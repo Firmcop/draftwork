@@ -10,14 +10,14 @@ planned('form', 'Create Form', 'form', P5);
 planned('derive', 'Derive', 'derive', P2);
 cmd('extrude', 'Extrude', 'extrude', { key: 'E', run: () => newProfileFeature('extrude') });
 cmd('revolve', 'Revolve', 'revolve', { run: () => newProfileFeature('revolve') });
-planned('sweep', 'Sweep', 'sweep'); cmd('loft', 'Loft', 'loft', { run: () => newLoft() }); planned('rib', 'Rib', 'rib'); planned('web', 'Web', 'web'); planned('emboss', 'Emboss', 'emboss');
+cmd('sweep', 'Sweep', 'sweep', { run: () => newSweep(false) }); cmd('loft', 'Loft', 'loft', { run: () => newLoft() }); planned('rib', 'Rib', 'rib'); planned('web', 'Web', 'web'); planned('emboss', 'Emboss', 'emboss');
 cmd('hole', 'Hole', 'hole', { key: 'H', run: () => startPlaced('hole') });
 planned('thread', 'Thread', 'thread');
 cmd('box', 'Box', 'box', { run: () => startPlaced('box') });
 cmd('cylinder', 'Cylinder', 'cylinder', { run: () => startPlaced('cylinder') });
 cmd('sphere', 'Sphere', 'sphere', { run: () => startPlaced('sphere') });
 cmd('torus', 'Torus', 'torus', { run: () => startPlaced('torus') });
-planned('coil', 'Coil', 'coil'); planned('pipe', 'Pipe', 'pipe');
+planned('coil', 'Coil', 'coil'); cmd('pipe', 'Pipe', 'pipe', { run: () => newSweep(true) });
 cmd('patrect', 'Rectangular Pattern', 'patrect', { run: () => newRepeat('pattern', 'linear') });
 cmd('patcirc', 'Circular Pattern', 'patcirc', { run: () => newRepeat('pattern', 'circular') });
 planned('patpath', 'Pattern on Path', 'patpath');
@@ -86,19 +86,19 @@ cmd('k.slot', 'Center to Center Slot', 'slot', { key: 'S', run: () => setSketchT
 cmd('k.arc', 'Three-Point Arc', 'arc', { key: 'A', run: () => setSketchTool('arc3') }); planned('k.spline', 'Fit Point Spline', 'spline'); planned('k.point', 'Point', 'spoint'); planned('k.text', 'Text', 'text');
 planned('k.mirror', 'Sketch Mirror', 'mirror'); planned('k.cpattern', 'Sketch Circular Pattern', 'patcirc'); planned('k.project', 'Project', 'insertmesh');
 cmd('k.dimension', 'Sketch Dimension', 'dimension', { key: 'D', run: () => { if (geoSel.size) addDimension(); else { setSketchTool('select'); toast('Select a line, two points, a circle or arc, or two lines, then press D'); } } });
-planned('k.fillet', 'Sketch Fillet', 'fillet2d'); planned('k.trim', 'Trim', 'trim2d', P1, { key: 'T' }); planned('k.extend', 'Extend', 'extend'); planned('k.offset', 'Offset', 'offset2d', P1, { key: 'O' });
+cmd('k.fillet', 'Sketch Fillet', 'fillet2d', { run: () => setSketchTool('fillet2d') }); planned('k.trim', 'Trim', 'trim2d', P1, { key: 'T' }); planned('k.extend', 'Extend', 'extend'); cmd('k.offset', 'Offset', 'offset2d', { key: 'O', run: () => offsetSelection() });
 cmd('k.move', 'Move/Copy', 'move', { run: () => setSketchTool('select') });
 cmd('k.delete', 'Delete', 'delete', { key: 'Del', run: () => { if (geoSel.size) deleteGeoSelection(); else if (selProfile) deleteProfile(selProfile); else toast('Select something to delete'); } });
 for (const [k, l] of [['coincident', 'Coincident'], ['collinear', 'Collinear'], ['tangent', 'Tangent'], ['equal', 'Equal'], ['parallel', 'Parallel'], ['perpendicular', 'Perpendicular'], ['fix', 'Fix/Unfix'], ['horizontal', 'Horizontal/Vertical'], ['concentric', 'Concentric'], ['midpoint', 'Midpoint']])
   cmd('k.c.' + k, l, k, { key: k === 'horizontal' ? 'H' : undefined, run: () => applyConstraint(k) });
-planned('k.c.symmetry', 'Symmetry', 'symmetry');
+cmd('k.c.symmetry', 'Symmetry', 'symmetry', { run: () => applyConstraint('symmetry') });
 cmd('k.construction', 'Normal/Construction', 'construction', { key: 'X', run: () => toggleConstruction() });
 cmd('k.select', 'Select', 'select', { run: () => setSketchTool('select') });
 cmd('k.finish', 'Finish Sketch', 'finish', { run: () => finishSketch() });
 
 const TABS = {
   SOLID: [
-    { name: 'CREATE', bar: ['sketch', 'extrude', 'revolve', 'loft', 'hole', 'box', 'patrect', 'mirror'], menu: ['sketch', 'form', 'derive', '-', 'extrude', 'revolve', 'sweep', 'loft', 'rib', 'web', 'emboss', '-', 'hole', 'thread', '-', 'box', 'cylinder', 'sphere', 'torus', 'coil', 'pipe', '-', { sub: 'Pattern', icon: 'patrect', items: ['patrect', 'patcirc', 'patpath'] }, 'mirror', '-', 'thicken', 'boundary'] },
+    { name: 'CREATE', bar: ['sketch', 'extrude', 'revolve', 'sweep', 'loft', 'hole', 'box', 'patrect', 'mirror'], menu: ['sketch', 'form', 'derive', '-', 'extrude', 'revolve', 'sweep', 'loft', 'rib', 'web', 'emboss', '-', 'hole', 'thread', '-', 'box', 'cylinder', 'sphere', 'torus', 'coil', 'pipe', '-', { sub: 'Pattern', icon: 'patrect', items: ['patrect', 'patcirc', 'patpath'] }, 'mirror', '-', 'thicken', 'boundary'] },
     { name: 'MODIFY', bar: ['presspull', 'fillet', 'chamfer', 'shell', 'draft', 'combine', 'move', 'params'], menu: ['presspull', 'fillet', 'chamfer', 'shell', 'draft', 'scale', 'combine', '-', 'replaceface', 'splitface', 'splitbody', '-', 'move', 'align', 'delete', '-', 'material', 'appearance', '-', 'params'] },
     { name: 'CONFIGURE', bar: ['cfgtable'], menu: ['cfgtable', 'cfgrules'] },
     { name: 'CONSTRUCT', bar: ['offsetplane'], menu: ['offsetplane', 'planeangle', 'midplane', 'planetangent', '-', 'axiscyl', 'axis2p', '-', 'pointv'] },

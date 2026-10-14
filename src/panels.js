@@ -262,7 +262,7 @@ function rerenderDialog() {
 function dialogHelp(f) {
   return { extrude: 'Pushes a closed sketch profile into a solid.', revolve: 'Spins a profile around a sketch axis.', hole: 'Drills a hole into the bodies below the placement plane.',
     pattern: 'Repeats a feature. Copies of a New Body feature become new bodies.', mirror: 'Mirrors a feature across an origin plane.', plane: 'A reference plane you can sketch on.',
-    move: 'Moves or copies a body. Rotation is about the origin.', draft: 'Tilts the picked faces so the part releases from a mold.', loft: 'Blends a solid through two or more profiles.', import: 'Solids read from a STEP file.', fillet: 'Rounds the picked edges. Edge picks follow the model when earlier steps change.', chamfer: 'Bevels the picked edges.', shell: 'Hollows the body, opening the picked faces, with walls of the given thickness.', combine: 'Joins, cuts or intersects bodies with each other.' }[f.type] || 'Values accept expressions such as width/2 + 5.';
+    move: 'Moves or copies a body. Rotation is about the origin.', sweep: 'Moves a profile along a sketched path.', draft: 'Tilts the picked faces so the part releases from a mold.', loft: 'Blends a solid through two or more profiles.', import: 'Solids read from a STEP file.', fillet: 'Rounds the picked edges. Edge picks follow the model when earlier steps change.', chamfer: 'Bevels the picked edges.', shell: 'Hollows the body, opening the picked faces, with walls of the given thickness.', combine: 'Joins, cuts or intersects bodies with each other.' }[f.type] || 'Values accept expressions such as width/2 + 5.';
 }
 function featureFields(f, idx) {
   const out = [];
@@ -371,6 +371,20 @@ function featureFields(f, idx) {
         list.append(h('label', { class: 'chk', for: cid }, c, s.name, h('span', { class: 'note', style: 'margin:0 0 0 auto' }, profCount(s) + ' profile' + (profCount(s) === 1 ? '' : 's'))));
       }
       out.push(section_('Profiles', h('p', { class: 'note' }, 'Pick two or more sketches, one closed profile each. They are joined in timeline order.'), list, chkField('Straight (ruled) sides', f, 'ruled')));
+      out.push(section_('Result', ...opsSection()));
+      break;
+    }
+    case 'sweep': {
+      const sks = doc.features.slice(0, idx).filter(g => g.type === 'sketch');
+      const pathSks = sks.filter(s => sketchPathCount(s));
+      const kids = [selField('Path', f, 'path', pathSks.length ? pathSks.map(s => [s.id, s.name]) : [['', 'No path sketch before this step']], { id: 'ds-path', rerender: true })];
+      const np = sketchPathCount(featById(f.path));
+      if (np > 1) kids.push(selField('Which chain', f, 'pathIndex', Array.from({ length: np }, (_, i) => [i, 'Chain ' + (i + 1)]), { numeric: true, id: 'ds-pidx' }));
+      out.push(section_('Path', ...kids, h('p', { class: 'note' }, 'The profile is placed at the start of the path, square to it.')));
+      const prof = [segField('Profile', f, 'profileKind', [['circle', 'Circle'], ['sketch', 'From sketch']], { rerender: true })];
+      if ((f.profileKind || 'circle') === 'circle') prof.push(exField('Diameter', f, 'diameter', 'mm', { min: 0.001 }), exField('Wall thickness', f, 'wall', 'mm', { min: 0, id: 'dx-wall' }), h('p', { class: 'note' }, 'Wall 0 makes a solid rod; a wall makes a tube.'));
+      else { const ps = sks.filter(s => s.id !== f.path && profCount(s) >= 1); prof.push(selField('Profile sketch', f, 'profile', ps.length ? ps.map(s => [s.id, s.name]) : [['', 'No other sketch with a profile']], { id: 'ds-prof' }), h('p', { class: 'note' }, 'Its sketch origin lands on the path start.')); }
+      out.push(section_('Profile', ...prof));
       out.push(section_('Result', ...opsSection()));
       break;
     }

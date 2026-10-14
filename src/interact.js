@@ -1,5 +1,5 @@
 // ===== Commands, picking, sketching, measuring, view cube, navigation, boot =====
-const NAMES = { sketch: 'Sketch', plane: 'Plane', extrude: 'Extrude', revolve: 'Revolve', box: 'Box', cylinder: 'Cylinder', sphere: 'Sphere', torus: 'Torus', hole: 'Hole', pattern: 'Pattern', mirror: 'Mirror', move: 'Move', combine: 'Combine', remove: 'Remove', fillet: 'Fillet', chamfer: 'Chamfer', shell: 'Shell', draft: 'Draft', loft: 'Loft', import: 'Import' };
+const NAMES = { sketch: 'Sketch', plane: 'Plane', extrude: 'Extrude', revolve: 'Revolve', box: 'Box', cylinder: 'Cylinder', sphere: 'Sphere', torus: 'Torus', hole: 'Hole', pattern: 'Pattern', mirror: 'Mirror', move: 'Move', combine: 'Combine', remove: 'Remove', fillet: 'Fillet', chamfer: 'Chamfer', shell: 'Shell', draft: 'Draft', loft: 'Loft', import: 'Import', sweep: 'Sweep' };
 function nextName(type) {
   let n = doc.features.filter(f => f.type === type).length + 1;
   while (doc.features.some(f => f.name === NAMES[type] + ' ' + n)) n++;
@@ -34,6 +34,7 @@ function defaultHint() {
   if (mode === 'sketch') {
     const t = { select: geoSel.size ? geoSel.size + ' selected · apply a constraint, press D to dimension, Delete to remove' : 'Click geometry to select it (Shift adds). Drag points and lines to reshape.',
       line: lineDraft ? 'Click to add the next point. Click the first point to close; Enter or Esc ends the line.' : 'Click to place the first point. Points snap to existing points.',
+      fillet2d: 'Click a corner where two lines meet, then type the radius',
       arc3: !gdraw?.pts?.length ? 'Click the arc start' : gdraw.pts.length === 1 ? 'Click the arc end' : 'Click a point the arc passes through',
       rect2: 'Drag from corner to corner', rectc: 'Drag from the center to a corner', circle: 'Drag from the center outward', polygon: 'Drag from the center to a corner (6 equal sides)', slot: 'Drag from one end center to the other' }[sketchTool];
     return setHint(t);
@@ -187,6 +188,22 @@ function toggleRef(f, hit) {
   } else f.edges = [...(f.edges || []), JSON.parse(JSON.stringify(hit.sig))];
   void key;
   rerenderDialog(); drawToolsOverlay(); scheduleRegen(60);
+}
+function sketchPathCount(s) {
+  if (!s?.geo?.curves?.length) return 0;
+  try { const sol = solveSketch(resolvedGeo(s.geo)); return sol.ok ? geoPaths(resolvedGeo(s.geo), sol).paths.length : 0; } catch (e) { return 0; }
+}
+function newSweep(pipe) {
+  if (!isBrep()) { toast(engineState === 'loading' ? 'The exact geometry engine is still loading. Try again in a moment.' : 'Sweep needs the exact geometry engine, which could not start here: ' + engineMsg); return; }
+  const end = insertIndex();
+  const paths = doc.features.slice(0, end).filter(g => g.type === 'sketch' && sketchPathCount(g) && statusOf(g.id).state === 'ok');
+  if (!paths.length) { toast('Sketch a path first: lines and arcs joined end to end (it can stay open)'); return; }
+  const sel = selFeature && featById(selFeature);
+  const path = paths.includes(sel) ? sel : paths[paths.length - 1];
+  const profileSk = doc.features.slice(0, end).filter(g => g.type === 'sketch' && g.id !== path.id && profCount(g) === 1).pop();
+  const snap = JSON.stringify(doc); checkpoint();
+  const f = { id: uid(), type: 'sweep', name: nextName('sweep'), path: path.id, pathIndex: 0, profileKind: pipe || !profileSk ? 'circle' : 'sketch', profile: profileSk?.id || null, diameter: 8, wall: pipe ? 1 : 0, op: bodiesAtInsert().length ? 'join' : 'new', target: null };
+  insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
 }
 function newLoft() {
   if (!isBrep()) { toast(engineState === 'loading' ? 'The exact geometry engine is still loading. Try again in a moment.' : 'Loft needs the exact geometry engine, which could not start here: ' + engineMsg); return; }

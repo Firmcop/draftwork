@@ -97,3 +97,24 @@ test('angle and perpendicular constraints', () => {
   const c = s.points.get('c');
   near(Math.atan2(c.y, c.x) * 180 / Math.PI, 60, 1e-6, 'angle');
 });
+
+test('symmetry and point-to-line distance', () => {
+  const g = {
+    points: [{ id: 'a', x: -8, y: 3 }, { id: 'b', x: 11, y: 4 }, { id: 'm1', x: 0, y: -20 }, { id: 'm2', x: 0, y: 20 }],
+    curves: [{ id: 'ax', kind: 'line', a: 'm1', b: 'm2', constr: true }],
+    cons: [{ id: 'k0', type: 'vertical', e: ['ax'] }, { id: 'k1', type: 'coincident', e: ['m1', 'O'] }, { id: 'k2', type: 'symmetry', e: ['a', 'b', 'ax'] }, { id: 'k3', type: 'pdist', e: ['b', 'ax'], value: 15 }],
+  };
+  const s = K.solveSketch(g); assert.ok(s.ok);
+  const a = s.points.get('a'), b = s.points.get('b');
+  near(a.x, -15, 1e-6, 'mirrored x'); near(b.x, 15, 1e-6, 'distance to axis'); near(a.y, b.y, 1e-6, 'same height');
+});
+
+test('open paths are found in order', () => {
+  const g = {
+    points: [{ id: 'a', x: 0, y: 0 }, { id: 'b', x: 10, y: 0 }, { id: 'c', x: 10, y: 10 }],
+    curves: [{ id: 'l2', kind: 'line', a: 'c', b: 'b' }, { id: 'l1', kind: 'line', a: 'a', b: 'b' }], cons: [],
+  };
+  const { paths } = K.geoPaths(g, K.solveSketch(g));
+  assert.equal(paths.length, 1); assert.equal(paths[0].closed, false);
+  assert.deepEqual(paths[0].segs.map(s => s.id), ['l2', 'l1']);
+});

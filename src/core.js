@@ -24,7 +24,7 @@ const MATERIALS = {
 const TYPE = {
   sketch: { label: 'Sketch', icon: 'sketch' }, plane: { label: 'Offset Plane', icon: 'plane' }, extrude: { label: 'Extrude', icon: 'extrude' }, revolve: { label: 'Revolve', icon: 'revolve' },
   box: { label: 'Box', icon: 'box' }, cylinder: { label: 'Cylinder', icon: 'cylinder' }, sphere: { label: 'Sphere', icon: 'sphere' }, torus: { label: 'Torus', icon: 'torus' },
-  hole: { label: 'Hole', icon: 'hole' }, fillet: { label: 'Fillet', icon: 'fillet' }, draft: { label: 'Draft', icon: 'draft' }, loft: { label: 'Loft', icon: 'loft' }, import: { label: 'Imported file', icon: 'insertmesh' }, chamfer: { label: 'Chamfer', icon: 'chamfer' }, shell: { label: 'Shell', icon: 'shell' }, pattern: { label: 'Pattern', icon: 'patrect' }, mirror: { label: 'Mirror', icon: 'mirror' }, move: { label: 'Move/Copy', icon: 'move' },
+  hole: { label: 'Hole', icon: 'hole' }, fillet: { label: 'Fillet', icon: 'fillet' }, draft: { label: 'Draft', icon: 'draft' }, loft: { label: 'Loft', icon: 'loft' }, sweep: { label: 'Sweep', icon: 'sweep' }, import: { label: 'Imported file', icon: 'insertmesh' }, chamfer: { label: 'Chamfer', icon: 'chamfer' }, shell: { label: 'Shell', icon: 'shell' }, pattern: { label: 'Pattern', icon: 'patrect' }, mirror: { label: 'Mirror', icon: 'mirror' }, move: { label: 'Move/Copy', icon: 'move' },
   combine: { label: 'Combine', icon: 'combine' }, remove: { label: 'Remove', icon: 'delete' },
 };
 const featIcon = f => f.type === 'pattern' ? (f.kind === 'circular' ? 'patcirc' : 'patrect') : (TYPE[f.type]?.icon || 'generic');

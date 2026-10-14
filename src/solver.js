@@ -10,7 +10,7 @@
 // The solver moves points (and circle radii) as little as possible to satisfy every constraint
 // (minimum-norm Gauss-Newton), so under-constrained geometry stays where the user left it.
 
-export const DIM_TYPES = new Set(['distance', 'length', 'hdist', 'vdist', 'radius', 'diameter', 'angle']);
+export const DIM_TYPES = new Set(['distance', 'length', 'hdist', 'vdist', 'radius', 'diameter', 'angle', 'pdist']);
 export function emptyGeo() { return { points: [], curves: [], cons: [] }; }
 
 function buildSystem(geo, drag) {
@@ -65,6 +65,9 @@ function buildSystem(geo, drag) {
       case 'midpoint': res.push(v => { const p = P(v, e[0]), [a, b] = L(v, e[1]); return [p[0] - (a[0] + b[0]) / 2, p[1] - (a[1] + b[1]) / 2]; }); break;
       case 'concentric': res.push(v => { const a = C(v, e[0]), b = C(v, e[1]); return [a[0] - b[0], a[1] - b[1]]; }); break;
       case 'onLine': res.push(v => { const p = P(v, e[0]), [a, b] = L(v, e[1]), u = dir([a, b]); return [(u[0] * (p[1] - a[1]) - u[1] * (p[0] - a[0])) / len(u)]; }); break;
+      case 'symmetry': res.push(v => { const p = P(v, e[0]), q = P(v, e[1]), [a, b] = L(v, e[2]), u = dir([a, b]), l = len(u), m = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2], w = [q[0] - p[0], q[1] - p[1]];
+        return [(u[0] * (m[1] - a[1]) - u[1] * (m[0] - a[0])) / l, (u[0] * w[0] + u[1] * w[1]) / l]; }); break;
+      case 'pdist': res.push(v => { const p = P(v, e[0]), [a, b] = L(v, e[1]), u = dir([a, b]); return [Math.abs(u[0] * (p[1] - a[1]) - u[1] * (p[0] - a[0])) / len(u) - val]; }); break;
       case 'onCircle': res.push(v => { const p = P(v, e[0]), c = C(v, e[1]); return [Math.hypot(p[0] - c[0], p[1] - c[1]) - R(v, e[1])]; }); break;
       // dimensions
       case 'distance': res.push(v => { const p = P(v, e[0]), q = P(v, e[1]); return [Math.hypot(p[0] - q[0], p[1] - q[1]) - val]; }); break;
@@ -220,9 +223,9 @@ export function geoProfiles(geo, solved) {
     if (!closed) { const branch = [...comp].some(id => { const c = edges.find(x => x.id === id); return [c.a, c.b].some(e => (adj.get(find(e)) || []).length > 2); }); branch ? info.branching++ : info.open++; continue; }
     const segs = seq.map(({ c, forward }) => {
       const a = P(forward ? c.a : c.b), b = P(forward ? c.b : c.a);
-      if (c.kind === 'line') return { t: 'line', a, b };
+      if (c.kind === 'line') return { t: 'line', a, b, id: c.id, forward };
       const cc = P(c.c);
-      return { t: 'arc', a, b, c: cc, ccw: forward };
+      return { t: 'arc', a, b, c: cc, ccw: forward, id: c.id, forward };
     });
     if (segs.length === 1 && segs[0].t === 'line') { info.open++; continue; }
     profiles.push({ id: 'geo-loop-' + start.id, kind: 'loop', segs });
@@ -243,4 +246,33 @@ export function sketchWithGeo(f) {
   if (!s.ok) throw new Error('The sketch constraints conflict. Edit the sketch to fix them.');
   const { profiles } = geoProfiles(f.geo, s);
   return { ...f, profiles: [...(f.profiles || []), ...profiles] };
+}
+
+// Open chains of non-construction lines/arcs (sweep paths), ordered from one free end to the other.
+// Closed loops are returned too (after the open ones) so a ring can be a path.
+export function geoPaths(geo, solved) {
+  const pts = solved ? solved.points : new Map(geo.points.map(p => [p.id, p]));
+  const P = id => { const p = id === 'O' ? { x: 0, y: 0 } : pts.get(id); return [p.x, p.y]; };
+  const parent = new Map(); const find = x => { while (parent.has(x) && parent.get(x) !== x) x = parent.get(x); return x; };
+  for (const k of geo.cons) if (k.type === 'coincident') { const a = find(k.e[0]), b = find(k.e[1]); if (a !== b) parent.set(a, b); }
+  const edges = geo.curves.filter(c => !c.constr && c.kind !== 'circle');
+  const adj = new Map();
+  for (const c of edges) for (const end of [c.a, c.b]) { const k = find(end); if (!adj.has(k)) adj.set(k, []); adj.get(k).push(c); }
+  if ([...adj.values()].some(l => l.length > 2)) return { paths: [], branching: true };
+  const used = new Set(), open = [], closed = [];
+  const walk = (startNode, first) => {
+    const segs = []; let node = startNode, cur = first;
+    while (cur && !used.has(cur.id)) {
+      used.add(cur.id);
+      const forward = find(cur.a) === node;
+      const a = P(forward ? cur.a : cur.b), b = P(forward ? cur.b : cur.a);
+      segs.push(cur.kind === 'line' ? { t: 'line', a, b, id: cur.id } : { t: 'arc', a, b, c: P(cur.c), ccw: forward, id: cur.id });
+      node = find(forward ? cur.b : cur.a);
+      cur = (adj.get(node) || []).find(x => !used.has(x.id)) || null;
+    }
+    return segs;
+  };
+  for (const [node, list] of adj) if (list.length === 1 && !used.has(list[0].id)) open.push(walk(node, list[0]));
+  for (const c of edges) if (!used.has(c.id)) closed.push(walk(find(c.a), c));
+  return { paths: [...open.map(segs => ({ segs, closed: false })), ...closed.map(segs => ({ segs, closed: true }))], branching: false };
 }

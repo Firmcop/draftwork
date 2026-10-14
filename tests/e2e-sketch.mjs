@@ -65,6 +65,38 @@ await page.click('.palette .btn.go'); await W(1500);
 
 check((await info()).includes('18.00'), 'changing the dimension to 60 rebuilds the solid (18.00 cm³)');
 
+// sketch fillet + offset on the 60 × 30 rectangle
+await page.locator('.chip').first().dblclick(); await W(1200);
+await page.click('.rbtn[aria-label^="Sketch Fillet"]'); await W(200);
+await clickAt(await sk(60, 30)); await W(300);
+await page.fill('.dimedit', '8'); await page.keyboard.press('Enter'); await W(800);
+g = await geo();
+check(g.ok && g.dof === 0 && g.loops === 1, `fillet keeps the sketch fully constrained and closed (dof ${g.dof}, loops ${g.loops})`);
+await page.keyboard.press('v'); await clickAt(await curve(0)); await W(200);
+await page.keyboard.press('o'); await W(300);
+await page.fill('.dimedit', '-5'); await page.keyboard.press('Enter'); await W(1000);
+g = await geo();
+check(g.ok && g.loops === 2, `offset adds a second closed loop inside (loops ${g.loops})`);
+await page.click('.palette .btn.go'); await W(2000);
+// fillet removes (1 − π/4)·8² mm² from the corner; the inner offset loop becomes a hole through the 10 mm extrusion
+const expect = (1800 - (64 - 16 * Math.PI) - (50 * 20 - (9 - 9 * Math.PI / 4))) * 10 / 1000;
+check((await info()).includes(expect.toFixed(2)), `extrusion becomes a frame with a rounded corner (${expect.toFixed(2)} cm³; got ${(await info()).match(/[\d.]+ cm³/)?.[0]})`);
+
+// pipe along an L-shaped path on the front plane
+await page.click('.rbtn[aria-label^="Create Sketch"]'); await W(300);
+await page.click('#bMin'); await page.click('.node .nlab:text-is("XZ")'); await page.click('#bMin'); await W(1500);
+await page.keyboard.press('l');
+for (const [x, y] of [[-40, 0], [-40, 40], [-10, 40]]) await clickAt(await sk(x, y));
+await page.keyboard.press('Escape'); await W(200);
+await page.click('.palette .btn.go'); await W(800);
+await page.click('.rlabel:has-text("CREATE")'); await W(200); await page.click('.menu .mi:has-text("Pipe")'); await W(1500);
+await page.selectOption('#ds-op', 'new'); await W(1500);
+await page.click('.dialog .btn.ok'); await W(1200);
+const st = await page.evaluate(() => window.__dw.state());
+const pipeVol = Math.PI * (16 - 9) * 70;
+check(st.features.at(-1) === 'sweep:ok' && st.bodies.some(b => Math.abs(parseFloat(b.split('=')[1].replace(/,/g, '')) - pipeVol) < 2), `pipe along the path (${pipeVol.toFixed(0)} mm³): ${st.bodies.join(' ')}`);
+if (process.env.SHOTS) { await page.click('#vcHome'); await W(800); await page.screenshot({ path: process.env.SHOTS + '/pipe.png' }); }
+
 // slot tool: tangent arcs make an extrudable profile
 await page.click('.rbtn[aria-label^="Create Sketch"]'); await W(300);
 await page.click('#bMin'); await page.click('.node .nlab:text-is("XY")'); await page.click('#bMin'); await W(1500);

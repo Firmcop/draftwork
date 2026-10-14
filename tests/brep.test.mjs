@@ -105,3 +105,21 @@ test('STEP import splits solids into bodies', async () => {
   const v = vols(r).sort((x, y) => x - y);
   near(v[0], 4 / 3 * Math.PI * 125, 0.5, 'sphere'); near(v[1], 1000, 0.01, 'cube');
 });
+
+test('sweep and pipe along a sketched path with an arc', () => {
+  // path on XZ: up 40, quarter arc R10, across 30
+  const geo = {
+    points: [{ id: 'a', x: 0, y: 0 }, { id: 'b', x: 0, y: 40 }, { id: 'c', x: 10, y: 50 }, { id: 'd', x: 40, y: 50 }, { id: 'k', x: 10, y: 40 }],
+    curves: [{ id: 'l1', kind: 'line', a: 'a', b: 'b' }, { id: 'r', kind: 'arc', c: 'k', a: 'c', b: 'b' }, { id: 'l2', kind: 'line', a: 'c', b: 'd' }],
+    cons: [],
+  };
+  const L = 40 + Math.PI * 5 + 30;
+  const base = [{ id: 'p', type: 'sketch', plane: 'XZ', profiles: [], geo }];
+  let r = K.regenerateBrep([...base, { id: 's', type: 'sweep', path: 'p', profileKind: 'circle', diameter: 8, wall: 0, op: 'new' }]);
+  okAll(r); near(vols(r)[0], Math.PI * 16 * L, 0.01, 'solid rod');
+  r = K.regenerateBrep([...base, { id: 's', type: 'sweep', path: 'p', profileKind: 'circle', diameter: 8, wall: 1, op: 'new' }]);
+  okAll(r); near(vols(r)[0], Math.PI * (16 - 9) * L, 0.01, 'pipe with 1 mm wall');
+  r = K.regenerateBrep([...base, { id: 'q', type: 'sketch', plane: 'XY', profiles: [{ id: 'sq', kind: 'rect', cx: 0, cy: 0, w: 6, h: 4 }] },
+    { id: 's', type: 'sweep', path: 'p', profileKind: 'sketch', profile: 'q', op: 'new' }]);
+  okAll(r); near(vols(r)[0], 24 * L, 0.5, 'rectangular profile from a sketch');
+});

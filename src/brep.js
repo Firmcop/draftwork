@@ -304,6 +304,10 @@ function brepStep(f, out) {
       const tool = T(parts[0].loftWith(parts.slice(1), { ruled: !!f.ruled }));
       const res = bApply(out, f, tool, f.op || 'new', f.target);
       out.tools.set(f.id, { shape: tool, ...res, op: f.op || 'new' });
+    } else if (f.type === 'sweep') {
+      const tool = sweepTool(f, out);
+      const res = bApply(out, f, tool, f.op || 'new', f.target);
+      out.tools.set(f.id, { shape: tool, ...res, op: f.op || 'new' });
     } else if (f.type === 'import') {
       const shapes = importShapes.get(f.file);
       if (!shapes) throw new Error(f.file ? 'Reading the imported file…' : 'The imported file is missing');
@@ -425,4 +429,52 @@ async function brepImportSTEP(fileId, text) {
   if (!solids.length && shape) solids = [shape];
   importShapes.set(fileId, solids);
   return solids.length;
+}
+
+// ---- sweep ----
+function segsPen(segs, closed) {
+  let pen = RC.draw(segs[0].a);
+  segs.forEach((sg, i) => {
+    const last = i === segs.length - 1, end = closed && last ? segs[0].a : sg.b;
+    if (sg.t === 'arc') pen = pen.threePointsArcTo(end, arcMid(sg).mid);
+    else if (!(closed && last)) pen = pen.lineTo(end);
+  });
+  return closed ? pen.close() : pen.done();
+}
+function sweepTool(f, out) {
+  const ps = out.sketches.get(f.path);
+  if (!ps) throw new Error('Choose a path sketch that comes before this feature');
+  const geo = ps.feature.geo;
+  if (!geo?.curves?.length) throw new Error('The path sketch has no lines or arcs. Draw the path with Line or Arc.');
+  const solved = solveSketch(geo);
+  if (!solved.ok) throw new Error('The path sketch constraints conflict');
+  const { paths, branching } = geoPaths(geo, solved);
+  if (branching) throw new Error('The path branches. A path must be a single chain of lines and arcs.');
+  const path = paths[Math.max(0, Math.min(paths.length - 1, +f.pathIndex || 0))];
+  if (!path) throw new Error('The path sketch has no chain of lines or arcs');
+  const pi = placementInfo(ps.feature, out);
+  const spine = segsPen(path.segs, path.closed).sketchOnPlane(brepPlane(pi.base, pi.offset, pi.flip).plane);
+  // profile frame at the path start, perpendicular to it (same convention as replicad's sweepSketch)
+  const sp = spine.wire.startPoint, n = spine.wire.tangentAt(1e-9).multiply(-1).normalize(), x = n.cross(spine.defaultDirection).multiply(-1);
+  const frame = () => new RC.Plane(sp, x, n);
+  let outer, holes = [];
+  if ((f.profileKind || 'circle') === 'circle') {
+    const r = +f.diameter / 2; if (!(r > 0)) throw new Error('Diameter must be greater than 0 mm');
+    outer = RC.drawCircle(r);
+    const wall = +f.wall || 0;
+    if (wall > 0) { if (wall >= r) throw new Error('Wall thickness must be less than the radius'); holes = [RC.drawCircle(r - wall)]; }
+  } else {
+    const prs = out.sketches.get(f.profile);
+    if (!prs) throw new Error('Choose a profile sketch that comes before this feature');
+    const profiles = prs.feature.profiles || [];
+    const { regions, polys } = buildRegions(profiles);
+    if (regions.length !== 1) throw new Error('The profile sketch needs exactly one closed profile (holes inside it are fine)');
+    outer = profileDrawing(profiles[regions[0].index]);
+    holes = regions[0].holes.map(hp => profileDrawing(profiles[polys.indexOf(hp)]));
+  }
+  const cfg = { forceProfileSpineOthogonality: true, frenet: true };
+  const sweepOne = d => RC.genericSweep(d.sketchOnPlane(frame(), sp).wire, spine.wire, cfg);
+  let solid = T(sweepOne(outer));
+  for (const hd of holes) solid = T(solid.cut(T(sweepOne(hd))));
+  return solid;
 }

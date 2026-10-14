@@ -171,6 +171,7 @@ viewport.addEventListener('pointerdown', e => {
   e.stopImmediatePropagation(); e.preventDefault();
   if (sketchTool === 'line') return lineClick(sk, hit);
   if (sketchTool === 'arc3') return arcClick(sk, hit);
+  if (sketchTool === 'fillet2d') return filletClick(sk, hit);
   gdraw = { kind: 'shape', tool: sketchTool, s: snapPoint(sk, hit), e: null };
   window.addEventListener('pointermove', onGeoMove); window.addEventListener('pointerup', onGeoUp, { once: true });
 }, { capture: true });
@@ -266,7 +267,7 @@ function sketchHover(e) {
 function endLineChain() { if (lineDraft) { lineDraft = null; refreshOverlays(); defaultHint(); } }
 
 // ---------- drawing ----------
-const GLYPH = { horizontal: 'H', vertical: 'V', parallel: '∥', perpendicular: '⊥', equal: '=', tangent: 'T', fix: 'Fix', midpoint: 'M', concentric: '◎', collinear: '≡', onLine: '•', onCircle: '•', coincident: '•' };
+const GLYPH = { symmetry: '⇋', horizontal: 'H', vertical: 'V', parallel: '∥', perpendicular: '⊥', equal: '=', tangent: 'T', fix: 'Fix', midpoint: 'M', concentric: '◎', collinear: '≡', onLine: '•', onCircle: '•', coincident: '•' };
 function curvePts(sk, c, posOf, radOf) {
   if (c.kind === 'line') { const a = posOf(c.a), b = posOf(c.b); return [[a.x, a.y], [b.x, b.y]]; }
   const cc = posOf(c.c), r = radOf(c);
@@ -290,6 +291,7 @@ function drawGeo(sk, grp, active) {
     if (active) {
       for (const p of st.rg.points) {
         const q = posOf(p.id), sel = geoSel.has(p.id), hov = geoHover === p.id;
+        if (p.virtual && !sel && !hov) { const ring = new THREE.Mesh(new THREE.RingGeometry(2 * zoom, 3 * zoom, 14), new THREE.MeshBasicMaterial({ color: colors.muted, depthTest: false })); ring.position.set(q.x, q.y, 0.1); ring.renderOrder = 7; grp.add(ring); continue; }
         const dot = new THREE.Mesh(new THREE.CircleGeometry((sel || hov ? 4 : 3) * zoom, 14), new THREE.MeshBasicMaterial({ color: sel ? colors.select : hov ? colors.accent : free.has(p.id) ? colors.accent : colors.fg, depthTest: false }));
         dot.position.set(q.x, q.y, 0.1); dot.renderOrder = 7; grp.add(dot);
       }
@@ -343,6 +345,7 @@ function consAnchor(sk, k, zoom, stack) {
   const e = k.e || [];
   if (DIM_TYPES.has(k.type)) {
     if (k.type === 'length') { const l = C(e[0]); if (!l) return null; const m = lineMid(l), off = 22 * zoom; return { x: m.x - m.nx * off, y: m.y - m.ny * off }; }
+    if (k.type === 'pdist') { const p = P(e[0]), l = C(e[1]); if (!l) return null; const a = P(l.a), b = P(l.b), dx = b.x - a.x, dy = b.y - a.y, L = dx * dx + dy * dy || 1, t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / L, f = { x: a.x + t * dx, y: a.y + t * dy }; return { x: (p.x + f.x) / 2 + 6 * zoom, y: (p.y + f.y) / 2 + 6 * zoom, leader: [[p.x, p.y], [f.x, f.y]] }; }
     if (k.type === 'distance' || k.type === 'hdist' || k.type === 'vdist') { const a = P(e[0]), b = P(e[1]); const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1, off = 20 * zoom; return { x: (a.x + b.x) / 2 + dy / L * off, y: (a.y + b.y) / 2 - dx / L * off, leader: [[a.x, a.y], [b.x, b.y]] }; }
     if (k.type === 'radius' || k.type === 'diameter') { const c = C(e[0]); if (!c) return null; const cc = P(c.c), r = geoRadius(sk, c); let t = Math.PI / 4; if (c.kind === 'arc') { const [a0, a1] = arcAngles(cc, P(c.a), P(c.b)); t = (a0 + a1) / 2; } return { x: cc.x + (r + 12 * zoom) * Math.cos(t), y: cc.y + (r + 12 * zoom) * Math.sin(t), leader: [[cc.x, cc.y], [cc.x + r * Math.cos(t), cc.y + r * Math.sin(t)]] }; }
     if (k.type === 'angle') { const l1 = C(e[0]), l2 = C(e[1]); if (!l1 || !l2) return null; const m1 = lineMid(l1), m2 = lineMid(l2); return { x: (m1.x + m2.x) / 2, y: (m1.y + m2.y) / 2 }; }
@@ -390,6 +393,7 @@ function applyConstraint(type) {
       } else ok = need('Select a line and an arc or circle, or two arcs or circles'); break;
     case 'concentric': circs.length === 2 && crv.length === 2 ? add('concentric', circs.map(c => c.id)) : (ok = need('Select two arcs or circles')); break;
     case 'midpoint': pts.length === 1 && lines.length === 1 && crv.length === 1 ? add('midpoint', [pts[0], lines[0].id]) : (ok = need('Select a point and a line')); break;
+    case 'symmetry': pts.length === 2 && lines.length === 1 && crv.length === 1 ? add('symmetry', [pts[0], pts[1], lines[0].id]) : (ok = need('Select two points and the line to mirror them about')); break;
     case 'fix':
       if (!pts.length) { ok = need('Select points to fix'); break; }
       for (const id of pts) { if (id === 'O') continue; const ex = g.cons.findIndex(k => k.type === 'fix' && k.e[0] === id); if (ex >= 0) g.cons.splice(ex, 1); else { const p = P(id); add('fix', [id], { x: Math.round(p.x * 1e6) / 1e6, y: Math.round(p.y * 1e6) / 1e6 }); } }
@@ -406,6 +410,7 @@ function addDimension() {
   const r2 = v => Math.round(v * 100) / 100;
   if (lines.length === 1 && crv.length === 1 && !pts.length) { const a = P(lines[0].a), b = P(lines[0].b); dim = { type: 'length', e: [lines[0].id], value: r2(Math.hypot(b.x - a.x, b.y - a.y)) }; }
   else if (pts.length === 2 && !crv.length) { const a = P(pts[0]), b = P(pts[1]); dim = { type: 'distance', e: pts, value: r2(Math.hypot(b.x - a.x, b.y - a.y)) }; }
+  else if (pts.length === 1 && lines.length === 1 && crv.length === 1) { const p = P(pts[0]), a = P(lines[0].a), b = P(lines[0].b), dx = b.x - a.x, dy = b.y - a.y; dim = { type: 'pdist', e: [pts[0], lines[0].id], value: r2(Math.abs(dx * (p.y - a.y) - dy * (p.x - a.x)) / (Math.hypot(dx, dy) || 1)) }; }
   else if (circs.length === 1 && crv.length === 1 && !pts.length) { const c = circs[0], r = geoRadius(sk, c); dim = c.kind === 'circle' ? { type: 'diameter', e: [c.id], value: r2(2 * r) } : { type: 'radius', e: [c.id], value: r2(r) }; }
   else if (lines.length === 2 && crv.length === 2) {
     const d = l => { const a = P(l.a), b = P(l.b); return [b.x - a.x, b.y - a.y]; }, [d1, d2] = lines.map(d);
@@ -467,4 +472,146 @@ function toggleConstruction() {
   const g = cloneGeo(sk.geo), on = !crv.every(c => c.constr);
   for (const c of g.curves) if (geoSel.has(c.id)) { if (on) c.constr = true; else delete c.constr; }
   commitGeo(sk, g, { force: true });
+}
+
+// ---------- small value prompt anchored in the canvas ----------
+function promptValue(label, initial, onOK, at) {
+  document.querySelectorAll('.dimedit').forEach(x => x.remove());
+  const stage = $('#stage'), sr = stage.getBoundingClientRect();
+  const x = at ? at.x - sr.left : sr.width / 2 - 70, y = at ? at.y - sr.top : sr.height / 2;
+  const inp = h('input', { class: 'dimedit', type: 'text', value: String(initial), 'aria-label': label, title: label, spellcheck: 'false', style: `left:${x}px;top:${y}px` });
+  stage.append(inp); inp.focus(); inp.select();
+  let done = false;
+  const commit = () => { if (done) return; let v; try { v = evalExpr(inp.value, params.vars); } catch (err) { toast(err.message); return; } if (onOK(v, inp.value.trim()) !== false) { done = true; inp.remove(); } };
+  inp.addEventListener('keydown', ev => { ev.stopPropagation(); if (ev.key === 'Enter') commit(); if (ev.key === 'Escape') { done = true; inp.remove(); } });
+  inp.addEventListener('blur', () => setTimeout(() => { if (!done) { done = true; inp.remove(); } }, 150));
+  setHint(label + ' · Enter applies, Esc cancels');
+}
+function screenOf(sk, x, y) {
+  const v = new THREE.Vector3(x, y, 0).applyMatrix4(sketchMatrix(sk)).project(camera), r = renderer.domElement.getBoundingClientRect();
+  return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height };
+}
+
+// ---------- sketch fillet: round the corner where two lines meet ----------
+let lastFilletR = 5;
+function filletClick(sk, hit) {
+  const pid = nearestPoint(sk, hit.x, hit.y, hit.tol * 1.5);
+  const g0 = sk.geo;
+  const lines = pid ? (g0?.curves || []).filter(c => !c.constr && c.kind === 'line' && (c.a === pid || c.b === pid)) : [];
+  const others = pid ? (g0?.curves || []).filter(c => !c.constr && c.kind !== 'line' && [c.a, c.b, c.c].includes(pid)) : [];
+  if (!pid || lines.length !== 2 || others.length) { toast('Click a corner where exactly two lines meet'); return; }
+  const at = screenOf(sk, geoPos(sk, pid).x, geoPos(sk, pid).y);
+  promptValue('Fillet radius (mm)', lastFilletR, r => {
+    if (!(r > 0)) { toast('Radius must be greater than 0'); return false; }
+    const res = makeFillet(sk, pid, lines, r);
+    if (res) lastFilletR = r;
+    return res;
+  }, { x: at.x + 12, y: at.y - 12 });
+}
+function makeFillet(sk, pid, lines, r) {
+  const P = geoPos(sk, pid);
+  const far = l => geoPos(sk, l.a === pid ? l.b : l.a);
+  const A = far(lines[0]), B = far(lines[1]);
+  const u1 = { x: A.x - P.x, y: A.y - P.y }, u2 = { x: B.x - P.x, y: B.y - P.y };
+  const L1 = Math.hypot(u1.x, u1.y), L2 = Math.hypot(u2.x, u2.y);
+  u1.x /= L1; u1.y /= L1; u2.x /= L2; u2.y /= L2;
+  const theta = Math.acos(Math.max(-1, Math.min(1, u1.x * u2.x + u1.y * u2.y)));
+  if (theta < 1e-3 || Math.PI - theta < 1e-3) { toast('These lines are parallel, so there is no corner to round'); return false; }
+  const d = r / Math.tan(theta / 2);
+  if (d >= L1 - 1e-6 || d >= L2 - 1e-6) { toast('That radius is too large for these lines'); return false; }
+  const bis = { x: u1.x + u2.x, y: u1.y + u2.y }, bl = Math.hypot(bis.x, bis.y);
+  const cd = r / Math.sin(theta / 2);
+  const T1 = { x: P.x + u1.x * d, y: P.y + u1.y * d }, T2 = { x: P.x + u2.x * d, y: P.y + u2.y * d }, Cc = { x: P.x + bis.x / bl * cd, y: P.y + bis.y / bl * cd };
+  const g = cloneGeo(sk.geo);
+  const t1 = addPoint(g, T1.x, T1.y), t2 = addPoint(g, T2.x, T2.y), c = addPoint(g, Cc.x, Cc.y);
+  for (const [l, t] of [[lines[0], t1], [lines[1], t2]]) { const gl = g.curves.find(x => x.id === l.id); if (gl.a === pid) gl.a = t; else gl.b = t; }
+  const cross = (T1.x - Cc.x) * (T2.y - Cc.y) - (T1.y - Cc.y) * (T2.x - Cc.x);
+  const arcId = 'a' + uid();
+  g.curves.push(cross > 0 ? { id: arcId, kind: 'arc', c, a: t1, b: t2 } : { id: arcId, kind: 'arc', c, a: t2, b: t1 });
+  // Like Fusion, keep the sharp corner as a virtual point on both line extensions, so dimensions
+  // and constraints that referenced the corner (or the full line lengths) still mean the same thing.
+  g.points.find(q => q.id === pid).virtual = true;
+  g.cons.push({ id: cid(), type: 'onLine', e: [pid, lines[0].id] }, { id: cid(), type: 'onLine', e: [pid, lines[1].id] });
+  for (const k of g.cons) {
+    const l = lines.find(x => k.type === 'length' && k.e[0] === x.id);
+    if (l) { k.type = 'distance'; k.e = [l.a === pid ? l.b : l.a, pid]; }
+  }
+  g.cons.push({ id: cid(), type: 'tangent', e: [lines[0].id, arcId] }, { id: cid(), type: 'tangent', e: [lines[1].id, arcId] }, { id: cid(), type: 'radius', e: [arcId], value: Math.round(r * 1000) / 1000 });
+  if (!commitGeo(sk, g, { msg: 'The fillet conflicts with the sketch constraints' })) return false;
+  geoSel = new Set([arcId]); toast('Fillet added. Its radius is a dimension you can edit.');
+  return true;
+}
+
+// ---------- sketch offset: copy a closed loop at a distance ----------
+function offsetSelection() {
+  const sk = featById(sketchId); if (!sk?.geo) return;
+  const st = geoState(sk); if (!st?.solved) return;
+  const { crv } = selectionParts(sk);
+  if (!crv.length) { toast('Select a curve of a closed shape, then choose Offset'); return; }
+  const target = crv[0];
+  const loop = target.kind === 'circle' ? null : st.loops.profiles.find(p => p.kind === 'loop' && p.segs.some(sg => sg.id === target.id));
+  if (target.kind !== 'circle' && !loop) { toast('Offset works on closed shapes and circles'); return; }
+  promptValue('Offset distance (mm, negative goes inward)', 5, d => {
+    if (!d) { toast('Enter a distance other than 0'); return false; }
+    const g = cloneGeo(sk.geo);
+    let newIds;
+    try { newIds = target.kind === 'circle' ? offsetCircle(sk, g, target, d) : offsetLoop(sk, g, loop, d); }
+    catch (err) { toast(err.message); return false; }
+    if (!commitGeo(sk, g, { force: true })) return false;
+    geoSel = new Set(newIds); refreshOverlays(); renderPalette();
+    toast('Offset copy added');
+  });
+}
+function offsetCircle(sk, g, c, d) {
+  const r = geoRadius(sk, c) + d;
+  if (!(r > 0)) throw new Error('The offset would shrink the circle to nothing');
+  const cc = geoPos(sk, c.c), id = 'c' + uid();
+  g.curves.push({ id, kind: 'circle', c: addPoint(g, cc.x, cc.y), r: Math.round(r * 1e4) / 1e4 });
+  g.cons.push({ id: cid(), type: 'concentric', e: [c.id, id] });
+  return [id];
+}
+function offsetLoop(sk, g, loop, d) {
+  const segs = loop.segs, n = segs.length;
+  // orientation: shoelace over a polyline of the loop
+  let area = 0; const poly = profilePolygon(loop);
+  for (let i = 0; i < poly.length; i++) { const p = poly[i], q = poly[(i + 1) % poly.length]; area += p.x * q.y - q.x * p.y; }
+  // traversal order of segs can be either way; outward is to the right of travel for a CCW loop
+  let travelArea = 0;
+  segs.forEach(sg => { travelArea += sg.a[0] * sg.b[1] - sg.b[0] * sg.a[1]; if (sg.t === 'arc') { const m = arcMid(sg); travelArea += (m.a1 - m.a0) * m.r * m.r; } });
+  const ccw = travelArea > 0, out = ccw ? 1 : -1;
+  void area;
+  const offs = segs.map(sg => {
+    if (sg.t === 'line') {
+      const dx = sg.b[0] - sg.a[0], dy = sg.b[1] - sg.a[1], L = Math.hypot(dx, dy), nx = dy / L * out * d, ny = -dx / L * out * d;
+      return { t: 'line', a: [sg.a[0] + nx, sg.a[1] + ny], b: [sg.b[0] + nx, sg.b[1] + ny] };
+    }
+    const m = arcMid(sg), sgn = (sg.ccw === ccw) ? 1 : -1, r = m.r + sgn * d;
+    if (!(r > 0)) throw new Error('The offset is larger than an arc radius in this shape');
+    const at = (p) => { const a = Math.atan2(p[1] - sg.c[1], p[0] - sg.c[0]); return [sg.c[0] + r * Math.cos(a), sg.c[1] + r * Math.sin(a)]; };
+    return { t: 'arc', a: at(sg.a), b: at(sg.b), c: sg.c, r, ccw: sg.ccw };
+  });
+  const lineX = (s1, s2) => {
+    const d1 = [s1.b[0] - s1.a[0], s1.b[1] - s1.a[1]], d2 = [s2.b[0] - s2.a[0], s2.b[1] - s2.a[1]], den = d1[0] * d2[1] - d1[1] * d2[0];
+    if (Math.abs(den) < 1e-12) return s1.b;
+    const t = ((s2.a[0] - s1.a[0]) * d2[1] - (s2.a[1] - s1.a[1]) * d2[0]) / den;
+    return [s1.a[0] + t * d1[0], s1.a[1] + t * d1[1]];
+  };
+  const verts = segs.map((sg, i) => {
+    const cur = offs[i], nxt = offs[(i + 1) % n];
+    if (Math.hypot(cur.b[0] - nxt.a[0], cur.b[1] - nxt.a[1]) < 1e-6) return cur.b;     // tangent joint
+    if (cur.t === 'line' && nxt.t === 'line') return lineX(cur, nxt);
+    return [(cur.b[0] + nxt.a[0]) / 2, (cur.b[1] + nxt.a[1]) / 2];                        // sharp line/arc joint: close enough, constraints settle it
+  });
+  const vid = verts.map(v => addPoint(g, v[0], v[1]));
+  const ids = [];
+  segs.forEach((sg, i) => {
+    const a = vid[(i - 1 + n) % n], b = vid[i], id = (sg.t === 'line' ? 'l' : 'a') + uid();
+    if (sg.t === 'line') g.curves.push({ id, kind: 'line', a, b });
+    else { const c = addPoint(g, sg.c[0], sg.c[1]); g.curves.push(sg.ccw ? { id, kind: 'arc', c, a, b } : { id, kind: 'arc', c, a: b, b: a }); g.cons.push({ id: cid(), type: 'concentric', e: [sg.id, id] }); }
+    if (sg.t === 'line') g.cons.push({ id: cid(), type: 'parallel', e: [sg.id, id] });
+    ids.push(id);
+  });
+  // tangent joints stay tangent
+  segs.forEach((sg, i) => { const j = (i + 1) % n; if ((sg.t === 'arc') !== (segs[j].t === 'arc') || (sg.t === 'arc' && segs[j].t === 'arc')) { const cur = offs[i], nxt = offs[j]; if (Math.hypot(cur.b[0] - nxt.a[0], cur.b[1] - nxt.a[1]) < 1e-6) g.cons.push({ id: cid(), type: 'tangent', e: [ids[i], ids[j]] }); } });
+  return ids;
 }
