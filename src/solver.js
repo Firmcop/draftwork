@@ -44,7 +44,9 @@ function buildSystem(geo, drag) {
         break;
       }
       case 'tangent': {
-        const [x, y] = e.map(id => curves.get(id)); const line = x.kind === 'line' ? x : y.kind === 'line' ? y : null;
+        const [x, y] = e.map(id => curves.get(id));
+        if (x?.kind === 'spline' || y?.kind === 'spline') break;   // the spline takes the other curve's direction (see splineEndTangent)
+        const line = x.kind === 'line' ? x : y.kind === 'line' ? y : null;
         // When the two curves share an endpoint, tangency is "perpendicular to the radius there" (well conditioned);
         // otherwise it is a distance condition.
         const ends = c => c.kind === 'arc' ? [c.a, c.b] : c.kind === 'line' ? [c.a, c.b] : [];
@@ -68,6 +70,11 @@ function buildSystem(geo, drag) {
       case 'symmetry': res.push(v => { const p = P(v, e[0]), q = P(v, e[1]), [a, b] = L(v, e[2]), u = dir([a, b]), l = len(u), m = [(p[0] + q[0]) / 2, (p[1] + q[1]) / 2], w = [q[0] - p[0], q[1] - p[1]];
         return [(u[0] * (m[1] - a[1]) - u[1] * (m[0] - a[0])) / l, (u[0] * w[0] + u[1] * w[1]) / l]; }); break;
       case 'pdist': res.push(v => { const p = P(v, e[0]), [a, b] = L(v, e[1]), u = dir([a, b]); return [Math.abs(u[0] * (p[1] - a[1]) - u[1] * (p[0] - a[0])) / len(u) - val]; }); break;
+      case 'onSpline': res.push(v => {
+        const q = P(v, e[0]), full = splineFull(curves.get(e[1]), id => P(v, id), geo), sp = splineClosest(full, q);
+        const i = Math.min(full.length - 1, Math.floor(sp)), t = sp - i, p = bezPoint(full[i], t), d = bezDer(full[i], t), l = Math.hypot(d[0], d[1]) || 1;
+        return [(d[0] * (q[1] - p[1]) - d[1] * (q[0] - p[0])) / l];
+      }); break;
       case 'onCircle': res.push(v => { const p = P(v, e[0]), c = C(v, e[1]); return [Math.hypot(p[0] - c[0], p[1] - c[1]) - R(v, e[1])]; }); break;
       // dimensions
       case 'distance': res.push(v => { const p = P(v, e[0]), q = P(v, e[1]); return [Math.hypot(p[0] - q[0], p[1] - q[1]) - val]; }); break;
@@ -173,7 +180,7 @@ export function analyzeSketch(geo, solved) {
   for (const [id, i] of sys.pIndex) if (freeVar[i] || freeVar[i + 1]) free.add(id);
   for (const [id, i] of sys.rIndex) if (freeVar[i]) free.add(id);
   for (const c of geo.curves) {
-    const ids = c.kind === 'line' ? [c.a, c.b] : c.kind === 'arc' ? [c.c, c.a, c.b] : c.kind === 'spline' ? c.pts : [c.c, c.id];
+    const ids = c.kind === 'line' ? [c.a, c.b] : c.kind === 'arc' ? [c.c, c.a, c.b] : c.kind === 'spline' ? [...c.pts, c.a, c.b] : [c.c, c.id];
     if (ids.some(id => free.has(id))) free.add(c.id);
   }
   return { dof: n - pivots.length, free };
@@ -224,7 +231,7 @@ export function geoProfiles(geo, solved) {
     const segs = seq.map(({ c, forward }) => {
       const a = P(forward ? c.a : c.b), b = P(forward ? c.b : c.a);
       if (c.kind === 'line') return [{ t: 'line', a, b, id: c.id, forward }];
-      if (c.kind === 'spline') { const sp = splineSpans(c, P); return (forward ? sp : sp.reverse().map(B => [...B].reverse())).map(B => ({ t: 'bez', a: B[0], b: B[3], P: B, id: c.id, forward })); }
+      if (c.kind === 'spline') { const sp = splineSpans(c, P, geo); return (forward ? sp : sp.reverse().map(B => [...B].reverse())).map(B => ({ t: 'bez', a: B[0], b: B[3], P: B, id: c.id, forward })); }
       const cc = P(c.c);
       return [{ t: 'arc', a, b, c: cc, ccw: forward, id: c.id, forward }];
     }).flat();
@@ -271,7 +278,7 @@ export function geoPaths(geo, solved) {
       used.add(cur.id);
       const forward = find(cur.a) === node;
       const a = P(forward ? cur.a : cur.b), b = P(forward ? cur.b : cur.a);
-      if (cur.kind === 'spline') { const sp = splineSpans(cur, P); for (const B of forward ? sp : sp.reverse().map(B => [...B].reverse())) segs.push({ t: 'bez', a: B[0], b: B[3], P: B, id: cur.id }); }
+      if (cur.kind === 'spline') { const sp = splineSpans(cur, P, geo); for (const B of forward ? sp : sp.reverse().map(B => [...B].reverse())) segs.push({ t: 'bez', a: B[0], b: B[3], P: B, id: cur.id }); }
       else segs.push(cur.kind === 'line' ? { t: 'line', a, b, id: cur.id } : { t: 'arc', a, b, c: P(cur.c), ccw: forward, id: cur.id });
       node = find(forward ? cur.b : cur.a);
       cur = (adj.get(node) || []).find(x => !used.has(x.id)) || null;
@@ -288,7 +295,7 @@ export function geoPaths(geo, solved) {
 // Each region: { outer: segs, holes: [segs], sample: [x, y] interior point, filled: even-odd over closed loops (regions outside every loop count as filled), area }.
 const TAU = Math.PI * 2;
 // ---- fit-point splines: a chain of cubic Béziers through the points (chord-weighted Catmull-Rom tangents) ----
-export function splineBeziers(P, closed = false) {
+export function splineBeziers(P, closed = false, t0 = null, t1 = null) {
   const n = P.length; if (n < 2) return [];
   const sub = (a, b) => [a[0] - b[0], a[1] - b[1]], nrm = v => { const l = Math.hypot(v[0], v[1]) || 1; return [v[0] / l, v[1] / l]; };
   const m = P.map((p, i) => {
@@ -302,6 +309,8 @@ export function splineBeziers(P, closed = false) {
       m[0] = end(0, 1); m[n - 1] = end(n - 1, n - 2);   // reflection about the chord line keeps the forward sense
     }
   }
+  if (!closed && t0) m[0] = nrm(t0);
+  if (!closed && t1) m[n - 1] = nrm(t1);
   const out = [], spans = closed ? n : n - 1;
   for (let i = 0; i < spans; i++) {
     const a = P[i], b = P[(i + 1) % n], d = Math.hypot(...sub(b, a)) / 3;
@@ -318,8 +327,66 @@ export function bezSub(B, t0, t1) {
   if (t0 > 0) R = split(R, t0 / (t1 || 1))[1];
   return R;
 }
-// spline curve (by point ids) -> Bézier spans, given a point lookup
-export function splineSpans(c, P) { const closed = c.pts.length > 2 && c.pts[0] === c.pts[c.pts.length - 1]; const ids = closed ? c.pts.slice(0, -1) : c.pts; return splineBeziers(ids.map(P), closed); }
+// ---- spline curves ----
+// A spline stores its fit points `pts`; its ends `a`/`b` are normally the first/last fit point. After a trim an
+// end is a separate point kept on the curve (onSpline), and the curve runs only between the two ends.
+// A 'tangent' constraint [spline, line|arc] sharing an end makes the spline leave that end along the other curve.
+const splineClosed = c => c.pts.length > 2 && c.pts[0] === c.pts[c.pts.length - 1];
+function splineEndTangent(c, end, P, geo) {
+  if (!geo || splineClosed(c)) return null;
+  const S = end === 'a' ? c.pts[0] : c.pts[c.pts.length - 1];
+  for (const k of geo.cons) {
+    if (k.type !== 'tangent' || k.e[0] !== c.id) continue;
+    const o = geo.curves.find(x => x.id === k.e[1]); if (!o) continue;
+    let cont = null;                                   // direction leaving the other curve at S, continuing it
+    if (o.kind === 'line' && (o.a === S || o.b === S)) { const f = P(o.a === S ? o.b : o.a), q = P(S); cont = [q[0] - f[0], q[1] - f[1]]; }
+    else if (o.kind === 'arc' && (o.a === S || o.b === S)) { const cc = P(o.c), q = P(S), ccw = [-(q[1] - cc[1]), q[0] - cc[0]]; cont = o.b === S ? ccw : [-ccw[0], -ccw[1]]; }
+    if (!cont || Math.hypot(...cont) < 1e-12) continue;
+    return end === 'a' ? cont : [-cont[0], -cont[1]];
+  }
+  return null;
+}
+// all spans of the untrimmed curve
+export function splineFull(c, P, geo) {
+  const closed = splineClosed(c), ids = closed ? c.pts.slice(0, -1) : c.pts;
+  return splineBeziers(ids.map(P), closed, splineEndTangent(c, 'a', P, geo), splineEndTangent(c, 'b', P, geo));
+}
+// global parameter s in [0, spans] of the point on the curve closest to q
+export function splineClosest(spans, q) {
+  let best = 0, bd = Infinity;
+  spans.forEach((B, i) => { for (let k = 0; k <= 32; k++) { const p = bezPoint(B, k / 32), d = (p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2; if (d < bd) { bd = d; best = i + k / 32; } } });
+  let i = Math.min(spans.length - 1, Math.floor(best)), t = best - i;
+  for (let it = 0; it < 12; it++) {
+    const B = spans[i], p = bezPoint(B, t), d1 = bezDer(B, t), h = 1e-5, d2 = bezDer(B, Math.min(1, t + h)).map((x, k) => (x - d1[k]) / h);
+    const f = (p[0] - q[0]) * d1[0] + (p[1] - q[1]) * d1[1], fp = d1[0] ** 2 + d1[1] ** 2 + (p[0] - q[0]) * d2[0] + (p[1] - q[1]) * d2[1];
+    if (Math.abs(fp) < 1e-14) break;
+    const nt = t - f / fp;
+    if (nt < 0 && i > 0) { i--; t = nt + 1; } else if (nt > 1 && i < spans.length - 1) { i++; t = nt - 1; } else t = Math.min(1, Math.max(0, nt));
+    if (Math.abs(f / fp) < 1e-12) break;
+  }
+  return i + t;
+}
+export const splineAt = (spans, s) => { const i = Math.min(spans.length - 1, Math.max(0, Math.floor(s))); return bezPoint(spans[i], s - i); };
+// parameter range of the visible part: [s0, s1], s1 may pass the seam of a closed spline
+export function splineRange(c, spans, P) {
+  const N = spans.length, closed = splineClosed(c);
+  let s0 = c.a === c.pts[0] ? 0 : splineClosest(spans, P(c.a));
+  let s1 = c.b === c.pts[c.pts.length - 1] ? N : splineClosest(spans, P(c.b));
+  if (closed) { if (c.a !== c.pts[0] || c.b !== c.pts[0]) { if (s1 <= s0 + 1e-9) s1 += N; } }
+  else if (s1 < s0) [s0, s1] = [s1, s0];
+  return [s0, s1];
+}
+// Bézier spans of the visible part, each tagged with the global parameters it covers (g0, g1)
+export function splineSpans(c, P, geo) {
+  const full = splineFull(c, P, geo), N = full.length; if (!N) return [];
+  const [s0, s1] = splineRange(c, full, P), out = [];
+  for (let k = Math.floor(s0); k < s1; k++) {
+    const a = Math.max(s0, k), b = Math.min(s1, k + 1); if (b - a < 1e-12) continue;
+    const i = ((k % N) + N) % N, B = bezSub(full[i], a - k, b - k);
+    B.g0 = a; B.g1 = b; out.push(B);
+  }
+  return out;
+}
 function arrCurves(geo, solved) {
   const pts = solved ? solved.points : new Map(geo.points.map(p => [p.id, p]));
   const P = id => { const p = id === 'O' ? { x: 0, y: 0 } : pts.get(id); return [p.x, p.y]; };
@@ -327,7 +394,7 @@ function arrCurves(geo, solved) {
   for (const c of geo.curves) {
     if (c.constr) continue;
     if (c.kind === 'line') { const a = P(c.a), b = P(c.b); if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 1e-9) out.push({ id: c.id, kind: 'line', a, b }); }
-    else if (c.kind === 'spline') splineSpans(c, P).forEach((B, k) => out.push({ id: c.id + '#' + k, src: c.id, kind: 'bez', P: B, a: B[0], b: B[3] }));
+    else if (c.kind === 'spline') splineSpans(c, P, geo).forEach((B, k) => out.push({ id: c.id + '#' + k, src: c.id, kind: 'bez', P: B, a: B[0], b: B[3], g0: B.g0, g1: B.g1 }));
     else {
       const cc = P(c.c);
       if (c.kind === 'circle') { const r = solved?.radii.get(c.id) ?? Math.abs(+c.r); if (r > 1e-9) out.push({ id: c.id, kind: 'arc', c: cc, r, a0: 0, a1: TAU, full: true }); }

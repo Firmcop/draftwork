@@ -135,3 +135,20 @@ test('press pull grows or pushes in a flat face', () => {
   r = K.regenerateBrep([...f, { id: 'p', type: 'presspull', edges: [top], distance: 5 }, { id: 'p2', type: 'presspull', edges: [{ ...top, c: [top.c[0], top.c[1], 25] }], distance: -2 }]); okAll(r);
   near(vols(r)[0], 40 * 30 * 23, 0.01, 'a second press pull finds the moved face');
 });
+
+test('press pull offsets curved faces: holes shrink or grow, bosses thicken', () => {
+  const f = [{ id: 'b', type: 'box', plane: 'XY', cx: 0, cy: 0, w: 40, d: 40, h: 20, op: 'new' }, { id: 'c', type: 'cylinder', plane: 'XY', cx: 0, cy: 0, diameter: 10, h: 20, op: 'cut' }];
+  const body = [...K.regenerateBrep(f).bodies.values()][0];
+  const hole = [...K.brepSigMap(body, 'face').values()].find(s => s.type !== 'PLANE');
+  let r = K.regenerateBrep([...f, { id: 'p', type: 'presspull', edges: [hole], distance: -1 }]); okAll(r);
+  near(vols(r)[0], 32000 - Math.PI * 36 * 20, 0.01, 'hole radius 5 → 6');
+  r = K.regenerateBrep([...f, { id: 'p', type: 'presspull', edges: [hole], distance: 1.5 }]); okAll(r);
+  near(vols(r)[0], 32000 - Math.PI * 3.5 ** 2 * 20, 0.01, 'hole radius 5 → 3.5');
+  const g = [{ id: 'b', type: 'box', plane: 'XY', cx: 0, cy: 0, w: 40, d: 40, h: 10, op: 'new' }, { id: 'c', type: 'cylinder', plane: 'XY', offset: 0, cx: 0, cy: 0, diameter: 10, h: 25, op: 'join' }];
+  const b2 = [...K.regenerateBrep(g).bodies.values()][0];
+  const boss = [...K.brepSigMap(b2, 'face').values()].find(s => s.type !== 'PLANE');
+  r = K.regenerateBrep([...g, { id: 'p', type: 'presspull', edges: [boss], distance: 2 }]); okAll(r);
+  near(vols(r)[0], 16000 + Math.PI * 49 * 15, 0.01, 'boss radius 5 → 7 above the plate');
+  r = K.regenerateBrep([...f, { id: 'p', type: 'presspull', edges: [hole], distance: 6 }]);
+  assert.equal(r.status.get('p').state, 'error', 'closing a hole past its axis is refused');
+});

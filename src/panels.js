@@ -361,7 +361,7 @@ function featureFields(f, idx) {
         h('p', { class: 'note' }, n ? `${n} ${what}${n > 1 ? 's' : ''} selected. Click on the model to add or remove ${what}s.` : `Click the ${what}s on the model.`),
         h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn', type: 'button', disabled: !n, onclick: () => { checkpoint(); f.edges = []; rerenderDialog(); scheduleRegen(0); drawToolsOverlay(); } }, 'Clear selection'))));
       if (f.type === 'presspull') {
-        out.push(section_('Offset', exField('Distance', f, 'distance', 'mm', { id: 'dx-ppdist' }), h('p', { class: 'note' }, 'Positive pulls the face out and adds material; negative pushes it in and removes material.')));
+        out.push(section_('Offset', exField('Distance', f, 'distance', 'mm', { id: 'dx-ppdist' }), h('p', { class: 'note' }, 'Positive pulls the face out and adds material; negative pushes it in and removes material. On a hole, positive makes it smaller.')));
         break;
       } else if (f.type === 'draft') {
         out.push(section_('Pull direction', selField('Neutral plane', f, 'neutral', planeOptions(idx, f.neutral), { id: 'ds-neutral' }), exField('Plane offset', f, 'neutralOffset', 'mm', { id: 'dx-noff' }),

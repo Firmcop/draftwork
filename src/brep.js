@@ -272,10 +272,42 @@ function edgeFeature(f, out) {
   return matched;
 }
 
-// Press Pull on flat faces: grow the face outward (join) or push it in (cut) by a signed distance.
+// Smallest radius of curvature on the face, separately for directions that curve toward the outward
+// normal (concave, like the wall of a hole) and away from it (convex, like a boss), by finite differences.
+function curvatureRadii(face) {   // (normalAt is not unit length)
+  let concave = Infinity, convex = Infinity;
+  const at = (u, v) => { const p = face.pointOnSurface(u, v), n = face.normalAt(p), l = Math.hypot(n.x, n.y, n.z) || 1, r = [[p.x, p.y, p.z], [n.x / l, n.y / l, n.z / l]]; p.delete?.(); n.delete?.(); return r; };
+  for (const [u, v] of [[0.5, 0.5], [0.2, 0.3], [0.8, 0.7]]) for (const [du, dv] of [[0.01, 0], [0, 0.01]]) {
+    let a, b; try { a = at(u, v); b = at(u + du, v + dv); } catch (e) { continue; }
+    const dp = [0, 1, 2].map(k => b[0][k] - a[0][k]), dn = [0, 1, 2].map(k => b[1][k] - a[1][k]);
+    const lp = Math.hypot(...dp), ln = Math.hypot(...dn);
+    if (lp < 1e-12 || ln < 1e-9) continue;
+    const R = lp / ln, s = dp[0] * dn[0] + dp[1] * dn[1] + dp[2] * dn[2];
+    if (s < 0) concave = Math.min(concave, R); else convex = Math.min(convex, R);
+  }
+  return { concave, convex };
+}
+// The material between a curved face and its offset by d (along the outward normal), as a solid. It reaches a
+// hair past the face on the other side so the boolean never meets exactly coincident curved faces.
+function offsetSlab(face, d) {
+  const oc = RC.getOC(), eps = Math.min(0.01, Math.abs(d) / 10);
+  // an offset past a center of curvature turns the surface inside out (a hole closed beyond its axis)
+  const { concave, convex } = curvatureRadii(face);
+  if ((d > 0 && d >= concave * 0.999) || (d < 0 && -d >= convex * 0.999)) throw new Error('This face cannot be offset that far: ' + Math.min(d > 0 ? concave : convex, 1e9).toFixed(2) + ' mm is the most it can move this way.');
+  const mo = new oc.BRepOffsetAPI_MakeOffsetShape(); mo.PerformBySimple(face.wrapped, d > 0 ? -eps : eps);
+  const off = mo.Shape();
+  const mk = new oc.BRepOffsetAPI_MakeThickSolid(); mk.MakeThickSolidBySimple(d > 0 ? off.Reversed() : off, d > 0 ? -(d + eps) : d - eps);
+  const slab = RC.cast(mk.Shape());
+  mo.delete(); mk.delete(); off.delete?.();
+  let v = 0; try { v = RC.measureVolume(slab); } catch (e) { }
+  if (!(v > 1e-9)) { slab.delete?.(); throw new Error('This face cannot be offset that far. Try a smaller distance.'); }
+  return slab;
+}
+// Press Pull: grow a face outward (join) or push it in (cut) by a signed distance. Flat faces extrude;
+// curved ones (holes, bosses, fillets) are offset along their normal, so a hole gets bigger or smaller.
 function pressPull(f, out) {
   const refs = f.edges || [];
-  if (!refs.length) throw new Error('Click a flat face on the model');
+  if (!refs.length) throw new Error('Click a face on the model');
   const d = +f.distance;
   if (!(Math.abs(d) > 1e-6)) throw new Error('Distance must not be 0 mm');
   let matched = 0;
@@ -285,13 +317,11 @@ function pressPull(f, out) {
     const picked = list.filter(x => hs.has(x.hashCode));
     try {
       if (!picked.length) continue;
-      if (picked.some(x => x.geomType !== 'PLANE')) throw new Error('Press Pull works on flat faces for now');
       let shape = b.shape.clone();
       for (const face of picked) {
-        const n = face.normalAt(), v = n.multiply(d);
-        const prism = RC.basicFaceExtrusion(face, v);
+        const prism = face.geomType === 'PLANE' ? (() => { const n = face.normalAt(), v = n.multiply(d), p = RC.basicFaceExtrusion(face, v); n.delete?.(); v.delete?.(); return p; })() : offsetSlab(face, d);
         const next = d > 0 ? shape.fuse(prism) : shape.cut(prism);
-        shape.delete?.(); prism.delete?.(); n.delete?.(); v.delete?.();
+        shape.delete?.(); prism.delete?.();
         shape = next;
       }
       matched += picked.length;

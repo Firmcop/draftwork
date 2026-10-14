@@ -213,3 +213,30 @@ test('fit-point spline closes a profile; both kernels extrude it', () => {
   assert.equal(r2.length, 2, 'line crossing the spline makes two areas');
   near(r2[0].area + r2[1].area, area, 1e-6, 'areas add up');
 });
+
+test('spline constraints: tangent end, point on spline, trimmed range', () => {
+  // line from (-20,0) to (0,0), spline from (0,0) through (10,10) to (20,0)
+  const g = {
+    points: [{ id: 'q', x: -20, y: 0 }, { id: 'p0', x: 0, y: 0 }, { id: 'p1', x: 10, y: 10 }, { id: 'p2', x: 20, y: 0 }, { id: 'm', x: 9, y: 12 }],
+    curves: [{ id: 'l', kind: 'line', a: 'q', b: 'p0' }, { id: 's', kind: 'spline', pts: ['p0', 'p1', 'p2'], a: 'p0', b: 'p2' }],
+    cons: [{ id: 'k1', type: 'tangent', e: ['s', 'l'] }, { id: 'k2', type: 'fix', e: ['p0'], x: 0, y: 0 }, { id: 'k3', type: 'fix', e: ['p1'], x: 10, y: 10 }, { id: 'k4', type: 'fix', e: ['p2'], x: 20, y: 0 }, { id: 'k5', type: 'onSpline', e: ['m', 's'] }],
+  };
+  const solved = K.solveSketch(g);
+  assert.ok(solved.ok, 'solves');
+  const P = id => { const q = solved.points.get(id); return [q.x, q.y]; };
+  const full = K.splineFull(g.curves[1], P, g);
+  const d = [full[0][1][0] - full[0][0][0], full[0][1][1] - full[0][0][1]];
+  const ld = [P('p0')[0] - P('q')[0], P('p0')[1] - P('q')[1]];
+  near((d[0] * ld[1] - d[1] * ld[0]) / Math.hypot(...d) / Math.hypot(...ld), 0, 1e-9, 'spline leaves along the line (tangent)');
+  assert.ok(d[0] * ld[0] + d[1] * ld[1] > 0, 'continuing forward');
+  const m = P('m'), s = K.splineClosest(full, m), on = K.splineAt(full, s);
+  near(Math.hypot(m[0] - on[0], m[1] - on[1]), 0, 1e-6, 'point solved onto the spline');
+  // trim: the spline now starts at m
+  g.curves[1].a = 'm';
+  const spans = K.splineSpans(g.curves[1], P, g);
+  near(spans[0][0][0], m[0], 1e-9, 'visible part starts at the trim point');
+  near(spans.at(-1)[3][0], 20, 1e-9, 'and still ends at the last fit point');
+  // the visible part is exactly the tail of the full curve
+  const mid = K.bezPoint(spans[0], 0.5), sMid = K.splineClosest(full, mid);
+  near(Math.hypot(...K.splineAt(full, sMid).map((x, i) => x - mid[i])), 0, 1e-9, 'trimmed piece lies on the original curve');
+});

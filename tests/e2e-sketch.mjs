@@ -152,6 +152,20 @@ for (const [x, y] of [[40, 0], [33, 18], [12, 24], [0, 0]]) await clickAt(await 
 await page.keyboard.press('Enter'); await W(500);
 g = await geo();
 check(g.ok && g.loops === 1 && g.regions === 1 && g.filled === 1, `line + spline make one closed area (loops ${g.loops}, regions ${g.regions})`);
+// trim the spline back to a crossing line, then undo
+await page.keyboard.press('l');
+for (const [x, y] of [[25, 40], [25, 5]]) await clickAt(await sk(x, y));
+await page.keyboard.press('Escape'); await W(200);
+const before = await page.evaluate(() => window.__dw.doc().features[0].geo.curves.length);
+await page.keyboard.press('t'); await W(200);
+await clickAt(await sk(12, 24)); await W(800);
+const trimmed = await page.evaluate(() => { const g = window.__dw.doc().features[0].geo, sp = g.curves.find(c => c.kind === 'spline'); return sp && { a: sp.a, b: sp.b, first: sp.pts[0], last: sp.pts.at(-1), on: g.cons.filter(k => k.type === 'onSpline').length }; });
+g = await geo();
+check(g.ok && trimmed && trimmed.b !== trimmed.last && trimmed.a === trimmed.first && trimmed.on >= 1, `trim cuts the spline back to the crossing line (${JSON.stringify(trimmed)})`);
+if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/spline-trim.png' });
+await page.keyboard.press('Control+z'); await W(500); await page.keyboard.press('Control+z'); await W(800);
+check((await page.evaluate(() => window.__dw.doc().features[0].geo.curves.length)) === before - 1 && (await geo()).loops === 1, 'undo restores the spline and removes the line');
+await page.keyboard.press('v'); await W(200);
 await page.keyboard.press('l');
 for (const [x, y] of [[50, 10], [62, 10]]) await clickAt(await sk(x, y));
 await page.keyboard.press('Escape'); await W(200);

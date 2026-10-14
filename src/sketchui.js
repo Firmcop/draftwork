@@ -297,15 +297,15 @@ function sketchHover(e) {
   if (gdraw?.kind === 'arc') { gdraw.hover = snapPoint(sk, hit); changed = true; }
   if (sketchTool === 'select' && !gdraw) { const gp = pickGeo(sk, hit), id = gp?.id || null; if (id !== geoHover) { geoHover = id; changed = true; } }
   if (sketchTool === 'extend') { const pl = extendPlan(sk, hit), key = pl ? pl.curve.id + pl.end : null; if (key !== (trimHover?.key ?? null)) { trimHover = pl ? { ext: pl, key } : null; changed = true; } }
-  if (sketchTool === 'trim') { const tp = trimPiece(sk, hit); const key = tp ? tp.curve.id + ':' + tp.t0 : null; if (key !== (trimHover?.key ?? null)) { trimHover = tp ? { ...tp, key } : null; changed = true; } }
+  if (sketchTool === 'trim') { const tp = trimPiece(sk, hit); const key = tp ? (tp.key || tp.curve.id + ':' + tp.t0) : null; if (key !== (trimHover?.key ?? null)) { trimHover = tp ? { ...tp, key } : null; changed = true; } }
   if (changed) refreshOverlays();
 }
 function endLineChain() { if (lineDraft) { lineDraft = null; refreshOverlays(); defaultHint(); } }
 
 // ---------- drawing ----------
-const GLYPH = { symmetry: '⇋', horizontal: 'H', vertical: 'V', parallel: '∥', perpendicular: '⊥', equal: '=', tangent: 'T', fix: 'Fix', midpoint: 'M', concentric: '◎', collinear: '≡', onLine: '•', onCircle: '•', coincident: '•' };
+const GLYPH = { symmetry: '⇋', horizontal: 'H', vertical: 'V', parallel: '∥', perpendicular: '⊥', equal: '=', tangent: 'T', fix: 'Fix', midpoint: 'M', concentric: '◎', collinear: '≡', onLine: '•', onCircle: '•', onSpline: '•', coincident: '•' };
 function curvePts(sk, c, posOf, radOf) {
-  if (c.kind === 'spline') { const out = []; splineSpans(c, id => { const p = posOf(id); return [p.x, p.y]; }).forEach((B, k) => { for (let i = k ? 1 : 0; i <= 24; i++) out.push(bezPoint(B, i / 24)); }); return out; }
+  if (c.kind === 'spline') { const out = []; splineSpans(c, id => { const p = posOf(id); return [p.x, p.y]; }, sk.geo).forEach((B, k) => { for (let i = k ? 1 : 0; i <= 24; i++) out.push(bezPoint(B, i / 24)); }); return out; }
   if (c.kind === 'line') { const a = posOf(c.a), b = posOf(c.b); return [[a.x, a.y], [b.x, b.y]]; }
   const cc = posOf(c.c), r = radOf(c);
   let a0 = 0, a1 = 2 * Math.PI;
@@ -378,7 +378,11 @@ function drawGeo(sk, grp, active) {
     else { let t0 = end === 'a' ? c.a0 : c.a1, t1 = Math.atan2(p[1] - c.c[1], p[0] - c.c[0]); if (end === 'b') { while (t1 < t0) t1 += TAU; } else { while (t1 > t0) t1 -= TAU; } for (let i = 0; i <= 32; i++) { const t = t0 + (t1 - t0) * i / 32; pts.push([c.c[0] + c.r * Math.cos(t), c.c[1] + c.r * Math.sin(t), 0.11]); } }
     grp.add(line(pts, colors.select, { depthTest: false, order: 9, dashed: true, dash: 4 * zoom, gap: 2.5 * zoom }));
   }
-  if (sketchTool === 'trim' && trimHover?.curve) {
+  if (sketchTool === 'trim' && trimHover?.spline) {
+    const { full, N, lo, hi } = trimHover, pts = [];
+    for (let i = 0; i <= 64; i++) { const s = lo + (hi - lo) * i / 64, m = ((s % N) + N) % N, q = splineAt(full, m === 0 && s > 0 ? N : m); pts.push([q[0], q[1], 0.11]); }
+    grp.add(line(pts, colors.err, { depthTest: false, order: 9, dashed: true, dash: 4 * zoom, gap: 2.5 * zoom }));
+  } else if (sketchTool === 'trim' && trimHover?.curve) {
     const c = trimHover.curve, n = 32, pts = [];
     for (let i = 0; i <= n; i++) { const t = trimHover.t0 + (trimHover.t1 - trimHover.t0) * i / n; pts.push(c.kind === 'line' ? [c.a[0] + (c.b[0] - c.a[0]) * t, c.a[1] + (c.b[1] - c.a[1]) * t, 0.11] : [c.c[0] + c.r * Math.cos(t), c.c[1] + c.r * Math.sin(t), 0.11]); }
     grp.add(line(pts, colors.err, { depthTest: false, order: 9, dashed: true, dash: 4 * zoom, gap: 2.5 * zoom }));
@@ -407,6 +411,7 @@ function consAnchor(sk, k, zoom, stack) {
   const first = e[0];
   const c = C(first);
   if (c?.kind === 'line') { const m = lineMid(c); return bump(first, m.x, m.y, m.nx, m.ny); }
+  if (c?.kind === 'spline') { const o = C(e[1]), end = o && [o.a, o.b].includes(c.pts[c.pts.length - 1]) ? c.pts[c.pts.length - 1] : c.pts[0], p = P(end); return bump(first, p.x, p.y, 0.7, -0.7); }
   if (c) { const cc = P(c.c), r = geoRadius(sk, c); return bump(first, cc.x + r * 0.7, cc.y + r * 0.7, 0.7, 0.7); }
   const p = P(first); return bump(first, p.x, p.y, 0.7, 0.7);
 }
@@ -416,13 +421,14 @@ function selectionParts(sk) {
   const g = sk.geo || emptyGeo(), sel = [...geoSel];
   const pts = sel.filter(id => id === 'O' || g.points.some(p => p.id === id));
   const crv = sel.map(id => g.curves.find(c => c.id === id)).filter(Boolean);
-  return { pts, crv, lines: crv.filter(c => c.kind === 'line'), circs: crv.filter(c => c.kind !== 'line'), cons: sel.filter(id => g.cons.some(k => k.id === id)) };
+  return { pts, crv, lines: crv.filter(c => c.kind === 'line'), circs: crv.filter(c => c.kind === 'arc' || c.kind === 'circle'), splines: crv.filter(c => c.kind === 'spline'), cons: sel.filter(id => g.cons.some(k => k.id === id)) };
 }
 function applyConstraint(type) {
   const sk = featById(sketchId); if (!sk) return;
   if (!sk.geo || !geoSel.size) { toast('Select sketch geometry first, then choose the constraint'); return; }
-  const g = cloneGeo(sk.geo), { pts, crv, lines, circs } = selectionParts(sk), P = id => geoPos(sk, id);
+  const g = cloneGeo(sk.geo), { pts, crv, lines, circs, splines } = selectionParts(sk), P = id => geoPos(sk, id);
   const add = (t, e, extra = {}) => g.cons.push({ id: cid(), type: t, e, ...extra });
+  let reduce = type !== 'fix';
   const need = m => { toast(m); return false; };
   const hv = (a, b) => Math.abs(b.x - a.x) >= Math.abs(b.y - a.y) ? 'horizontal' : 'vertical';
   let ok = true;
@@ -433,13 +439,20 @@ function applyConstraint(type) {
       else ok = need('Select lines, or two points'); break;
     case 'coincident':
       if (pts.length === 2 && !crv.length) add('coincident', pts);
-      else if (pts.length === 1 && crv.length === 1) add(crv[0].kind === 'line' ? 'onLine' : 'onCircle', [pts[0], crv[0].id]);
+      else if (pts.length === 1 && crv.length === 1) add(crv[0].kind === 'line' ? 'onLine' : crv[0].kind === 'spline' ? 'onSpline' : 'onCircle', [pts[0], crv[0].id]);
       else ok = need('Select two points, or a point and a curve'); break;
     case 'collinear': lines.length === 2 && crv.length === 2 ? add('collinear', lines.map(l => l.id)) : (ok = need('Select two lines')); break;
     case 'parallel': case 'perpendicular': lines.length === 2 && crv.length === 2 ? add(type, lines.map(l => l.id)) : (ok = need('Select two lines')); break;
     case 'equal': (lines.length === 2 && crv.length === 2) || (circs.length === 2 && crv.length === 2) ? add('equal', crv.map(c => c.id)) : (ok = need('Select two lines, or two arcs or circles')); break;
     case 'tangent':
-      if (crv.length === 2 && lines.length === 1) add('tangent', [lines[0].id, circs[0].id]);
+      if (splines.length === 1 && crv.length === 2 && (lines.length === 1 || circs.length === 1)) {
+        // the spline leaves its end along the other curve; needs a shared end point
+        const sp = splines[0], o = lines[0] || circs[0], ends = [sp.pts[0], sp.pts[sp.pts.length - 1]];
+        if (o.kind === 'circle' || ![o.a, o.b].some(id => ends.includes(id))) { ok = need('The spline and the other curve must meet at an end of the spline'); break; }
+        if (g.cons.some(k => k.type === 'tangent' && k.e[0] === sp.id && k.e[1] === o.id)) { ok = need('They are already tangent'); break; }
+        add('tangent', [sp.id, o.id]); reduce = false;
+      }
+      else if (crv.length === 2 && lines.length === 1) add('tangent', [lines[0].id, circs[0].id]);
       else if (circs.length === 2 && crv.length === 2) {
         const [c1, c2] = circs, p1 = P(c1.c), p2 = P(c2.c), d = Math.hypot(p1.x - p2.x, p1.y - p2.y), r1 = geoRadius(sk, c1), r2 = geoRadius(sk, c2);
         add('tangent', [c1.id, c2.id], { sign: Math.abs(d - (r1 + r2)) <= Math.abs(d - Math.abs(r1 - r2)) ? 1 : -1 });
@@ -454,7 +467,7 @@ function applyConstraint(type) {
     default: ok = need('This constraint is not available yet');
   }
   if (!ok) return;
-  if (commitGeo(sk, g, { msg: 'That constraint conflicts with the sketch, so it was not added', mustReduce: type !== 'fix' })) toast((CMD['k.c.' + type]?.label || type) + ' added');
+  if (commitGeo(sk, g, { msg: 'That constraint conflicts with the sketch, so it was not added', mustReduce: reduce })) toast((CMD['k.c.' + type]?.label || type) + ' added');
 }
 function addDimension() {
   const sk = featById(sketchId); if (!sk) return;
@@ -603,6 +616,16 @@ function offsetSelection() {
   const { crv } = selectionParts(sk);
   if (!crv.length) { toast('Select a curve of a closed shape, then choose Offset'); return; }
   const target = crv[0];
+  if (target.kind === 'spline') {
+    promptValue('Offset distance (mm; for a closed spline negative goes inward)', 5, d => {
+      if (!d) { toast('Enter a distance other than 0'); return false; }
+      const g = cloneGeo(sk.geo); let ids;
+      try { ids = offsetSpline(sk, st, g, target, d); } catch (err) { toast(err.message); return false; }
+      if (!commitGeo(sk, g, { force: true })) return false;
+      geoSel = new Set(ids); refreshOverlays(); renderPalette(); toast('Offset copy added');
+    });
+    return;
+  }
   const loop = target.kind === 'circle' ? null : st.loops.profiles.find(p => p.kind === 'loop' && p.segs.some(sg => sg.id === target.id));
   if (target.kind !== 'circle' && !loop) { toast('Offset works on closed shapes and circles'); return; }
   promptValue('Offset distance (mm, negative goes inward)', 5, d => {
@@ -615,6 +638,20 @@ function offsetSelection() {
     geoSel = new Set(newIds); refreshOverlays(); renderPalette();
     toast('Offset copy added');
   });
+}
+// A new spline through points offset from the original along its normal (a close fit, not linked to the original).
+function offsetSpline(sk, st, g, c, d) {
+  const P = id => { const q = id === 'O' ? { x: 0, y: 0 } : st.solved.points.get(id); return [q.x, q.y]; };
+  const spans = splineSpans(c, P, st.rg); if (!spans.length) throw new Error('That spline is empty');
+  const closed = c.pts.length > 2 && c.pts[0] === c.pts[c.pts.length - 1] && c.a === c.pts[0] && c.b === c.pts[0];
+  const per = Math.max(4, Math.ceil(16 / spans.length)), samples = [];
+  spans.forEach((B, k) => { for (let i = (k ? 1 : 0); i <= per; i++) { if (closed && k === spans.length - 1 && i === per) continue; const t = i / per, q = bezPoint(B, t), u = 1 - t, dv = [0, 1].map(j => 3 * u * u * (B[1][j] - B[0][j]) + 6 * u * t * (B[2][j] - B[1][j]) + 3 * t * t * (B[3][j] - B[2][j])); samples.push([q, dv]); } });
+  let sign = 1;
+  if (closed) { let A = 0; for (let i = 0; i < samples.length; i++) { const a = samples[i][0], b = samples[(i + 1) % samples.length][0]; A += a[0] * b[1] - b[0] * a[1]; } sign = A > 0 ? -1 : 1; }   // positive = outward
+  const ids = samples.map(([q, dv]) => { const l = Math.hypot(dv[0], dv[1]) || 1; return addPoint(g, q[0] - dv[1] / l * d * sign, q[1] + dv[0] / l * d * sign); });
+  if (closed) ids.push(ids[0]);
+  const id = 's' + uid(); g.curves.push({ id, kind: 'spline', pts: ids, a: ids[0], b: ids[ids.length - 1] });
+  return [id];
 }
 function offsetCircle(sk, g, c, d) {
   const r = geoRadius(sk, c) + d;
@@ -672,10 +709,16 @@ function offsetLoop(sk, g, loop, d) {
 }
 
 // ---------- trim: remove the piece of a curve between crossings ----------
-function nearestArrCurve(curves, hit) {
+function nearestArrCurve(curves, hit, withBez = false) {
   let best = null, bd = hit.tol;
   for (const c of curves) {
-    if (c.kind === 'bez') continue;   // splines are not trimmed or extended (yet)
+    if (c.kind === 'bez') {   // spline pieces: Trim only (Extend does not lengthen splines)
+      if (!withBez) continue;
+      let bt = 0, bdd = Infinity;
+      for (let k = 0; k <= 48; k++) { const q = bezPoint(c.P, k / 48), dd = Math.hypot(q[0] - hit.x, q[1] - hit.y); if (dd < bdd) { bdd = dd; bt = k / 48; } }
+      if (bdd <= bd) { bd = bdd; best = { c, t: bt }; }
+      continue;
+    }
     let d, t;
     if (c.kind === 'line') { const dx = c.b[0] - c.a[0], dy = c.b[1] - c.a[1], L = dx * dx + dy * dy; t = Math.max(0, Math.min(1, ((hit.x - c.a[0]) * dx + (hit.y - c.a[1]) * dy) / L)); d = Math.hypot(hit.x - c.a[0] - t * dx, hit.y - c.a[1] - t * dy); }
     else { const raw = Math.atan2(hit.y - c.c[1], hit.x - c.c[0]); let th; if (c.full) th = ((raw % TAU) + TAU) % TAU; else { th = raw; while (th < c.a0 - 1e-9) th += TAU; while (th > c.a0 + TAU) th -= TAU; if (th > c.a1 + 1e-9) continue; } t = th; d = Math.abs(Math.hypot(hit.x - c.c[0], hit.y - c.c[1]) - c.r); }
@@ -685,8 +728,9 @@ function nearestArrCurve(curves, hit) {
 }
 function trimPiece(sk, hit) {
   const st = geoState(sk); if (!st?.solved) return null;
-  const curves = arrCurvesFor(st), best = nearestArrCurve(curves, hit);
+  const curves = arrCurvesFor(st), best = nearestArrCurve(curves, hit, true);
   if (!best) return null;
+  if (best.c.kind === 'bez') return splineTrimPiece(st, curves, best);
   const sp = curveSplits(curves).find(s => s.curve.id === best.c.id);
   if (best.c.full) {
     const hs = [...new Set(sp.hits.map(hh => Math.round((((hh.t % TAU) + TAU) % TAU) * 1e9) / 1e9))].sort((x, y) => x - y);
@@ -701,8 +745,63 @@ function trimPiece(sk, hit) {
   return null;
 }
 function arrCurvesFor(st) { return arrCurves(st.rg, st.solved); }
+// The stretch of a spline between the crossings either side of the click, in the spline's global parameter.
+function splineTrimPiece(st, curves, best) {
+  const src = best.c.src, c = st.rg.curves.find(x => x.id === src); if (!c) return null;
+  const P = id => { const q = id === 'O' ? { x: 0, y: 0 } : st.solved.points.get(id); return [q.x, q.y]; };
+  const full = splineFull(c, P, st.rg), N = full.length;
+  const pieces = curves.filter(x => x.src === src), S0 = pieces[0].g0, S1 = pieces[pieces.length - 1].g1;
+  const own = id => id.startsWith(src + '#'), hits = [];
+  for (const sp of curveSplits(curves)) {
+    if (sp.curve.src !== src) continue;
+    for (const h of sp.hits) if (!own(h.other)) hits.push({ s: sp.curve.g0 + h.t * (sp.curve.g1 - sp.curve.g0), other: h.other });
+  }
+  const s = best.c.g0 + best.t * (best.c.g1 - best.c.g0);
+  const closedWhole = c.pts.length > 2 && c.pts[0] === c.pts[c.pts.length - 1] && c.a === c.pts[0] && c.b === c.pts[0];
+  const xs = [...new Set(hits.map(h => Math.round(h.s * 1e9) / 1e9))].filter(x => x > S0 + 1e-7 && x < S1 - 1e-7).sort((a, b) => a - b);
+  const base = { spline: src, full, N, hits, S0, S1, curve: { kind: 'spline' } };
+  if (closedWhole) {
+    const ys = [...new Set(hits.map(h => Math.round((((h.s % N) + N) % N) * 1e9) / 1e9))].sort((a, b) => a - b);
+    if (ys.length < 2) return { ...base, lo: 0, hi: N, whole: true, key: src + ':w' };
+    const ext = [...ys, ys[0] + N]; let t = s; if (t < ys[0]) t += N;
+    for (let k = 0; k < ext.length - 1; k++) if (t >= ext[k] - 1e-9 && t <= ext[k + 1] + 1e-9) return { ...base, lo: ext[k], hi: ext[k + 1], closed: true, key: src + ':' + ext[k] };
+    return null;
+  }
+  const ext = [S0, ...xs, S1];
+  for (let k = 0; k < ext.length - 1; k++) if (s >= ext[k] - 1e-9 && s <= ext[k + 1] + 1e-9)
+    return { ...base, lo: ext[k], hi: ext[k + 1], whole: k === 0 && k + 1 === ext.length - 1, atStart: k === 0, atEnd: k + 1 === ext.length - 1, key: src + ':' + ext[k] };
+  return null;
+}
+function trimSpline(sk, tp) {
+  const g = cloneGeo(sk.geo), c = g.curves.find(x => x.id === tp.spline); if (!c) return;
+  const at = s => splineAt(tp.full, ((s % tp.N) + tp.N) % tp.N === 0 && s > 0 ? tp.N : ((s % tp.N) + tp.N) % tp.N);
+  const att = [];
+  const pin = (pid, s, sid) => {
+    g.cons.push({ id: cid(), type: 'onSpline', e: [pid, sid] });
+    const h = tp.hits.find(x => Math.abs(x.s - s) < 1e-6 || Math.abs(Math.abs(x.s - s) - tp.N) < 1e-6);
+    if (!h) return;
+    const oid = h.other.split('#')[0], o = g.curves.find(x => x.id === oid); if (!o) return;
+    const k = { id: cid(), type: o.kind === 'line' ? 'onLine' : o.kind === 'spline' ? 'onSpline' : 'onCircle', e: [pid, oid] }; att.push(k.id); g.cons.push(k);
+  };
+  if (tp.whole) { g.curves = g.curves.filter(x => x.id !== c.id); g.cons = g.cons.filter(k => !(k.e || []).includes(c.id)); }
+  else if (tp.closed) { const pB = addPoint(g, ...at(tp.hi)), pA = addPoint(g, ...at(tp.lo)); c.a = pB; c.b = pA; pin(pB, tp.hi, c.id); pin(pA, tp.lo, c.id); }
+  else if (tp.atStart) { const p = addPoint(g, ...at(tp.hi)); c.a = p; pin(p, tp.hi, c.id); }
+  else if (tp.atEnd) { const p = addPoint(g, ...at(tp.lo)); c.b = p; pin(p, tp.lo, c.id); }
+  else {
+    const pA = addPoint(g, ...at(tp.lo)), pB = addPoint(g, ...at(tp.hi)), c2 = { ...c, pts: [...c.pts], id: 's' + uid(), a: pB, b: c.b };
+    c.b = pA; g.curves.push(c2);
+    for (const k of [...g.cons]) if (k.type === 'tangent' && k.e[0] === c.id) g.cons.push({ ...k, id: cid(), e: [c2.id, k.e[1]] });   // both pieces share the full curve
+    pin(pA, tp.lo, c.id); pin(pB, tp.hi, c2.id);
+  }
+  const used = new Set(g.curves.flatMap(curveRefs));
+  const gone = new Set(g.points.filter(p => !used.has(p.id) && !p.virtual && !g.cons.some(k => k.type === 'fix' && k.e[0] === p.id)).map(p => p.id));
+  g.points = g.points.filter(p => !gone.has(p.id)); g.cons = g.cons.filter(k => !(k.e || []).some(x => gone.has(x)));
+  trimHover = null;
+  if (!commitGeo(sk, g, { quiet: true })) { g.cons = g.cons.filter(k => !att.includes(k.id)); commitGeo(sk, g, { msg: 'Could not trim the spline without breaking other constraints' }); }
+}
 function trimClick(sk, hit) {
   const tp = trimPiece(sk, hit); if (!tp) return;
+  if (tp.spline) return trimSpline(sk, tp);
   const g = cloneGeo(sk.geo), src = g.curves.find(c => c.id === tp.curve.id), c = tp.curve;
   const lo = c.kind === 'line' ? 0 : c.a0, hi = c.kind === 'line' ? 1 : (c.full ? c.a0 + TAU : c.a1);
   const isEndLo = Math.abs(tp.t0 - lo) < 1e-9, isEndHi = Math.abs(tp.t1 - hi) < 1e-9;

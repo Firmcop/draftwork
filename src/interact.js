@@ -155,7 +155,7 @@ function newEdgeFeature(type) {
   const snap = JSON.stringify(doc); checkpoint();
   const f = { id: uid(), type, name: nextName(type), edges: [], ...(type === 'fillet' ? { radius: 2 } : type === 'chamfer' ? { distance: 1 } : type === 'draft' ? { angle: 3, neutral: 'XY', neutralOffset: 0, flipPull: false } : type === 'presspull' ? { distance: 5 } : { thickness: 2 }) };
   insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
-  toast(type === 'presspull' ? 'Click a flat face to push or pull' : type === 'shell' ? 'Click the faces to open' : type === 'draft' ? 'Click the faces to taper' : 'Click the edges to ' + (type === 'fillet' ? 'round' : 'bevel'));
+  toast(type === 'presspull' ? 'Click a face to push or pull' : type === 'shell' ? 'Click the faces to open' : type === 'draft' ? 'Click the faces to taper' : 'Click the edges to ' + (type === 'fillet' ? 'round' : 'bevel'));
 }
 // ---- edge / face picking for fillet, chamfer, shell ----
 function mmPerPx() { const r = renderer.domElement.getBoundingClientRect(); return camera.position.distanceTo(controls.target) * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / r.height; }
