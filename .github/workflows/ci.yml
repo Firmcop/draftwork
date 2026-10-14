@@ -19,6 +19,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: node tests/e2e.mjs
       - run: node tests/e2e-sketch.mjs
+      - run: ENGINE_INLINE=1 node tests/e2e.mjs
       - uses: actions/upload-artifact@v4
         with:
           name: dist

@@ -19,10 +19,12 @@ const drag = async (a, b) => { await page.mouse.move(a.x, a.y); await page.mouse
 let failed = 0;
 const check = (cond, msg) => { console.log((cond ? 'ok   ' : 'FAIL ') + msg); if (!cond) failed++; };
 
-await page.goto(`http://localhost:${PORT}/`);
+await page.goto(`http://localhost:${PORT}/${process.env.ENGINE_INLINE ? '?inline-engine' : ''}`);
 await page.waitForFunction(() => /Exact engine|Mesh engine/.test(document.querySelector('#engineBadge')?.textContent || ''), null, { timeout: 90000 });
 await W(2500);
 check((await page.textContent('#engineBadge')).includes('Exact'), 'exact engine loads');
+const mode = await page.evaluate(() => window.__dw.engine());
+check(mode === (process.env.ENGINE_INLINE ? 'inline' : 'worker'), `engine runs ${process.env.ENGINE_INLINE ? 'on the page' : 'in a worker'} (${mode})`);
 check((await page.textContent('#tlInfo')).includes('82.87'), 'sample bracket volume 82.87 cm³');
 
 // fillet the boss/plate junction by clicking the edge

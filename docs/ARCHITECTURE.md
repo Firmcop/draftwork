@@ -63,7 +63,15 @@ Fallback when WebAssembly cannot start. Same features via three.js geometry and 
 
 ## Engine loading
 
-The page renders the first frame with the mesh kernel, then loads replicad and the OpenCascade glue from jsDelivr, fetches `engine/occ-gz.wasm`, unpacks it with `DecompressionStream` (if gzip), starts OpenCascade and switches kernels. The badge in the app bar shows which engine is active and why if the exact one failed.
+The page renders the first frame with the mesh kernel, then starts the exact engine and switches kernels. The badge in the app bar shows which engine is active and why if the exact one failed.
+
+The exact engine runs in a **Web Worker**, so a long rebuild never freezes the interface:
+
+- The build wraps `solver.js`, `kernel.js`, `brep.js` and `enginehost.js` in one self-contained `async function engineFactory(urls)`. `engineclient.js` starts a module worker from `engineFactory.toString()` (a Blob URL), passing absolute library URLs read from the page's import map, and the worker loads replicad and the OpenCascade glue, fetches `engine/occ-gz.wasm` and unpacks it with `DecompressionStream`.
+- If the page may not start workers (for example a strict content security policy), the same `engineFactory` runs on the page instead (`?inline-engine` forces this for testing).
+- Messages carry plain data only. OCC shapes stay in the worker and are named by integer tokens. A rebuild returns body records `{ id, name, feature, shape: token }` plus, for shapes the page has not seen, the display mesh (typed arrays, transferred without copying), face/edge signatures and mass properties. Tool-preview meshes are fetched on demand. Freed shapes are reported so the page drops their data.
+- Picking, reference matching (same rule as `matchRefs`), measurements and mass properties all work from that shipped data, so the page never waits on the worker except for rebuilds, STEP import and STEP export.
+- Edits made while a rebuild runs queue exactly one more rebuild with the latest document.
 
 ## UI
 

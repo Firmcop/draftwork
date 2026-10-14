@@ -552,16 +552,32 @@ function scheduleRegen(delay = 0) {
   clearTimeout(regenTimer); $('#busy').hidden = false;
   regenTimer = setTimeout(() => requestAnimationFrame(doRegen), delay);
 }
+// With the exact engine the rebuild runs in the background; edits made meanwhile queue one more rebuild.
+let regenRunning = null, regenQueued = false;
 function doRegen() {
   const t = performance.now();
   try {
     params = evalParams(doc.params);
     resolved = resolveFeatures(doc.features, params.vars);
-    if (isBrep()) ensureImports();
-    result = isBrep() ? regenerateBrep(resolved, doc.rollback, cache) : regenerate(resolved, doc.rollback, cache);
-    if (isBrep()) brepCollect(cache, result);
-  } catch (e) { console.error(e); toast('Rebuild failed: ' + e.message); }
+  } catch (e) { console.error(e); toast('Rebuild failed: ' + e.message); return Promise.resolve(); }
+  if (isBrep()) {
+    if (regenRunning) { regenQueued = true; return regenRunning; }
+    ensureImports();
+    regenRunning = engineRegen(resolved, doc.rollback)
+      .then(r => { result = r; }, e => { console.error(e); toast('Rebuild failed: ' + occMsg(e)); })
+      .then(() => {
+        regenRunning = null; lastRegenMs = performance.now() - t;
+        if (regenQueued) { regenQueued = false; return doRegen(); }
+        finishRegen();
+      });
+    return regenRunning;
+  }
+  try { result = regenerate(resolved, doc.rollback, cache); } catch (e) { console.error(e); toast('Rebuild failed: ' + e.message); }
   lastRegenMs = performance.now() - t;
+  finishRegen();
+  return Promise.resolve();
+}
+function finishRegen() {
   $('#busy').hidden = true;
   if (selBody && !result.bodies.has(selBody)) selBody = null;
   updateScene(); renderTimeline(); renderBrowser(); renderInfo(); refreshDialogStatus(); persist();

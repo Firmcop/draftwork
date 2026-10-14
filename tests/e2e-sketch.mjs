@@ -17,7 +17,7 @@ let failed = 0;
 const check = (cond, msg) => { console.log((cond ? 'ok   ' : 'FAIL ') + msg); if (!cond) failed++; };
 const clickAt = async p => { await page.mouse.click(p.x, p.y); await W(250); };
 
-await page.goto(`http://localhost:${PORT}/`);
+await page.goto(`http://localhost:${PORT}/${process.env.ENGINE_INLINE ? '?inline-engine' : ''}`);
 await page.waitForFunction(() => /Exact engine|Mesh engine/.test(document.querySelector('#engineBadge')?.textContent || ''), null, { timeout: 90000 });
 await page.click('#abFile'); await page.click('text=New design'); await W(1200);
 await page.click('#bMin');                                   // keep the browser panel out of the way

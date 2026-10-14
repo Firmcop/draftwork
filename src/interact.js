@@ -221,11 +221,11 @@ function newLoft() {
 const importPending = new Set();
 function ensureImports() {
   for (const f of doc.features) {
-    if (f.type !== 'import' || !f.file || importShapes.has(f.file) || importPending.has(f.file)) continue;
+    if (f.type !== 'import' || !f.file || importsRead.has(f.file) || importPending.has(f.file)) continue;
     const file = doc.files?.[f.file]; if (!file) continue;
     importPending.add(f.file);
-    brepImportSTEP(f.file, file.text).catch(e => { importShapes.set(f.file, []); toast('Could not read ' + file.name + ': ' + occMsg(e)); })
-      .finally(() => { importPending.delete(f.file); cache = []; scheduleRegen(0); });
+    brepImportSTEP(f.file, file.text).catch(e => { importsRead.add(f.file); toast('Could not read ' + file.name + ': ' + occMsg(e)); })
+      .finally(() => { importPending.delete(f.file); scheduleRegen(0); });
   }
 }
 function startImportSTEP() {
@@ -247,7 +247,7 @@ $('#stepInput').addEventListener('change', e => {
       checkpoint();
       doc.files ||= {}; doc.files[fileId] = { name: file.name, text };
       const f = { id: uid(), type: 'import', name: file.name.replace(/\.(step|stp)$/i, ''), file: fileId };
-      insertFeature(f); cache = []; doRegen(); setView('fit');
+      insertFeature(f); await doRegen(); setView('fit');
       toast(`Imported ${n} bod${n === 1 ? 'y' : 'ies'} from ${file.name}`);
     } catch (err) { toast('Could not read ' + file.name + ': ' + occMsg(err)); }
   };
@@ -413,7 +413,7 @@ function openExportDialog(only) {
           const item = id => ({ shape: result.bodies.get(id).shape, name: bodyName(id), color: bodyColor(id) });
           const groups = st.separate ? chosen.map(id => [fname(id), [item(id)]]) : [[slug(), chosen.map(item)]];
           files = [];
-          for (const [n, items] of groups) files.push({ name: n + '.step', data: new Uint8Array(await brepSTEP(items).arrayBuffer()) });
+          for (const [n, items] of groups) files.push({ name: n + '.step', data: await brepSTEP(items) });
         } else {
           files = st.separate ? chosen.map(id => ({ name: fname(id) + '.stl', data: toBinarySTL(niOf(id), bodyName(id)) }))
             : [{ name: slug() + '.stl', data: toBinarySTL(mergeBodies(chosen.map(niOf)), doc.name) }];
@@ -788,7 +788,7 @@ function setEngineBadge() {
   const b = $('#engineBadge');
   const txt = { loading: 'Loading exact engine…', ready: 'Exact engine', failed: 'Mesh engine' }[engineState];
   b.className = 'engine ' + engineState; b.innerHTML = '<span class="dot"></span><span class="et">' + txt + '</span>';
-  b.title = engineState === 'ready' ? 'OpenCascade B-rep kernel: exact solids, fillets, chamfers, shells, STEP export'
+  b.title = engineState === 'ready' ? 'OpenCascade B-rep kernel: exact solids, fillets, chamfers, shells, STEP export. ' + (engineMode === 'worker' ? 'Runs in the background, so long rebuilds do not pause the interface.' : 'Runs on the page (this browser would not start a background worker).')
     : engineState === 'loading' ? 'Downloading the OpenCascade kernel. You can keep working meanwhile.' : 'The exact engine could not start (' + engineMsg + '). Modeling continues with the mesh engine; fillet, chamfer, shell and STEP are unavailable.';
 }
 $('#engineBadge').addEventListener('click', () => toast($('#engineBadge').title));
@@ -796,16 +796,7 @@ async function loadEngine() {
   engineState = 'loading'; setEngineBadge();
   try {
     if (typeof WebAssembly !== 'object') throw new Error('WebAssembly is not available');
-    const [glue, rep] = await Promise.all([import('replicad-occ'), import('replicad')]);
-    const res = await fetch('engine/occ-gz.wasm');
-    if (!res.ok) throw new Error('engine file missing (' + res.status + ')');
-    let buf = new Uint8Array(await res.arrayBuffer());
-    if (buf[0] === 0x1f && buf[1] === 0x8b) {
-      if (typeof DecompressionStream === 'undefined') throw new Error('this browser cannot unpack the engine');
-      buf = new Uint8Array(await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
-    }
-    const oc = await glue.default({ wasmBinary: buf.buffer });
-    rep.setOC(oc); RC = rep;
+    await startEngine();
     engine = 'brep'; engineState = 'ready'; cache = []; mpCache = null;
     setEngineBadge(); scheduleRegen(0);
   } catch (e) {
@@ -830,6 +821,9 @@ if (location.hostname === 'localhost') window.__dw = {
   screen: (x, y, z) => { const v = new THREE.Vector3(x, y, z).project(camera), r = renderer.domElement.getBoundingClientRect(); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; },
   sketchScreen: (x, y) => { const v = new THREE.Vector3(x, y, 0).applyMatrix4(sketchMatrix(featById(sketchId))).project(camera), r = renderer.domElement.getBoundingClientRect(); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; },
   doc: () => JSON.parse(JSON.stringify(doc)),
+  engine: () => engineMode,
+  regen: () => doRegen(),
+  rebuild: async () => { if (isBrep()) await engineReset(); else cache = []; await doRegen(); },
   curveScreen: i => { const sk = featById(sketchId), c = sk.geo.curves[i]; const pts = curvePts(sk, c, id => geoPos(sk, id), cc => geoRadius(sk, cc)); const m = pts[Math.floor(pts.length / 2)], m2 = pts.length === 2 ? [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2] : m; return window.__dw.sketchScreen(m2[0], m2[1]); },
   geo: () => { const sk = featById(sketchId); const st = sk && geoState(sk); return st ? { dof: st.analysis.dof, ok: !!st.solved?.ok, loops: st.loops.profiles.length, regions: st.regions.length, filled: st.regions.filter(r => r.filled).length, sel: [...geoSel] } : null; },
   state: () => ({ mode, sketchTool, features: doc.features.map(f => f.type + ':' + statusOf(f.id).state + (statusOf(f.id).msg ? '(' + statusOf(f.id).msg + ')' : '')), bodies: [...result.bodies.keys()].map(id => bodyName(id) + '=' + fix(massProps().bodies.find(b => b.id === id)?.volume || 0, 0)) }),

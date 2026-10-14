@@ -11,16 +11,26 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const src = f => fs.readFileSync(path.join(root, 'src', f), 'utf8');
 const pkg = name => JSON.parse(fs.readFileSync(path.join(root, 'node_modules', name, 'package.json'), 'utf8')).version;
 
-// Concatenation order matters: later modules use functions from earlier ones.
-const MODULES = ['solver', 'kernel', 'brep', 'icons', 'core', 'ribbon', 'panels', 'interact', 'sketchui'];
 const strip = s => s.split('\n').filter(l => !/^import /.test(l)).map(l => l.replace(/^export /, '')).join('\n');
+// Concatenation order matters: later modules use functions from earlier ones.
+const MODULES = ['solver', 'kernel', 'engineclient', 'icons', 'core', 'ribbon', 'panels', 'interact', 'sketchui'];
+// The exact kernel runs in a Web Worker: solver + kernel + brep + host wrapped in one self-contained async function.
+// The page sends engineFactory.toString() to the worker, or calls it directly when workers are blocked.
+const ENGINE = ['solver', 'kernel', 'brep', 'enginehost'];
+const engineFactory = `async function engineFactory(urls) {
+const THREE = await import(urls.three);
+class Brush { } class Evaluator { } const ADDITION = 0, SUBTRACTION = 1, INTERSECTION = 2;   // mesh booleans are not used here
+const RCmod = await import(urls.replicad);
+${ENGINE.map(m => `// ---- ${m} ----\n` + strip(src(m + '.js'))).join('\n')}
+return engineHost(RCmod);
+}`;
 const header = `import * as THREE from 'three';
 import { Brush, Evaluator, ADDITION, SUBTRACTION, INTERSECTION } from 'three-bvh-csg';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 `;
-const js = header + MODULES.map(m => `// ---- ${m} ----\n` + strip(src(m + '.js'))).join('\n');
+const js = header + MODULES.map(m => `// ---- ${m} ----\n` + strip(src(m + '.js'))).join('\n') + '\n// ---- engine (runs in a worker) ----\n' + engineFactory;
 
 // Keep the import map in step with installed versions.
 const versions = { three: pkg('three'), 'three-mesh-bvh': pkg('three-mesh-bvh'), 'three-bvh-csg': pkg('three-bvh-csg'), replicad: pkg('replicad'), 'replicad-opencascadejs': pkg('replicad-opencascadejs') };

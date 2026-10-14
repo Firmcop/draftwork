@@ -45,6 +45,8 @@ src/
   style.css      design tokens (light/dark) and layout
   kernel.js      mesh kernel: profiles, extrude/revolve, CSG booleans, expressions, STL/ZIP writers
   brep.js        exact kernel on OpenCascade (replicad): same feature model + fillet/chamfer/shell, STEP
+  enginehost.js  message interface to the exact kernel (runs in a Web Worker)
+  engineclient.js page side: starts the worker (or runs inline), body proxies, picking data
   icons.js       icon set
   core.js        document model, state, undo/redo, three.js scene, display, mass properties
   solver.js      sketch geometry, constraint solver (minimum-norm Gauss-Newton), DOF analysis, loop detection

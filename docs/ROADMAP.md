@@ -22,11 +22,11 @@ Done
 - [x] Sketch trim (cuts back to crossings, keeps the new ends attached)
 - [x] Sketch extend; fit-point splines (exact cubic Béziers in both the arrangement and the B-rep)
 - [x] Press Pull on flat faces (pull out to add, push in to cut)
+- [x] Exact kernel runs in a Web Worker (falls back to the page when workers are blocked)
 
 Next
 - [ ] Sketch text; point-on-spline and tangent-to-spline constraints; trim/offset of splines
 - [ ] Press Pull on curved faces (offset face) and edges (fillet); sweep with guide rails/twist
-- [ ] Run the kernel in a Web Worker so long rebuilds don't pause the UI
 - [ ] Desktop packaging (Tauri)
 
 ## Phase 2 — Drawings, assemblies, animation
