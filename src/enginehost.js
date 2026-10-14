@@ -83,9 +83,18 @@ function engineHost(RCmod) {
       if (op === 'mesh') { const t = a.tok; const p = meshPayload(t, true); if (p) shipped.add(t); return p; }
       if (op === 'import') { const n = await brepImportSTEP(a.fileId, a.text); cacheArr = []; return n; }
       if (op === 'step') {
-        const items = a.items.map(x => ({ shape: shapeOf.get(x.tok), name: x.name, color: x.color }));
-        if (items.some(x => !x.shape)) throw new Error('That body is no longer available. Try again after the rebuild.');
-        return new Uint8Array(await brepSTEP(items).arrayBuffer());
+        if (a.items.some(x => !shapeOf.get(x.tok))) throw new Error('That body is no longer available. Try again after the rebuild.');
+        const temp = [];
+        const items = a.items.map(x => {
+          let shape = shapeOf.get(x.tok);
+          if (x.place) {   // assembled position of a jointed component
+            shape = shape.clone();
+            if (x.place.angle > 1e-9) shape = shape.rotate(x.place.angle, [0, 0, 0], x.place.axis);
+            shape = shape.translate(x.place.move); temp.push(shape);
+          }
+          return { shape, name: x.name, color: x.color };
+        });
+        try { return new Uint8Array(await brepSTEP(items).arrayBuffer()); } finally { temp.forEach(t => t.delete?.()); }
       }
       throw new Error('Unknown engine request ' + op);
     } catch (e) { throw new Error(occMsg(e)); }

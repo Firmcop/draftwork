@@ -152,3 +152,14 @@ test('press pull offsets curved faces: holes shrink or grow, bosses thicken', ()
   r = K.regenerateBrep([...f, { id: 'p', type: 'presspull', edges: [hole], distance: 6 }]);
   assert.equal(r.status.get('p').state, 'error', 'closing a hole past its axis is refused');
 });
+
+test('round edges carry their center and axis (joint origins)', () => {
+  const r = K.regenerateBrep([{ id: 'c', type: 'cylinder', plane: 'XY', cx: 12, cy: -3, diameter: 10, h: 20, op: 'new' }]);
+  const circles = [...K.brepSigMap([...r.bodies.values()][0], 'edge').values()].filter(s => s.type === 'CIRCLE');
+  assert.ok(circles.length >= 2, 'rims found (OCC may split each into arcs)');
+  for (const s of circles) {
+    near(s.cc[0], 12, 1e-6, 'center x'); near(s.cc[1], -3, 1e-6, 'center y');
+    near(Math.abs(s.ax[2]), 1, 1e-9, 'axis along Z');
+  }
+  near(Math.max(...circles.map(s => s.cc[2])), 20, 1e-6, 'top rim at z = 20');
+});

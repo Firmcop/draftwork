@@ -51,8 +51,8 @@ cmd('properties', 'Properties', 'properties', { run: () => openPropertiesModal()
 planned('insderive', 'Insert Derive', 'derive', P2); planned('decal', 'Decal', 'decal', P2); planned('canvas', 'Canvas', 'canvas', P2);
 cmd('insstep', 'Insert STEP', 'insertmesh', { run: () => startImportSTEP() }); planned('insmesh', 'Insert Mesh', 'insertmesh', P1); planned('inssvg', 'Insert SVG', 'insertsvg', P1); planned('insdxf', 'Insert DXF', 'insertsvg', P1);
 // assemble
-planned('newcomp', 'New Component', 'component', P2); planned('joint', 'Joint', 'joint', P2, { key: 'J' }); planned('asbuilt', 'As-built Joint', 'joint', P2);
-planned('rigid', 'Rigid Group', 'component', P2); planned('drive', 'Drive Joints', 'motion', P2); planned('motionlink', 'Motion Link', 'motion', P2); planned('contact', 'Enable Contact Sets', 'interference', P2);
+cmd('newcomp', 'New Component', 'component', { run: () => newComponent() }); cmd('joint', 'Joint', 'joint', { key: 'J', run: () => newJoint() }); planned('asbuilt', 'As-built Joint', 'joint', P2);
+planned('rigid', 'Rigid Group', 'component', P2); cmd('drive', 'Drive Joints', 'motion', { run: () => { const j = (selJoint && joints().find(x => x.id === selJoint)) || joints().at(-1); j ? editJoint(j.id) : toast('There are no joints yet'); } }); planned('motionlink', 'Motion Link', 'motion', P2); planned('contact', 'Enable Contact Sets', 'interference', P2);
 // select
 cmd('select', 'Select', 'select', { run: () => cancelModes(true) });
 planned('window', 'Window Selection', 'window'); planned('filters', 'Selection Filters', 'filter');

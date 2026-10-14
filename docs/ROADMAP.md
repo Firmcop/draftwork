@@ -31,8 +31,19 @@ Next
 - [ ] Press Pull on edges (fillet) and fillet faces (change radius); offset faces that meet neighbours at an angle; sweep with guide rails/twist
 - [ ] Desktop packaging (Tauri)
 
-## Phase 2 — Drawings, assemblies, animation
-Components, joints, motion; 2D drawings with dimensions; render; add-ins.
+## Phase 2 — Drawings, assemblies, animation *(started)*
+
+Done
+- [x] Components (group bodies; ground)
+- [x] Joints: rigid, revolute, slider, cylindrical, planar; origins on flat faces and round edges; offset, flip; live values
+- [x] Joint animation; assembled positions in display, mass properties, STL and STEP export
+- [x] Joint origins re-found after rebuilds; sketches on a component's face move with it
+
+Next
+- [ ] Closed loops of joints (four-bar linkages); joint limits; drag to move along free axes
+- [ ] As-built joints, rigid groups, motion links; contact sets
+- [ ] Joints and components in the timeline; components as separate designs (external references)
+- [ ] 2D drawings with dimensions; render; add-ins
 
 ## Phase 3 — Manufacturing
 2.5D milling, routing, laser/plasma toolpaths, G-code post-processors; sheet metal; plastic design; nesting.

@@ -87,7 +87,7 @@ async function engineRegen(features, rollback) {
 }
 function engineReset() { return engineCall('reset'); }
 async function brepImportSTEP(fileId, text) { const n = await engineCall('import', { fileId, text }); importsRead.add(fileId); return n; }
-function brepSTEP(items) { return engineCall('step', { items: items.map(({ shape, name, color }) => ({ tok: shape, name, color })) }); }
+function brepSTEP(items) { return engineCall('step', { items: items.map(({ shape, name, color, place }) => ({ tok: shape, name, color, place })) }); }
 
 // ---- per-body data for display and picking ----
 const EMPTY_MESH = { display: new THREE.BufferGeometry(), edgeGeom: new THREE.BufferGeometry(), triFace: new Float64Array(0), segEdge: new Float64Array(0) };

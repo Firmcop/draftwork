@@ -30,6 +30,7 @@ function deleteFeature(id) {
 function setHint(t) { $('#hint').textContent = t || ''; }
 function defaultHint() {
   if (pick) return setHint(pick.prompt + ' · Esc cancels');
+  if (jointHint()) return setHint(jointHint());
   if (measure) return setHint('Click points on the model to measure between them · Esc closes');
   if (mode === 'sketch') {
     const t = { select: geoSel.size ? geoSel.size + ' selected · apply a constraint, press D to dimension, Delete to remove' : 'Click geometry to select it (Shift adds). Drag points and lines to reshape.',
@@ -88,7 +89,7 @@ function newProfileFeature(type) {
 function startCreateSketch() {
   startPick({ prompt: 'Select a plane or flat face to sketch on', planes: true, faces: true, then: c => {
     checkpoint();
-    const f = { id: uid(), type: 'sketch', name: nextName('sketch'), plane: c.plane, offset: c.offset || 0, flip: !!c.flip, profiles: [] };
+    const f = { id: uid(), type: 'sketch', name: nextName('sketch'), plane: c.plane, offset: c.offset || 0, flip: !!c.flip, profiles: [], ...(c.body && compOfBody(c.body) ? { body: c.body } : {}) };
     insertFeature(f); lastSketchId = f.id;
     doRegen(); enterSketch(f.id); setSketchTool('rect2');
   } });
@@ -405,12 +406,12 @@ function openExportDialog(only) {
     onOK: () => {
       const chosen = ids.filter(id => st.pick.has(id));
       if (!chosen.length) { toast('Choose at least one body'); return; }
-      const niOf = id => { const b = result.bodies.get(id); return b.shape ? brepGeomNI(b) : b.geom; };
+      const niOf = id => { const b = result.bodies.get(id), g = b.shape ? brepGeomNI(b) : b.geom, m = bodyXf(id); return m === IDENT ? g : g.clone().applyMatrix4(m); };   // assembled position
       const fname = id => bodyName(id).replace(/[^a-z0-9]+/gi, '-') || 'body';
       (async () => {
         let files;
         if (st.format === 'step' && isBrep()) {
-          const item = id => ({ shape: result.bodies.get(id).shape, name: bodyName(id), color: bodyColor(id) });
+          const item = id => ({ shape: result.bodies.get(id).shape, name: bodyName(id), color: bodyColor(id), place: bodyXf(id) === IDENT ? null : xfParts(bodyXf(id)) });
           const groups = st.separate ? chosen.map(id => [fname(id), [item(id)]]) : [[slug(), chosen.map(item)]];
           files = [];
           for (const [n, items] of groups) files.push({ name: n + '.step', data: await brepSTEP(items) });
@@ -514,7 +515,7 @@ function pickAt(e) {
   // A face beats a plane at (nearly) the same depth: origin planes often slice through parts.
   const firstBody = hits.find(x => x.object.userData.body);
   if (firstBody) hits = hits.filter(x => x.object.userData.body || x.distance < firstBody.distance - Math.max(0.05, firstBody.distance * 1e-3));
-  for (const hit of hits) {
+  for (let hit of hits) {
     const ud = hit.object.userData;
     if (ud.plane) {
       const M = PLANES[ud.plane] ? planeMatrix(ud.plane, 0) : planeMatrixOf(ud.plane);
@@ -522,6 +523,8 @@ function pickAt(e) {
       return { plane: ud.plane, offset: 0, flip: false, M, local: { x: snapHalf(l.x), y: snapHalf(l.y) }, label: PLANES[ud.plane] ? ud.plane + ' plane' : featById(ud.plane)?.name };
     }
     if (ud.body) {
+      // work in the body's as-modeled coordinates (its component may be moved by joints)
+      hit = { ...hit, point: hit.point.clone().applyMatrix4(bodyXf(ud.body).clone().invert()) };
       const n = hit.face.normal.clone(), a = [Math.abs(n.x), Math.abs(n.y), Math.abs(n.z)];
       const ax = a.indexOf(Math.max(...a));
       if (a[ax] < 0.999) {
@@ -534,7 +537,7 @@ function pickAt(e) {
         }
         const frame = frameFromPoint(hit.point, nn);
         const M = planeMatrix(frame, 0, false);
-        return { plane: frame, offset: 0, flip: false, face: true, M, local: { x: 0, y: 0 }, label: `Angled face of ${bodyName(ud.body)}` };
+        return { plane: frame, offset: 0, flip: false, face: true, body: ud.body, M, local: { x: 0, y: 0 }, label: `Angled face of ${bodyName(ud.body)}` };
       }
       const p = hit.point; let base, offset, flip;
       if (ax === 2) { base = 'XY'; offset = p.z; flip = n.z < 0; }
@@ -543,7 +546,7 @@ function pickAt(e) {
       offset = Math.round(offset * 1000) / 1000;
       const M = planeMatrix(base, offset, flip);
       const l = p.clone().applyMatrix4(M.clone().invert());
-      return { plane: base, offset, flip, face: true, M, local: { x: snapHalf(l.x), y: snapHalf(l.y) }, label: `Face of ${bodyName(ud.body)} (${base} at ${fmt(offset)} mm${flip ? ', facing back' : ''})` };
+      return { plane: base, offset, flip, face: true, body: ud.body, M, local: { x: snapHalf(l.x), y: snapHalf(l.y) }, label: `Face of ${bodyName(ud.body)} (${base} at ${fmt(offset)} mm${flip ? ', facing back' : ''})` };
     }
   }
   return null;
@@ -578,6 +581,7 @@ viewport.addEventListener('pointerup', e => {
     if (c.invalid) { toast(c.msg); return; }
     completePick(c); return;
   }
+  if (jointEdit?.stage && jointPickAt(e)) return;
   const rf = regionDialogFeature();
   if (rf && toggleRegion(rf, regionAt(e, rf))) return;
   const ef = edgeDialogFeature();
@@ -822,6 +826,8 @@ if (location.hostname === 'localhost') window.__dw = {
   sketchScreen: (x, y) => { const v = new THREE.Vector3(x, y, 0).applyMatrix4(sketchMatrix(featById(sketchId))).project(camera), r = renderer.domElement.getBoundingClientRect(); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; },
   doc: () => JSON.parse(JSON.stringify(doc)),
   engine: () => engineMode,
+  setDoc: d => { checkpoint(); doc = upgradeDoc(d); afterDocReplace(); },
+  assembly: () => ({ comps: comps().map(c => ({ name: c.name, bodies: c.bodies.length, moved: compXf.has(c.id) && !compXf.get(c.id).equals(IDENT) })), joints: joints().map(j => j.name + ':' + (jointStatus.get(j.id)?.state || '?')), xf: Object.fromEntries([...compXf].map(([k, m]) => [compById(k)?.name, m.elements.map(v => Math.round(v * 1e4) / 1e4)])) }),
   regen: () => doRegen(),
   rebuild: async () => { if (isBrep()) await engineReset(); else cache = []; await doRegen(); },
   curveScreen: i => { const sk = featById(sketchId), c = sk.geo.curves[i]; const pts = curvePts(sk, c, id => geoPos(sk, id), cc => geoRadius(sk, cc)); const m = pts[Math.floor(pts.length / 2)], m2 = pts.length === 2 ? [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2] : m; return window.__dw.sketchScreen(m2[0], m2[1]); },

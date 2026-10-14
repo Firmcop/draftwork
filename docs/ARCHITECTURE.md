@@ -75,6 +75,14 @@ The exact engine runs in a **Web Worker**, so a long rebuild never freezes the i
 - Picking, reference matching (same rule as `matchRefs`), measurements and mass properties all work from that shipped data, so the page never waits on the worker except for rebuilds, STEP import and STEP export.
 - Edits made while a rebuild runs queue exactly one more rebuild with the latest document.
 
+## Assemblies
+
+`doc.components = [{ id, name, bodies: [bodyId], grounded }]` groups bodies; bodies outside every component belong to the fixed root. `doc.joints = [{ id, name, type, a, b, angle, distance, x, y, offset, flip }]` ties origin `a` (on the part that moves) to origin `b`. An origin is `{ body, kind: 'face' | 'edge', sig }`: the signature of a flat face (center, normal) or a round edge (center `cc`, axis `ax`, computed in `edgeSig`).
+
+`solveAssembly` (assembly.js) runs after every rebuild and whenever a joint changes. Each origin is re-found on the rebuilt body (same kind and direction, similar size, nearest; more forgiving than fillet picks) and turned into a frame `F` (z along the normal or axis). Joints are solved as a tree grown from the fixed parts: `T_a = T_b · F_b · M · F_a⁻¹`, where `M = Tz(offset) · motion(values) · Rx(π unless flipped)` so origins face each other by default. A joint whose two sides are already placed (a closed loop) is only checked and flagged when it does not hold.
+
+The result is one transform per component. Display (mesh matrices), pick overlays, mass properties and STL export apply it on the page; STEP export sends a rotation and translation per body to the worker. Features keep modeling in as-modeled coordinates: picks on a moved component are mapped back through the inverse transform, and a sketch made on a component's face records that body so it is drawn moving with it. Animation sweeps the joint values in a preview (no document edits, no rebuild).
+
 ## UI
 
 - `ribbon.js` — one registry of commands (`cmd` for working ones, `planned` with a roadmap phase for the rest). Tabs and dropdowns are data.

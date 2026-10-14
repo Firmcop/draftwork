@@ -270,7 +270,8 @@ function planeMatrixOf(ref, offset = 0, flip = false) {
     return planeMatrix(p.base, p.offset + (+offset || 0), !!flip !== !!p.flip);
   } catch (e) { return planeMatrix('XY', 0); }
 }
-function sketchMatrix(sk) { const r = resolvedById(sk.id) || sk; return planeMatrixOf(sk.plane, r.offset, sk.flip); }
+// sketches made on a component's face move with that component
+function sketchMatrix(sk) { const r = resolvedById(sk.id) || sk; return bodyXf(sk.body).clone().multiply(planeMatrixOf(sk.plane, r.offset, sk.flip)); }
 
 // ---------- bodies display ----------
 const shownBodies = new Map(); // id -> {geom, mesh, edges, cap}
@@ -304,6 +305,7 @@ function updateScene() {
     bodiesGroup.add(mesh, edges, cap);
     shownBodies.set(id, { rec: b, mesh, edges, cap, own });
   }
+  applyBodyTransforms();
   const inSketch = mode === 'sketch';
   const secOn = !!section && !section.hidden;
   const clip = secOn ? [sectionPlane] : [];
@@ -442,6 +444,7 @@ function refreshOverlays() {
 let pickHover = null, edgeHover = null;
 function drawToolsOverlay() {
   clearGroup(toolsOverlay);
+  drawJointOverlay(toolsOverlay);
   if (measure && measure.pts.length) {
     for (const p of measure.pts) {
       const s = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 8), new THREE.MeshBasicMaterial({ color: colors.select, depthTest: false }));
@@ -474,6 +477,7 @@ function drawToolsOverlay() {
     const srcB = shownSource();
     for (const [, b] of srcB) {
       if (!b.shape || bodyHidden(b.id)) continue;
+      const bg = new THREE.Group(); bg.matrixAutoUpdate = false; bg.matrix.copy(bodyXf(b.id)); toolsOverlay.add(bg);   // follows its component
       const m = brepMeshOf(b), sel = brepRefHashes(b, ef.edges || [], FACE_PICK.has(ef.type) ? 'face' : 'edge');
       const hov = edgeHover && edgeHover.body === b.id ? edgeHover.hash : null;
       if (FACE_PICK.has(ef.type)) {
@@ -484,7 +488,7 @@ function drawToolsOverlay() {
           for (let t = 0; t < m.triFace.length; t++) if (set.has(m.triFace[t])) for (let k = 0; k < 3; k++) { const v = idx[t * 3 + k]; pos.push(P[v * 3], P[v * 3 + 1], P[v * 3 + 2]); }
           const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
           const mm = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: op, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, side: THREE.DoubleSide, depthWrite: false }));
-          mm.renderOrder = 8; toolsOverlay.add(mm);
+          mm.renderOrder = 8; bg.add(mm);
         }
       } else {
         for (const [set, col] of [[sel, colors.select], [new Set(hov != null ? [hov] : []), colors.accent]]) {
@@ -492,13 +496,13 @@ function drawToolsOverlay() {
           const pos = [];
           for (let sgi = 0; sgi < m.segEdge.length; sgi++) if (set.has(m.segEdge[sgi])) { const a = m.edgeGeom.attributes.position.array; for (let k = 0; k < 6; k++) pos.push(a[sgi * 6 + k]); }
           const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-          const ls = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: col, depthTest: false, linewidth: 2 })); ls.renderOrder = 9; toolsOverlay.add(ls);
+          const ls = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: col, depthTest: false, linewidth: 2 })); ls.renderOrder = 9; bg.add(ls);
           // thicker look: a second pass slightly offset toward the camera is not portable; draw tubes for selected edges
           if (set === sel) for (let sgi = 0; sgi < m.segEdge.length; sgi++) if (set.has(m.segEdge[sgi])) {
             const a = m.edgeGeom.attributes.position.array, A = new THREE.Vector3(a[sgi * 6], a[sgi * 6 + 1], a[sgi * 6 + 2]), B = new THREE.Vector3(a[sgi * 6 + 3], a[sgi * 6 + 4], a[sgi * 6 + 5]);
             const L = A.distanceTo(B); if (L < 1e-6) continue;
             const cyl = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.35, L, 6), new THREE.MeshBasicMaterial({ color: col, depthTest: false }));
-            cyl.position.copy(A).add(B).multiplyScalar(0.5); cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize()); cyl.renderOrder = 9; toolsOverlay.add(cyl);
+            cyl.position.copy(A).add(B).multiplyScalar(0.5); cyl.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize()); cyl.renderOrder = 9; bg.add(cyl);
           }
         }
       }
@@ -525,7 +529,8 @@ function massProps() {
       const pr = brepProps(b), g = bodyGeomOf(b); g.computeBoundingBox();
       const dens = MATERIALS[bodyMaterial(id)]?.density || 1, mass = pr.volume / 1000 * dens;
       bodies.push({ id, name: bodyName(id), material: bodyMaterial(id), volume: pr.volume, area: pr.area, mass, com: pr.com.clone(), size: g.boundingBox.getSize(new THREE.Vector3()), tris: g.index ? g.index.count / 3 : 0, hidden: bodyHidden(id), exact: true });
-      if (!bodyHidden(id)) { M += mass; C.add(pr.com.clone().multiplyScalar(mass)); }
+      const com = pr.com.clone().applyMatrix4(bodyXf(id)); bodies[bodies.length - 1].com = com;
+      if (!bodyHidden(id)) { M += mass; C.add(com.clone().multiplyScalar(mass)); }
       continue;
     }
     const p = b.geom.attributes.position.array; let V = 0; const c = new THREE.Vector3();
@@ -580,6 +585,7 @@ function doRegen() {
 function finishRegen() {
   $('#busy').hidden = true;
   if (selBody && !result.bodies.has(selBody)) selBody = null;
+  solveAssembly();
   updateScene(); renderTimeline(); renderBrowser(); renderInfo(); refreshDialogStatus(); persist();
 }
 

@@ -48,14 +48,33 @@ function renderBrowser() {
     add(2, { icon: 'section', label: 'Section ' + section.axis, vis: !section.hidden, onVis: () => { section.hidden = !section.hidden; applySectionVisibility(); }, onDbl: () => openSectionDialog(),
       menu: () => [{ label: 'Edit Section', icon: 'section', action: () => openSectionDialog() }, { label: 'Delete', icon: 'delete', action: () => { section = null; updateScene(); renderBrowser(); renderRibbon(); } }] });
   }
-  const bodies = [...result.bodies.values()];
-  if (bodies.length && add(1, { key: 'bodies', icon: 'folder', label: 'Bodies', sub: String(bodies.length), vis: !doc.hideAllBodies, onVis: () => { doc.hideAllBodies = !doc.hideAllBodies; persist(); updateScene(); renderBrowser(); renderInfo(); } })) {
-    for (const b of bodies) {
-      add(2, { icon: 'bodyi', label: bodyName(b.id), swatch: bodyColor(b.id), sel: selBody === b.id, vis: !doc.bodyMeta[b.id]?.hidden, title: bodyName(b.id) + ' · ' + bodyMaterial(b.id),
-        onVis: () => { meta(b.id).hidden = !meta(b.id).hidden; persist(); mpCache = null; updateScene(); renderBrowser(); renderInfo(); },
-        onClick: () => selectBody(b.id), onDbl: () => { renaming = 'b:' + b.id; renderBrowser(); }, renameKey: 'b:' + b.id, onRename: v => { meta(b.id).name = v; persist(); mpCache = null; renderInfo(); },
-        menu: () => bodyMenu(b.id) });
+  const bodyNode = (lvl, b) => add(lvl, { icon: 'bodyi', label: bodyName(b.id), swatch: bodyColor(b.id), sel: selBody === b.id, vis: !doc.bodyMeta[b.id]?.hidden, title: bodyName(b.id) + ' · ' + bodyMaterial(b.id),
+    onVis: () => { meta(b.id).hidden = !meta(b.id).hidden; persist(); mpCache = null; updateScene(); renderBrowser(); renderInfo(); },
+    onClick: () => selectBody(b.id), onDbl: () => { renaming = 'b:' + b.id; renderBrowser(); }, renameKey: 'b:' + b.id, onRename: v => { meta(b.id).name = v; persist(); mpCache = null; renderInfo(); },
+    menu: () => bodyMenu(b.id) });
+  if (comps().length && add(1, { key: 'components', icon: 'folder', label: 'Components', sub: String(comps().length) })) {
+    for (const c of comps()) {
+      const own = c.bodies.map(id => result.bodies.get(id)).filter(Boolean);
+      if (add(2, { key: 'c:' + c.id, icon: 'component', label: c.name + (c.grounded ? ' (grounded)' : ''), sub: String(own.length), renameKey: 'c:' + c.id,
+        onRename: v => { checkpoint(); c.name = v.trim() || c.name; persist(); }, onDbl: () => { renaming = 'c:' + c.id; renderBrowser(); },
+        menu: () => [{ label: 'Rename', icon: 'params', action: () => { renaming = 'c:' + c.id; renderBrowser(); } },
+          { label: c.grounded ? 'Unground' : 'Ground', icon: 'component', action: () => toggleGround(c.id) },
+          '-', { label: 'Dissolve (bodies return to the fixed set)', icon: 'delete', action: () => dissolveComponent(c.id) }] }))
+        for (const b of own) bodyNode(3, b);
     }
+  }
+  if (joints().length && add(1, { key: 'joints', icon: 'folder', label: 'Joints', sub: String(joints().length) })) {
+    for (const j of joints()) {
+      const st = jointStatus.get(j.id);
+      add(2, { icon: 'joint', label: j.name, sub: JOINT_TYPES[j.type]?.label, sel: selJoint === j.id, err: st?.state === 'error' || st?.state === 'warn', dim: st?.state === 'suppressed', title: st?.msg || '',
+        onClick: () => selectJoint(j.id), onDbl: () => editJoint(j.id), renameKey: 'j:' + j.id, onRename: v => { checkpoint(); j.name = v; persist(); },
+        menu: () => [{ label: 'Edit Joint', icon: 'joint', action: () => editJoint(j.id) }, { label: j.suppressed ? 'Unsuppress' : 'Suppress', icon: 'eye', action: () => toggleJointSuppressed(j.id) },
+          '-', { label: 'Delete', icon: 'delete', action: () => deleteJoint(j.id) }] });
+    }
+  }
+  const bodies = [...result.bodies.values()].filter(b => !compOfBody(b.id));
+  if (bodies.length && add(1, { key: 'bodies', icon: 'folder', label: 'Bodies', sub: String(bodies.length), vis: !doc.hideAllBodies, onVis: () => { doc.hideAllBodies = !doc.hideAllBodies; persist(); updateScene(); renderBrowser(); renderInfo(); } })) {
+    for (const b of bodies) bodyNode(2, b);
   }
   const sketches = doc.features.filter(f => f.type === 'sketch');
   if (sketches.length && add(1, { key: 'sketches', icon: 'folder', label: 'Sketches' })) {
@@ -78,6 +97,7 @@ function bodyMenu(id) {
     { label: 'Physical Material', icon: 'material', action: () => { selectBody(id); openMaterialDialog(); } },
     { label: 'Appearance', icon: 'appearance', action: () => { selectBody(id); openAppearanceDialog(); } },
     { label: 'Move/Copy', icon: 'move', action: () => { selectBody(id); newMove(); } },
+    ...(compOfBody(id) ? [] : [{ label: 'Create Component', icon: 'component', action: () => { selectBody(id); newComponent(); } }]),
     { label: 'Find in Timeline', icon: 'start', action: () => { const fid = result.bodies.get(id)?.feature; if (fid) selectFeature(fid); } },
     { label: doc.bodyMeta[id]?.hidden ? 'Show' : 'Hide', icon: 'eye', action: () => { meta(id).hidden = !meta(id).hidden; updateScene(); renderBrowser(); } },
     { label: 'Export STL…', icon: 'exportstl', action: () => openExportDialog([id]) },

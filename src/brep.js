@@ -218,7 +218,23 @@ function brepCopies(f, shape) {
 }
 
 // ---- persistent edge / face references (geometric signatures) ----
-function edgeSig(e) { const p = e.pointAt(0.5); let len = 0; try { len = RC.measureLength(e); } catch (x) { } return { p: [p.x, p.y, p.z], len, type: e.geomType }; }
+function edgeSig(e) {
+  const p = e.pointAt(0.5); let len = 0; try { len = RC.measureLength(e); } catch (x) { }
+  const sig = { p: [p.x, p.y, p.z], len, type: e.geomType };
+  if (sig.type === 'CIRCLE') {   // center and axis, for joint origins on round edges
+    try {
+      const q = [0, 0.25, 0.5].map(t => { const v = e.pointAt(t), r = [v.x, v.y, v.z]; v.delete?.(); return r; });
+      const sub = (u, v) => u.map((x, i) => x - v[i]), cr = (u, v) => [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]], dot = (u, v) => u[0] * v[0] + u[1] * v[1] + u[2] * v[2];
+      const ab = sub(q[1], q[0]), ac = sub(q[2], q[0]), n = cr(ab, ac), nn = dot(n, n);
+      if (nn > 1e-18) {
+        const t1 = cr(n, ab).map(x => x * dot(ac, ac)), t2 = cr(ac, n).map(x => x * dot(ab, ab));
+        sig.cc = q[0].map((x, i) => x + (t1[i] + t2[i]) / (2 * nn));
+        const l = Math.sqrt(nn); sig.ax = n.map(x => x / l);
+      }
+    } catch (x) { }
+  }
+  return sig;
+}
 function faceSig(fc) { const c = fc.center; let n = [0, 0, 0]; try { const v = fc.normalAt(); n = [v.x, v.y, v.z]; } catch (x) { } return { c: [c.x, c.y, c.z], n, type: fc.geomType }; }
 const d3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 // For each stored reference, find the closest current edge/face of the same kind (tolerates moderate upstream changes).
