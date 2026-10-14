@@ -72,6 +72,11 @@ function arcAngles(cc, a, b) {
   return [a0, a1];
 }
 function curveDist(sk, c, x, y) {
+  if (c.kind === 'spline') {
+    const pts = curvePts(sk, c, id => geoPos(sk, id)); let d = Infinity;
+    for (let i = 0; i + 1 < pts.length; i++) { const [ax, ay] = pts[i], [bx, by] = pts[i + 1], dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / L)); d = Math.min(d, Math.hypot(x - ax - t * dx, y - ay - t * dy)); }
+    return d;
+  }
   if (c.kind === 'line') {
     const a = geoPos(sk, c.a), b = geoPos(sk, c.b), dx = b.x - a.x, dy = b.y - a.y, L = dx * dx + dy * dy || 1;
     const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / L));
@@ -91,6 +96,7 @@ function pickGeo(sk, hit) {
   for (const c of sk.geo.curves) { const d = curveDist(sk, c, hit.x, hit.y); if (d <= bd) { bd = d; best = c; } }
   return best ? { kind: 'curve', id: best.id, curve: best } : null;
 }
+const curveRefs = c => [c.a, c.b, c.c, ...(c.pts || [])].filter(Boolean);
 function addPoint(g, x, y) { const id = 'p' + uid(); g.points.push({ id, x: Math.round(x * 1e6) / 1e6, y: Math.round(y * 1e6) / 1e6 }); return id; }
 const cid = () => 'k' + uid();
 
@@ -175,9 +181,11 @@ viewport.addEventListener('pointerdown', e => {
   }
   e.stopImmediatePropagation(); e.preventDefault();
   if (sketchTool === 'line') return lineClick(sk, hit);
+  if (sketchTool === 'spline') return splineClick(sk, hit);
   if (sketchTool === 'arc3') return arcClick(sk, hit);
   if (sketchTool === 'fillet2d') return filletClick(sk, hit);
   if (sketchTool === 'trim') return trimClick(sk, hit);
+  if (sketchTool === 'extend') return extendClick(sk, hit);
   gdraw = { kind: 'shape', tool: sketchTool, s: snapPoint(sk, hit), e: null };
   window.addEventListener('pointermove', onGeoMove); window.addEventListener('pointerup', onGeoUp, { once: true });
 }, { capture: true });
@@ -210,7 +218,8 @@ function onGeoMove(e) {
     else if (t.curve.kind === 'circle') {
       const c = g.curves.find(x => x.id === t.id), cc = geoPos(sk, c.c);
       if (typeof c.r === 'number') { c.r = Math.max(0.1, Math.hypot(hit.x - cc.x, hit.y - cc.y)); drag.add(c.id); }
-    } else { move(t.curve.c); move(t.curve.a); move(t.curve.b); }
+    } else if (t.curve.kind === 'spline') { [...new Set(t.curve.pts)].forEach(move); }
+    else { move(t.curve.c); move(t.curve.a); move(t.curve.b); }
     commitGeo(sk, g, { drag, tag: 'drag-' + t.id, quiet: true, noPalette: true, delay: 200 });
   }
 }
@@ -248,6 +257,25 @@ function lineClick(sk, hit) {
   if (id === lineDraft.start) lineDraft = null; else lineDraft.last = id;
   defaultHint(); refreshOverlays();
 }
+// fit-point spline: each click adds a point the curve passes through; click the last point again
+// (or press Enter/Esc) to finish, or the first point to close it
+function splineClick(sk, hit) {
+  const g = cloneGeo(sk.geo), sp = snapPoint(sk, hit);
+  if (!lineDraft) {
+    const id = sp.id || addPoint(g, sp.x, sp.y);
+    if (!sp.id) commitGeo(sk, g, { noRegen: true });
+    lineDraft = { start: id, last: id, hover: null, spline: null };
+    defaultHint(); refreshOverlays(); return;
+  }
+  let id = sp.id;
+  if (id === lineDraft.last) { endLineChain(); return; }
+  if (!id) id = addPoint(g, sp.x, sp.y);
+  if (!lineDraft.spline) { const sid = 's' + uid(); g.curves.push({ id: sid, kind: 'spline', pts: [lineDraft.start, id], a: lineDraft.start, b: id }); lineDraft.spline = sid; }
+  else { const c = g.curves.find(x => x.id === lineDraft.spline); if (!c) { lineDraft = null; return; } c.pts.push(id); c.b = id; }
+  if (!commitGeo(sk, g)) return;
+  if (id === lineDraft.start) lineDraft = null; else lineDraft.last = id;
+  defaultHint(); refreshOverlays();
+}
 function arcClick(sk, hit) {
   const sp = snapPoint(sk, hit);
   gdraw ||= { kind: 'arc', pts: [] };
@@ -268,6 +296,7 @@ function sketchHover(e) {
   if (lineDraft) { const sp = snapPoint(sk, hit); lineDraft.hover = sp; changed = true; }
   if (gdraw?.kind === 'arc') { gdraw.hover = snapPoint(sk, hit); changed = true; }
   if (sketchTool === 'select' && !gdraw) { const gp = pickGeo(sk, hit), id = gp?.id || null; if (id !== geoHover) { geoHover = id; changed = true; } }
+  if (sketchTool === 'extend') { const pl = extendPlan(sk, hit), key = pl ? pl.curve.id + pl.end : null; if (key !== (trimHover?.key ?? null)) { trimHover = pl ? { ext: pl, key } : null; changed = true; } }
   if (sketchTool === 'trim') { const tp = trimPiece(sk, hit); const key = tp ? tp.curve.id + ':' + tp.t0 : null; if (key !== (trimHover?.key ?? null)) { trimHover = tp ? { ...tp, key } : null; changed = true; } }
   if (changed) refreshOverlays();
 }
@@ -276,6 +305,7 @@ function endLineChain() { if (lineDraft) { lineDraft = null; refreshOverlays(); 
 // ---------- drawing ----------
 const GLYPH = { symmetry: '⇋', horizontal: 'H', vertical: 'V', parallel: '∥', perpendicular: '⊥', equal: '=', tangent: 'T', fix: 'Fix', midpoint: 'M', concentric: '◎', collinear: '≡', onLine: '•', onCircle: '•', coincident: '•' };
 function curvePts(sk, c, posOf, radOf) {
+  if (c.kind === 'spline') { const out = []; splineSpans(c, id => { const p = posOf(id); return [p.x, p.y]; }).forEach((B, k) => { for (let i = k ? 1 : 0; i <= 24; i++) out.push(bezPoint(B, i / 24)); }); return out; }
   if (c.kind === 'line') { const a = posOf(c.a), b = posOf(c.b); return [[a.x, a.y], [b.x, b.y]]; }
   const cc = posOf(c.c), r = radOf(c);
   let a0 = 0, a1 = 2 * Math.PI;
@@ -325,7 +355,12 @@ function drawGeo(sk, grp, active) {
   if (!active) return;
   // previews
   const prevCol = colors.select;
-  if (lineDraft?.hover) { const a = posOf(lineDraft.last), b = lineDraft.hover; grp.add(line([[a.x, a.y, 0.09], [b.x, b.y, 0.09]], prevCol, { depthTest: false, order: 8 }));
+  if (lineDraft?.hover && sketchTool === 'spline') {
+    const c = lineDraft.spline && sk.geo.curves.find(x => x.id === lineDraft.spline), ids = c ? c.pts : [lineDraft.start];
+    const P = [...ids.map(id => { const q = posOf(id); return [q.x, q.y]; }), [lineDraft.hover.x, lineDraft.hover.y]];
+    const pts = []; splineBeziers(P).forEach((B, k) => { for (let i = k ? 1 : 0; i <= 24; i++) { const q = bezPoint(B, i / 24); pts.push([q[0], q[1], 0.09]); } });
+    if (pts.length > 1) grp.add(line(pts, prevCol, { depthTest: false, order: 8 }));
+  } else if (lineDraft?.hover) { const a = posOf(lineDraft.last), b = lineDraft.hover; grp.add(line([[a.x, a.y, 0.09], [b.x, b.y, 0.09]], prevCol, { depthTest: false, order: 8 }));
     const o = new CSS2DObject(h('div', { class: 'mlabel' }, fmt(Math.hypot(b.x - a.x, b.y - a.y)) + ' mm')); o.position.set((a.x + b.x) / 2, (a.y + b.y) / 2, 0.1); grp.add(o); }
   if (gdraw?.kind === 'shape' && gdraw.e) {
     const frag = buildShape(gdraw.tool, gdraw.s, gdraw.e);
@@ -337,7 +372,13 @@ function drawGeo(sk, grp, active) {
       const o = new CSS2DObject(h('div', { class: 'mlabel' }, txt)); o.position.set(e2.x, e2.y, 0.1); grp.add(o);
     }
   }
-  if (sketchTool === 'trim' && trimHover) {
+  if (sketchTool === 'extend' && trimHover?.ext) {
+    const { curve: c, end, p } = trimHover.ext, pts = [];
+    if (c.kind === 'line') { const q = end === 'a' ? c.a : c.b; pts.push([q[0], q[1], 0.11], [p[0], p[1], 0.11]); }
+    else { let t0 = end === 'a' ? c.a0 : c.a1, t1 = Math.atan2(p[1] - c.c[1], p[0] - c.c[0]); if (end === 'b') { while (t1 < t0) t1 += TAU; } else { while (t1 > t0) t1 -= TAU; } for (let i = 0; i <= 32; i++) { const t = t0 + (t1 - t0) * i / 32; pts.push([c.c[0] + c.r * Math.cos(t), c.c[1] + c.r * Math.sin(t), 0.11]); } }
+    grp.add(line(pts, colors.select, { depthTest: false, order: 9, dashed: true, dash: 4 * zoom, gap: 2.5 * zoom }));
+  }
+  if (sketchTool === 'trim' && trimHover?.curve) {
     const c = trimHover.curve, n = 32, pts = [];
     for (let i = 0; i <= n; i++) { const t = trimHover.t0 + (trimHover.t1 - trimHover.t0) * i / n; pts.push(c.kind === 'line' ? [c.a[0] + (c.b[0] - c.a[0]) * t, c.a[1] + (c.b[1] - c.a[1]) * t, 0.11] : [c.c[0] + c.r * Math.cos(t), c.c[1] + c.r * Math.sin(t), 0.11]); }
     grp.add(line(pts, colors.err, { depthTest: false, order: 9, dashed: true, dash: 4 * zoom, gap: 2.5 * zoom }));
@@ -467,10 +508,11 @@ function deleteGeoSelection() {
   const g = cloneGeo(sk.geo), del = new Set(geoSel);
   del.delete('O');
   // deleting a point deletes the curves on it; deleting a curve deletes constraints that use it
-  for (const c of g.curves) if ([c.a, c.b, c.c].some(x => del.has(x))) del.add(c.id);
-  const usedBefore = new Set(g.curves.flatMap(c => [c.a, c.b, c.c].filter(Boolean)));
+  for (const c of g.curves) if (c.kind === 'spline' && !del.has(c.id)) { const keep = c.pts.filter((x, i) => !(del.has(x) && i > 0 && i < c.pts.length - 1)); if (keep.length !== c.pts.length && keep.length >= 2) c.pts = keep; }
+  for (const c of g.curves) if (curveRefs(c).some(x => del.has(x))) del.add(c.id);
+  const usedBefore = new Set(g.curves.flatMap(curveRefs));
   g.curves = g.curves.filter(c => !del.has(c.id));
-  const usedAfter = new Set(g.curves.flatMap(c => [c.a, c.b, c.c].filter(Boolean)));
+  const usedAfter = new Set(g.curves.flatMap(curveRefs));
   for (const id of usedBefore) if (!usedAfter.has(id)) del.add(id);     // points left alone by their deleted curves
   g.points = g.points.filter(p => !del.has(p.id));
   g.cons = g.cons.filter(k => !del.has(k.id) && !(k.e || []).some(x => del.has(x)));
@@ -584,6 +626,7 @@ function offsetCircle(sk, g, c, d) {
 }
 function offsetLoop(sk, g, loop, d) {
   const segs = loop.segs, n = segs.length;
+  if (segs.some(sg => sg.t === 'bez')) { toast('Offset does not work on splines yet'); return false; }
   // orientation: shoelace over a polyline of the loop
   let area = 0; const poly = profilePolygon(loop);
   for (let i = 0; i < poly.length; i++) { const p = poly[i], q = poly[(i + 1) % poly.length]; area += p.x * q.y - q.x * p.y; }
@@ -629,16 +672,20 @@ function offsetLoop(sk, g, loop, d) {
 }
 
 // ---------- trim: remove the piece of a curve between crossings ----------
-function trimPiece(sk, hit) {
-  const st = geoState(sk); if (!st?.solved) return null;
-  const curves = arrCurvesFor(st);
+function nearestArrCurve(curves, hit) {
   let best = null, bd = hit.tol;
   for (const c of curves) {
+    if (c.kind === 'bez') continue;   // splines are not trimmed or extended (yet)
     let d, t;
     if (c.kind === 'line') { const dx = c.b[0] - c.a[0], dy = c.b[1] - c.a[1], L = dx * dx + dy * dy; t = Math.max(0, Math.min(1, ((hit.x - c.a[0]) * dx + (hit.y - c.a[1]) * dy) / L)); d = Math.hypot(hit.x - c.a[0] - t * dx, hit.y - c.a[1] - t * dy); }
     else { const raw = Math.atan2(hit.y - c.c[1], hit.x - c.c[0]); let th; if (c.full) th = ((raw % TAU) + TAU) % TAU; else { th = raw; while (th < c.a0 - 1e-9) th += TAU; while (th > c.a0 + TAU) th -= TAU; if (th > c.a1 + 1e-9) continue; } t = th; d = Math.abs(Math.hypot(hit.x - c.c[0], hit.y - c.c[1]) - c.r); }
     if (d <= bd) { bd = d; best = { c, t }; }
   }
+  return best;
+}
+function trimPiece(sk, hit) {
+  const st = geoState(sk); if (!st?.solved) return null;
+  const curves = arrCurvesFor(st), best = nearestArrCurve(curves, hit);
   if (!best) return null;
   const sp = curveSplits(curves).find(s => s.curve.id === best.c.id);
   if (best.c.full) {
@@ -692,7 +739,7 @@ function trimClick(sk, hit) {
     attach(pA, tp.t0); attach(pB, tp.t1);
   }
   // drop points no longer used by any curve (and their constraints), except virtual corners
-  const used = new Set(g.curves.flatMap(x => [x.a, x.b, x.c].filter(Boolean)));
+  const used = new Set(g.curves.flatMap(curveRefs));
   const gone = new Set(g.points.filter(p => !used.has(p.id) && !p.virtual && !g.cons.some(k => k.type === 'fix' && k.e[0] === p.id)).map(p => p.id));
   g.points = g.points.filter(p => !gone.has(p.id)); g.cons = g.cons.filter(k => !(k.e || []).some(x => gone.has(x)));
   trimHover = null;
@@ -734,4 +781,29 @@ function drawRegions(sk, grp, active) {
     const m = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: op, side: THREE.DoubleSide, depthWrite: false, depthTest: !(active || editing) }));
     m.position.z = 0.03; m.renderOrder = editing ? 7 : 3; grp.add(m);
   }
+}
+
+// ---------- extend: lengthen the nearest end of a line or arc to the next curve it would meet ----------
+function extendPlan(sk, hit) {
+  const st = geoState(sk); if (!st?.solved) return null;
+  const curves = arrCurvesFor(st), best = nearestArrCurve(curves, hit);
+  if (!best || best.c.full) return null;
+  const c = best.c, end = c.kind === 'line' ? (best.t < 0.5 ? 'a' : 'b') : (best.t - c.a0 < c.a1 - best.t ? 'a' : 'b');
+  const tg = extendTarget(curves, c.id, end);
+  return tg ? { curve: c, end, ...tg } : null;
+}
+function extendClick(sk, hit) {
+  const pl = extendPlan(sk, hit); if (!pl) { toast('Nothing to extend to from that end'); return; }
+  const g = cloneGeo(sk.geo), src = g.curves.find(x => x.id === pl.curve.id);
+  const pid = src[pl.end], shared = g.curves.some(x => x !== src && curveRefs(x).includes(pid)) || pid === 'O';
+  let np;
+  if (shared) { np = addPoint(g, ...pl.p); src[pl.end] = np; }
+  else { np = pid; const q = g.points.find(x => x.id === pid); q.x = Math.round(pl.p[0] * 1e6) / 1e6; q.y = Math.round(pl.p[1] * 1e6) / 1e6; }
+  // the end moves, so anything pinning it (length, a dimension to that point, coincidence with something else) has to go
+  g.cons = g.cons.filter(k => !((k.e || []).includes(src.id) && ['length', 'equal', 'midpoint'].includes(k.type)) && !(!shared && (k.e || []).includes(np) && k.type !== 'construction'));
+  const other = g.curves.find(x => x.id === pl.other.split('#')[0]);
+  const att = other && other.kind !== 'spline' ? { id: cid(), type: other.kind === 'line' ? 'onLine' : 'onCircle', e: [np, other.id] } : null;   // no point-on-spline constraint yet
+  if (att) g.cons.push(att);
+  trimHover = null;
+  if (!commitGeo(sk, g, { quiet: true })) { g.cons = g.cons.filter(k => k !== att); commitGeo(sk, g, { msg: 'Could not extend without breaking other constraints' }); }
 }

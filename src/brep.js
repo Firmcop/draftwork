@@ -43,6 +43,7 @@ function profileDrawing(pr) {
       segs.forEach((sg, i) => {
         const end = i === n - 1 ? segs[0].a : sg.b;
         if (sg.t === 'arc') pen = pen.threePointsArcTo(end, arcMid(sg).mid);
+    else if (sg.t === 'bez') pen = pen.cubicBezierCurveTo(end, sg.P[1], sg.P[2]);
         else if (i < n - 1) pen = pen.lineTo(end);
       });
       return pen.close();
@@ -65,6 +66,7 @@ function loopDrawing(segs) {
   segs.forEach((sg, i) => {
     const end = i === n - 1 ? segs[0].a : sg.b;
     if (sg.t === 'arc') pen = pen.threePointsArcTo(end, arcMid(sg).mid);
+    else if (sg.t === 'bez') pen = pen.cubicBezierCurveTo(end, sg.P[1], sg.P[2]);
     else if (i < n - 1) pen = pen.lineTo(end);
   });
   return pen.close();
@@ -238,6 +240,7 @@ function matchRefs(items, refs, sigOf, key) {
 function edgeFeature(f, out) {
   const refs = f.edges || [];
   const faces = FACE_PICK.has(f.type);
+  if (f.type === 'presspull') return pressPull(f, out);
   if (!refs.length) throw new Error(f.type === 'shell' ? 'Click the faces to remove on the model' : f.type === 'draft' ? 'Click the faces to taper on the model' : 'Click the edges to round on the model');
   const amount = f.type === 'fillet' ? +f.radius : f.type === 'chamfer' ? +f.distance : f.type === 'draft' ? +f.angle : +f.thickness;
   if (f.type === 'draft') { if (!(Math.abs(amount) > 0 && Math.abs(amount) < 60)) throw new Error('Draft angle must be between 0° and 60°'); }
@@ -269,6 +272,35 @@ function edgeFeature(f, out) {
   return matched;
 }
 
+// Press Pull on flat faces: grow the face outward (join) or push it in (cut) by a signed distance.
+function pressPull(f, out) {
+  const refs = f.edges || [];
+  if (!refs.length) throw new Error('Click a flat face on the model');
+  const d = +f.distance;
+  if (!(Math.abs(d) > 1e-6)) throw new Error('Distance must not be 0 mm');
+  let matched = 0;
+  for (const [id, b] of [...out.bodies]) {
+    if (f.body && f.body !== id) continue;
+    const list = b.shape.faces, hs = matchRefs(list, refs, faceSig, 'c');
+    const picked = list.filter(x => hs.has(x.hashCode));
+    try {
+      if (!picked.length) continue;
+      if (picked.some(x => x.geomType !== 'PLANE')) throw new Error('Press Pull works on flat faces for now');
+      let shape = b.shape.clone();
+      for (const face of picked) {
+        const n = face.normalAt(), v = n.multiply(d);
+        const prism = RC.basicFaceExtrusion(face, v);
+        const next = d > 0 ? shape.fuse(prism) : shape.cut(prism);
+        shape.delete?.(); prism.delete?.(); n.delete?.(); v.delete?.();
+        shape = next;
+      }
+      matched += picked.length;
+      bReplace(out, id, T(shape.simplify ? shape.simplify() : shape));
+    } finally { list.forEach(x => x.delete?.()); }
+  }
+  if (!matched) throw new Error('The picked faces no longer exist. Edit this feature and pick them again.');
+  return matched;
+}
 function brepClone(o) {
   return { bodies: new Map(o.bodies), bodyCount: o.bodyCount, lastBody: o.lastBody, sketches: new Map(o.sketches), planes: new Map(o.planes),
     status: new Map(o.status), tools: new Map(o.tools), before: new Map(o.before), beforeBodies: new Map(o.beforeBodies) };
@@ -288,8 +320,8 @@ function regenerateBrep(features, upto = null, cache = null) {
   }
   return out;
 }
-const EDGE_TYPES = new Set(['fillet', 'chamfer', 'shell', 'draft']);
-const FACE_PICK = new Set(['shell', 'draft']);
+const EDGE_TYPES = new Set(['fillet', 'chamfer', 'shell', 'draft', 'presspull']);
+const FACE_PICK = new Set(['shell', 'draft', 'presspull']);
 // Imported STEP shapes, parsed once per file (async) and reused by every rebuild: fileId -> Shape3D[]
 const importShapes = new Map();
 function brepStep(f, out) {
@@ -453,6 +485,7 @@ function segsPen(segs, closed) {
   segs.forEach((sg, i) => {
     const last = i === segs.length - 1, end = closed && last ? segs[0].a : sg.b;
     if (sg.t === 'arc') pen = pen.threePointsArcTo(end, arcMid(sg).mid);
+    else if (sg.t === 'bez') pen = pen.cubicBezierCurveTo(end, sg.P[1], sg.P[2]);
     else if (!(closed && last)) pen = pen.lineTo(end);
   });
   return closed ? pen.close() : pen.done();

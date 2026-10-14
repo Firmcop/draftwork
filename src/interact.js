@@ -36,6 +36,8 @@ function defaultHint() {
       line: lineDraft ? 'Click to add the next point. Click the first point to close; Enter or Esc ends the line.' : 'Click to place the first point. Points snap to existing points.',
       fillet2d: 'Click a corner where two lines meet, then type the radius',
       trim: 'Click the piece of a curve to remove; it is cut back to where it crosses other curves',
+      extend: 'Click near the end of a line or arc to lengthen it to the next curve it meets',
+      spline: lineDraft ? 'Click to add fit points. Click the last point again, or press Enter, to finish; click the first point to close.' : 'Click to place the first fit point',
       arc3: !gdraw?.pts?.length ? 'Click the arc start' : gdraw.pts.length === 1 ? 'Click the arc end' : 'Click a point the arc passes through',
       rect2: 'Drag from corner to corner', rectc: 'Drag from the center to a corner', circle: 'Drag from the center outward', polygon: 'Drag from the center to a corner (6 equal sides)', slot: 'Drag from one end center to the other' }[sketchTool];
     return setHint(t);
@@ -151,9 +153,9 @@ function newEdgeFeature(type) {
   if (!isBrep()) { toast(engineState === 'loading' ? 'The exact geometry engine is still loading. Try again in a moment.' : `${TYPE[type].label} needs the exact geometry engine, which could not start here: ${engineMsg}`); return; }
   if (!bodiesAtInsert().length) { toast('There is no body yet'); return; }
   const snap = JSON.stringify(doc); checkpoint();
-  const f = { id: uid(), type, name: nextName(type), edges: [], ...(type === 'fillet' ? { radius: 2 } : type === 'chamfer' ? { distance: 1 } : type === 'draft' ? { angle: 3, neutral: 'XY', neutralOffset: 0, flipPull: false } : { thickness: 2 }) };
+  const f = { id: uid(), type, name: nextName(type), edges: [], ...(type === 'fillet' ? { radius: 2 } : type === 'chamfer' ? { distance: 1 } : type === 'draft' ? { angle: 3, neutral: 'XY', neutralOffset: 0, flipPull: false } : type === 'presspull' ? { distance: 5 } : { thickness: 2 }) };
   insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
-  toast(type === 'shell' ? 'Click the faces to open' : type === 'draft' ? 'Click the faces to taper' : 'Click the edges to ' + (type === 'fillet' ? 'round' : 'bevel'));
+  toast(type === 'presspull' ? 'Click a flat face to push or pull' : type === 'shell' ? 'Click the faces to open' : type === 'draft' ? 'Click the faces to taper' : 'Click the edges to ' + (type === 'fillet' ? 'round' : 'bevel'));
 }
 // ---- edge / face picking for fillet, chamfer, shell ----
 function mmPerPx() { const r = renderer.domElement.getBoundingClientRect(); return camera.position.distanceTo(controls.target) * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / r.height; }

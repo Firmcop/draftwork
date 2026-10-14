@@ -9,9 +9,9 @@ Parametric CAD in the browser. Sketch on planes or faces, build solids with a fe
 | Area | Features |
 |---|---|
 | Workspace | Workspace switcher, tabbed ribbon (Solid, Surface, Mesh, Sheet Metal, Plastic, Manage, Utilities, contextual Sketch), browser tree, view cube, navigation bar, timeline with history marker, command dialogs with OK/Cancel |
-| Sketch | On origin/offset planes or any flat face (including angled ones). Line, 3-point arc, 2-point and center rectangle, circle, polygon, slot, construction geometry. Sketch fillet, offset and trim. Constraint solver with 12 geometric constraints and driving dimensions (expressions allowed), degrees-of-freedom status, drag to reshape. Crossing curves split the sketch into areas; Extrude and Revolve use the filled areas or the ones you click |
+| Sketch | On origin/offset planes or any flat face (including angled ones). Line, 3-point arc, fit-point spline, 2-point and center rectangle, circle, polygon, slot, construction geometry. Sketch fillet, offset, trim and extend. Constraint solver with 12 geometric constraints and driving dimensions (expressions allowed), degrees-of-freedom status, drag to reshape. Crossing curves split the sketch into areas; Extrude and Revolve use the filled areas or the ones you click |
 | Solid | Extrude, revolve, sweep, pipe, loft, hole (simple/counterbore, flat/drill point), box, cylinder, sphere, torus, rectangular and circular pattern, mirror |
-| Modify | Fillet, chamfer, shell, draft (pick edges/faces on the model), combine, move/copy, remove, physical material, appearance |
+| Modify | Press Pull (flat faces), fillet, chamfer, shell, draft (pick edges/faces on the model), combine, move/copy, remove, physical material, appearance |
 | Bodies | Multiple bodies with New Body / Join / Cut / Intersect |
 | Parameters | User parameters and expressions in any field (`width/2 - edge`, `sqrt(…)`, `sin(…)` …) |
 | Construct | Offset planes |

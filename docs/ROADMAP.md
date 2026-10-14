@@ -20,10 +20,12 @@ Done
 - [x] Sketch fillet (keeps a virtual corner so dimensions survive), sketch offset, symmetry constraint, point-to-line dimension
 - [x] Regions from crossing curves; pick which areas to extrude or revolve by clicking them
 - [x] Sketch trim (cuts back to crossings, keeps the new ends attached)
+- [x] Sketch extend; fit-point splines (exact cubic Béziers in both the arrangement and the B-rep)
+- [x] Press Pull on flat faces (pull out to add, push in to cut)
 
 Next
-- [ ] Sketch extend, splines, text
-- [ ] Press pull; sweep with guide rails/twist
+- [ ] Sketch text; point-on-spline and tangent-to-spline constraints; trim/offset of splines
+- [ ] Press Pull on curved faces (offset face) and edges (fillet); sweep with guide rails/twist
 - [ ] Run the kernel in a Web Worker so long rebuilds don't pause the UI
 - [ ] Desktop packaging (Tauri)
 

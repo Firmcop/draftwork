@@ -355,12 +355,15 @@ function featureFields(f, idx) {
       out.push(section_('Result', segField('Operation', f, 'op', [['join', 'Join'], ['cut', 'Cut'], ['intersect', 'Intersect']]), chkField('Keep tool bodies', f, 'keep')));
       break;
     }
-    case 'fillet': case 'chamfer': case 'shell': case 'draft': {
+    case 'fillet': case 'chamfer': case 'shell': case 'draft': case 'presspull': {
       const n = (f.edges || []).length, what = FACE_PICK.has(f.type) ? 'face' : 'edge';
-      out.push(section_(f.type === 'shell' ? 'Faces to remove' : f.type === 'draft' ? 'Faces to taper' : 'Edges',
+      out.push(section_(f.type === 'presspull' ? 'Faces' : f.type === 'shell' ? 'Faces to remove' : f.type === 'draft' ? 'Faces to taper' : 'Edges',
         h('p', { class: 'note' }, n ? `${n} ${what}${n > 1 ? 's' : ''} selected. Click on the model to add or remove ${what}s.` : `Click the ${what}s on the model.`),
         h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn', type: 'button', disabled: !n, onclick: () => { checkpoint(); f.edges = []; rerenderDialog(); scheduleRegen(0); drawToolsOverlay(); } }, 'Clear selection'))));
-      if (f.type === 'draft') {
+      if (f.type === 'presspull') {
+        out.push(section_('Offset', exField('Distance', f, 'distance', 'mm', { id: 'dx-ppdist' }), h('p', { class: 'note' }, 'Positive pulls the face out and adds material; negative pushes it in and removes material.')));
+        break;
+      } else if (f.type === 'draft') {
         out.push(section_('Pull direction', selField('Neutral plane', f, 'neutral', planeOptions(idx, f.neutral), { id: 'ds-neutral' }), exField('Plane offset', f, 'neutralOffset', 'mm', { id: 'dx-noff' }),
           exField('Angle', f, 'angle', '°', { min: -59, max: 59, id: 'dx-dangle' }), chkField('Flip pull direction', f, 'flipPull'),
           h('p', { class: 'note' }, 'Faces stay put where they cross the neutral plane and tilt away from it.')));

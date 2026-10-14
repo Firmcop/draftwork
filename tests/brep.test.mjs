@@ -123,3 +123,15 @@ test('sweep and pipe along a sketched path with an arc', () => {
     { id: 's', type: 'sweep', path: 'p', profileKind: 'sketch', profile: 'q', op: 'new' }]);
   okAll(r); near(vols(r)[0], 24 * L, 0.5, 'rectangular profile from a sketch');
 });
+
+test('press pull grows or pushes in a flat face', () => {
+  const f = [{ id: 'b', type: 'box', plane: 'XY', cx: 0, cy: 0, w: 40, d: 30, h: 20, op: 'new' }];
+  const sigs = [...K.brepSigMap([...K.regenerateBrep(f).bodies.values()][0], 'face').values()];
+  const top = sigs.find(s => Math.abs(s.c[2] - 20) < 1e-3), side = sigs.find(s => Math.abs(s.c[0] - 20) < 1e-3);
+  let r = K.regenerateBrep([...f, { id: 'p', type: 'presspull', edges: [top], distance: 5 }]); okAll(r);
+  near(vols(r)[0], 40 * 30 * 25, 0.01, 'pull the top up 5 mm');
+  r = K.regenerateBrep([...f, { id: 'p', type: 'presspull', edges: [side], distance: -10 }]); okAll(r);
+  near(vols(r)[0], 30 * 30 * 20, 0.01, 'push a side in 10 mm');
+  r = K.regenerateBrep([...f, { id: 'p', type: 'presspull', edges: [top], distance: 5 }, { id: 'p2', type: 'presspull', edges: [{ ...top, c: [top.c[0], top.c[1], 25] }], distance: -2 }]); okAll(r);
+  near(vols(r)[0], 40 * 30 * 23, 0.01, 'a second press pull finds the moved face');
+});

@@ -24,7 +24,7 @@ planned('patpath', 'Pattern on Path', 'patpath');
 cmd('mirror', 'Mirror', 'mirror', { run: () => newRepeat('mirror') });
 planned('thicken', 'Thicken', 'thicken'); planned('boundary', 'Boundary Fill', 'boundary');
 // solid › modify
-planned('presspull', 'Press Pull', 'presspull', P1, { key: 'Q' });
+cmd('presspull', 'Press Pull', 'presspull', { key: 'Q', run: () => newEdgeFeature('presspull') });
 cmd('fillet', 'Fillet', 'fillet', { key: 'F', run: () => newEdgeFeature('fillet') });
 cmd('chamfer', 'Chamfer', 'chamfer', { run: () => newEdgeFeature('chamfer') }); cmd('shell', 'Shell', 'shell', { run: () => newEdgeFeature('shell') }); cmd('draft', 'Draft', 'draft', { run: () => newEdgeFeature('draft') }); planned('scale', 'Scale', 'scale');
 cmd('combine', 'Combine', 'combine', { run: () => newCombine() });
@@ -83,10 +83,10 @@ cmd('k.rectc', 'Center Rectangle', 'rectc', { run: () => setSketchTool('rectc') 
 cmd('k.circle', 'Center Diameter Circle', 'circle', { key: 'C', run: () => setSketchTool('circle') });
 cmd('k.polygon', 'Circumscribed Polygon', 'polygon', { key: 'P', run: () => setSketchTool('polygon') });
 cmd('k.slot', 'Center to Center Slot', 'slot', { key: 'S', run: () => setSketchTool('slot') });
-cmd('k.arc', 'Three-Point Arc', 'arc', { key: 'A', run: () => setSketchTool('arc3') }); planned('k.spline', 'Fit Point Spline', 'spline'); planned('k.point', 'Point', 'spoint'); planned('k.text', 'Text', 'text');
+cmd('k.arc', 'Three-Point Arc', 'arc', { key: 'A', run: () => setSketchTool('arc3') }); cmd('k.spline', 'Fit Point Spline', 'spline', { run: () => setSketchTool('spline') }); planned('k.point', 'Point', 'spoint'); planned('k.text', 'Text', 'text');
 planned('k.mirror', 'Sketch Mirror', 'mirror'); planned('k.cpattern', 'Sketch Circular Pattern', 'patcirc'); planned('k.project', 'Project', 'insertmesh');
 cmd('k.dimension', 'Sketch Dimension', 'dimension', { key: 'D', run: () => { if (geoSel.size) addDimension(); else { setSketchTool('select'); toast('Select a line, two points, a circle or arc, or two lines, then press D'); } } });
-cmd('k.fillet', 'Sketch Fillet', 'fillet2d', { run: () => setSketchTool('fillet2d') }); cmd('k.trim', 'Trim', 'trim2d', { key: 'T', run: () => setSketchTool('trim') }); planned('k.extend', 'Extend', 'extend'); cmd('k.offset', 'Offset', 'offset2d', { key: 'O', run: () => offsetSelection() });
+cmd('k.fillet', 'Sketch Fillet', 'fillet2d', { run: () => setSketchTool('fillet2d') }); cmd('k.trim', 'Trim', 'trim2d', { key: 'T', run: () => setSketchTool('trim') }); cmd('k.extend', 'Extend', 'extend', { run: () => setSketchTool('extend') }); cmd('k.offset', 'Offset', 'offset2d', { key: 'O', run: () => offsetSelection() });
 cmd('k.move', 'Move/Copy', 'move', { run: () => setSketchTool('select') });
 cmd('k.delete', 'Delete', 'delete', { key: 'Del', run: () => { if (geoSel.size) deleteGeoSelection(); else if (selProfile) deleteProfile(selProfile); else toast('Select something to delete'); } });
 for (const [k, l] of [['coincident', 'Coincident'], ['collinear', 'Collinear'], ['tangent', 'Tangent'], ['equal', 'Equal'], ['parallel', 'Parallel'], ['perpendicular', 'Perpendicular'], ['fix', 'Fix/Unfix'], ['horizontal', 'Horizontal/Vertical'], ['concentric', 'Concentric'], ['midpoint', 'Midpoint']])

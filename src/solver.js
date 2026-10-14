@@ -173,7 +173,7 @@ export function analyzeSketch(geo, solved) {
   for (const [id, i] of sys.pIndex) if (freeVar[i] || freeVar[i + 1]) free.add(id);
   for (const [id, i] of sys.rIndex) if (freeVar[i]) free.add(id);
   for (const c of geo.curves) {
-    const ids = c.kind === 'line' ? [c.a, c.b] : c.kind === 'arc' ? [c.c, c.a, c.b] : [c.c, c.id];
+    const ids = c.kind === 'line' ? [c.a, c.b] : c.kind === 'arc' ? [c.c, c.a, c.b] : c.kind === 'spline' ? c.pts : [c.c, c.id];
     if (ids.some(id => free.has(id))) free.add(c.id);
   }
   return { dof: n - pivots.length, free };
@@ -223,11 +223,13 @@ export function geoProfiles(geo, solved) {
     if (!closed) { const branch = [...comp].some(id => { const c = edges.find(x => x.id === id); return [c.a, c.b].some(e => (adj.get(find(e)) || []).length > 2); }); branch ? info.branching++ : info.open++; continue; }
     const segs = seq.map(({ c, forward }) => {
       const a = P(forward ? c.a : c.b), b = P(forward ? c.b : c.a);
-      if (c.kind === 'line') return { t: 'line', a, b, id: c.id, forward };
+      if (c.kind === 'line') return [{ t: 'line', a, b, id: c.id, forward }];
+      if (c.kind === 'spline') { const sp = splineSpans(c, P); return (forward ? sp : sp.reverse().map(B => [...B].reverse())).map(B => ({ t: 'bez', a: B[0], b: B[3], P: B, id: c.id, forward })); }
       const cc = P(c.c);
-      return { t: 'arc', a, b, c: cc, ccw: forward, id: c.id, forward };
-    });
+      return [{ t: 'arc', a, b, c: cc, ccw: forward, id: c.id, forward }];
+    }).flat();
     if (segs.length === 1 && segs[0].t === 'line') { info.open++; continue; }
+    if (seq.length === 1 && seq[0].c.kind === 'spline' && seq[0].c.a !== seq[0].c.b) { info.open++; continue; }
     profiles.push({ id: 'geo-loop-' + start.id, kind: 'loop', segs });
   }
   return { profiles, info };
@@ -269,7 +271,8 @@ export function geoPaths(geo, solved) {
       used.add(cur.id);
       const forward = find(cur.a) === node;
       const a = P(forward ? cur.a : cur.b), b = P(forward ? cur.b : cur.a);
-      segs.push(cur.kind === 'line' ? { t: 'line', a, b, id: cur.id } : { t: 'arc', a, b, c: P(cur.c), ccw: forward, id: cur.id });
+      if (cur.kind === 'spline') { const sp = splineSpans(cur, P); for (const B of forward ? sp : sp.reverse().map(B => [...B].reverse())) segs.push({ t: 'bez', a: B[0], b: B[3], P: B, id: cur.id }); }
+      else segs.push(cur.kind === 'line' ? { t: 'line', a, b, id: cur.id } : { t: 'arc', a, b, c: P(cur.c), ccw: forward, id: cur.id });
       node = find(forward ? cur.b : cur.a);
       cur = (adj.get(node) || []).find(x => !used.has(x.id)) || null;
     }
@@ -284,6 +287,39 @@ export function geoPaths(geo, solved) {
 // Curves are split where they cross; the faces of the resulting planar graph are the regions.
 // Each region: { outer: segs, holes: [segs], sample: [x, y] interior point, filled: even-odd over closed loops (regions outside every loop count as filled), area }.
 const TAU = Math.PI * 2;
+// ---- fit-point splines: a chain of cubic Béziers through the points (chord-weighted Catmull-Rom tangents) ----
+export function splineBeziers(P, closed = false) {
+  const n = P.length; if (n < 2) return [];
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1]], nrm = v => { const l = Math.hypot(v[0], v[1]) || 1; return [v[0] / l, v[1] / l]; };
+  const m = P.map((p, i) => {
+    if (closed || (i > 0 && i < n - 1)) { const pr = P[(i - 1 + n) % n], nx = P[(i + 1) % n], d0 = Math.hypot(...sub(p, pr)) || 1, d1 = Math.hypot(...sub(nx, p)) || 1; const a = sub(p, pr), b = sub(nx, p); return nrm([a[0] / d0 + b[0] / d1, a[1] / d0 + b[1] / d1]); }
+    return null;
+  });
+  if (!closed) {
+    if (n === 2) { m[0] = m[1] = nrm(sub(P[1], P[0])); }
+    else {   // free ends: reflect the neighbouring tangent about the end chord
+      const end = (i, j) => { const c = nrm(sub(P[j], P[i])), t = m[j], d = 2 * (c[0] * t[0] + c[1] * t[1]); return nrm([d * c[0] - t[0], d * c[1] - t[1]]); };
+      m[0] = end(0, 1); m[n - 1] = end(n - 1, n - 2);   // reflection about the chord line keeps the forward sense
+    }
+  }
+  const out = [], spans = closed ? n : n - 1;
+  for (let i = 0; i < spans; i++) {
+    const a = P[i], b = P[(i + 1) % n], d = Math.hypot(...sub(b, a)) / 3;
+    out.push([a, [a[0] + m[i][0] * d, a[1] + m[i][1] * d], [b[0] - m[(i + 1) % n][0] * d, b[1] - m[(i + 1) % n][1] * d], b]);
+  }
+  return out;
+}
+export const bezPoint = (B, t) => { const u = 1 - t, a = u * u * u, b = 3 * u * u * t, c = 3 * u * t * t, d = t * t * t; return [a * B[0][0] + b * B[1][0] + c * B[2][0] + d * B[3][0], a * B[0][1] + b * B[1][1] + c * B[2][1] + d * B[3][1]]; };
+const bezDer = (B, t) => { const u = 1 - t; return [0, 1].map(k => 3 * u * u * (B[1][k] - B[0][k]) + 6 * u * t * (B[2][k] - B[1][k]) + 3 * t * t * (B[3][k] - B[2][k])); };
+export function bezSub(B, t0, t1) {
+  const split = (Q, t) => { const L = (p, q) => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t]; const a = L(Q[0], Q[1]), b = L(Q[1], Q[2]), c = L(Q[2], Q[3]), d = L(a, b), e = L(b, c), f = L(d, e); return [[Q[0], a, d, f], [f, e, c, Q[3]]]; };
+  if (t1 < t0) return bezSub(B, t1, t0).reverse();
+  let R = t1 < 1 ? split(B, t1)[0] : B.map(p => [...p]);   // always a fresh copy: callers mutate it
+  if (t0 > 0) R = split(R, t0 / (t1 || 1))[1];
+  return R;
+}
+// spline curve (by point ids) -> Bézier spans, given a point lookup
+export function splineSpans(c, P) { const closed = c.pts.length > 2 && c.pts[0] === c.pts[c.pts.length - 1]; const ids = closed ? c.pts.slice(0, -1) : c.pts; return splineBeziers(ids.map(P), closed); }
 function arrCurves(geo, solved) {
   const pts = solved ? solved.points : new Map(geo.points.map(p => [p.id, p]));
   const P = id => { const p = id === 'O' ? { x: 0, y: 0 } : pts.get(id); return [p.x, p.y]; };
@@ -291,6 +327,7 @@ function arrCurves(geo, solved) {
   for (const c of geo.curves) {
     if (c.constr) continue;
     if (c.kind === 'line') { const a = P(c.a), b = P(c.b); if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 1e-9) out.push({ id: c.id, kind: 'line', a, b }); }
+    else if (c.kind === 'spline') splineSpans(c, P).forEach((B, k) => out.push({ id: c.id + '#' + k, src: c.id, kind: 'bez', P: B, a: B[0], b: B[3] }));
     else {
       const cc = P(c.c);
       if (c.kind === 'circle') { const r = solved?.radii.get(c.id) ?? Math.abs(+c.r); if (r > 1e-9) out.push({ id: c.id, kind: 'arc', c: cc, r, a0: 0, a1: TAU, full: true }); }
@@ -301,10 +338,33 @@ function arrCurves(geo, solved) {
 }
 const angIn = (c, th, tol = 1e-9) => { if (c.full) { let t = th % TAU; if (t < 0) t += TAU; return t; } let t = th; while (t < c.a0 - tol) t += TAU; while (t > c.a0 + TAU - tol) t -= TAU; return t <= c.a1 + tol ? t : null; };
 const normAng = (c, th) => { if (c.full) { let t = th % TAU; if (t < 0) t += TAU; return t; } let t = th; while (t < c.a0 - 1e-9) t += TAU; while (t > c.a1 + 1e-9 && t - TAU >= c.a0 - 1e-9) t -= TAU; return t; };
-const cPoint = (c, t) => c.kind === 'line' ? [c.a[0] + (c.b[0] - c.a[0]) * t, c.a[1] + (c.b[1] - c.a[1]) * t] : [c.c[0] + c.r * Math.cos(t), c.c[1] + c.r * Math.sin(t)];
+const cPoint = (c, t) => c.kind === 'bez' ? bezPoint(c.P, t) : c.kind === 'line' ? [c.a[0] + (c.b[0] - c.a[0]) * t, c.a[1] + (c.b[1] - c.a[1]) * t] : [c.c[0] + c.r * Math.cos(t), c.c[1] + c.r * Math.sin(t)];
 // parameters (t on lines, angle on arcs) where curve i meets curve j
+const cDer = (c, t) => c.kind === 'bez' ? bezDer(c.P, t) : c.kind === 'line' ? [c.b[0] - c.a[0], c.b[1] - c.a[1]] : [-c.r * Math.sin(t), c.r * Math.cos(t)];
+// Curves with a Bézier: intersect polylines, then polish each hit with Newton on P(t) = Q(u).
+function bezIntersect(A, B) {
+  const N = 48, poly = c => c.kind === 'bez' ? Array.from({ length: N }, (_, i) => ({ kind: 'line', a: bezPoint(c.P, i / N), b: bezPoint(c.P, (i + 1) / N), t0: i / N, t1: (i + 1) / N })) : [c];
+  const map = (c, piece, t) => c.kind === 'bez' ? piece.t0 + (piece.t1 - piece.t0) * t : t;
+  const res = [];
+  for (const pa of poly(A)) for (const pb of poly(B)) for (const [x, y] of intersect(pa, pb)) {
+    if (x == null || y == null) continue;
+    let t = map(A, pa, x), u = map(B, pb, y);
+    for (let it = 0; it < 30; it++) {
+      const p = cPoint(A, t), q = cPoint(B, u), dA = cDer(A, t), dB = cDer(B, u), f = [p[0] - q[0], p[1] - q[1]];
+      if (Math.hypot(...f) < 1e-13) break;
+      const det = dA[0] * -dB[1] - -dB[0] * dA[1]; if (Math.abs(det) < 1e-14) break;
+      t -= (f[0] * -dB[1] - -dB[0] * f[1]) / det; u -= (dA[0] * f[1] - f[0] * dA[1]) / det;
+    }
+    const lim = (c, v) => c.kind === 'arc' ? angIn(c, v, 1e-7) : (v > -1e-7 && v < 1 + 1e-7 ? Math.min(1, Math.max(0, v)) : null);
+    const tt = lim(A, t), uu = lim(B, u);
+    if (tt == null || uu == null) continue;
+    if (!res.some(([a, b]) => Math.hypot(...[0, 1].map(k => cPoint(A, a)[k] - cPoint(A, tt)[k])) < 1e-7)) res.push([tt, uu]);
+  }
+  return res;
+}
 function intersect(A, B) {
   const res = []; const tol = 1e-9;
+  if (A.kind === 'bez' || B.kind === 'bez') return bezIntersect(A, B);
   if (A.kind === 'line' && B.kind === 'line') {
     const d1 = [A.b[0] - A.a[0], A.b[1] - A.a[1]], d2 = [B.b[0] - B.a[0], B.b[1] - B.a[1]], den = d1[0] * d2[1] - d1[1] * d2[0];
     if (Math.abs(den) < 1e-12) {
@@ -337,17 +397,39 @@ function intersect(A, B) {
   for (const p of pts) { const ta = angIn(A, Math.atan2(p[1] - A.c[1], p[0] - A.c[0]), 1e-7), tb = angIn(B, Math.atan2(p[1] - B.c[1], p[0] - B.c[0]), 1e-7); if (ta != null && tb != null) res.push([ta, tb]); }
   return res;
 }
+// Where curve `id` would meet another curve if its end `end` ('a' | 'b') were extended.
+// Lines extend along their direction, arcs around their circle. Returns { p, other, t } or null.
+export function extendTarget(curves, id, end, reach = 1e5) {
+  const C = curves.find(c => c.id === id); if (!C) return null;
+  let ext, better;
+  if (C.kind === 'line') {
+    const [from, to] = end === 'b' ? [C.a, C.b] : [C.b, C.a], d = [to[0] - from[0], to[1] - from[1]], l = Math.hypot(...d);
+    ext = { kind: 'line', a: to, b: [to[0] + d[0] / l * reach, to[1] + d[1] / l * reach] };
+    better = (t, bt) => t > 1e-9 && (bt == null || t < bt);
+  } else {
+    if (C.full) return null;
+    const gap = TAU - (C.a1 - C.a0); if (gap < 1e-9) return null;
+    ext = end === 'b' ? { kind: 'arc', c: C.c, r: C.r, a0: C.a1, a1: C.a1 + gap } : { kind: 'arc', c: C.c, r: C.r, a0: C.a0 - gap, a1: C.a0 };
+    better = end === 'b' ? (t, bt) => t > ext.a0 + 1e-9 && (bt == null || t < bt) : (t, bt) => t < ext.a1 - 1e-9 && (bt == null || t > bt);
+  }
+  let best = null;
+  for (const o of curves) {
+    if (o.id === id) continue;
+    for (const [t] of intersect(ext, o)) if (t != null && better(t, best?.t)) best = { t, other: o.id, p: cPoint(ext, t) };
+  }
+  return best;
+}
 // Split points of every curve: [{ curve, params: sorted unique, hits: [{ t, other }] }]
 export function curveSplits(curves) {
-  const splits = curves.map(c => ({ curve: c, params: c.kind === 'line' ? [0, 1] : c.full ? [0, Math.PI] : [c.a0, c.a1], hits: [] }));
+  const splits = curves.map(c => ({ curve: c, params: c.kind !== 'arc' ? [0, 1] : c.full ? [0, Math.PI] : [c.a0, c.a1], hits: [] }));
   for (let i = 0; i < curves.length; i++) for (let j = i + 1; j < curves.length; j++) {
     for (const [ti, tj] of intersect(curves[i], curves[j])) {
-      if (ti != null) { const t = curves[i].kind === 'line' ? ti : normAng(curves[i], ti); splits[i].params.push(t); splits[i].hits.push({ t, other: curves[j].id }); }
-      if (tj != null) { const t = curves[j].kind === 'line' ? tj : normAng(curves[j], tj); splits[j].params.push(t); splits[j].hits.push({ t, other: curves[i].id }); }
+      if (ti != null) { const t = curves[i].kind !== 'arc' ? ti : normAng(curves[i], ti); splits[i].params.push(t); splits[i].hits.push({ t, other: curves[j].id }); }
+      if (tj != null) { const t = curves[j].kind !== 'arc' ? tj : normAng(curves[j], tj); splits[j].params.push(t); splits[j].hits.push({ t, other: curves[i].id }); }
     }
   }
   for (const s of splits) {
-    const c = s.curve, lo = c.kind === 'line' ? 0 : c.a0, hi = c.kind === 'line' ? 1 : c.full ? c.a0 + TAU : c.a1;
+    const c = s.curve, lo = c.kind !== 'arc' ? 0 : c.a0, hi = c.kind !== 'arc' ? 1 : c.full ? c.a0 + TAU : c.a1;
     const ps = s.params.map(t => Math.min(hi, Math.max(lo, t))).sort((x, y) => x - y), u = [];
     const eps = c.kind === 'line' ? 1e-9 : 1e-9;
     for (const t of ps) if (!u.length || t - u[u.length - 1] > eps) u.push(t);
@@ -360,6 +442,7 @@ function polyOfSegs(segs, n = 24) {
   const pts = [];
   for (const s of segs) {
     if (s.t === 'line') { pts.push(s.a); continue; }
+    if (s.t === 'bez') { for (let i = 0; i < 16; i++) pts.push(bezPoint(s.P, i / 16)); continue; }
     const m = arcMid(s), k = Math.max(2, Math.ceil(Math.abs(m.a1 - m.a0) / TAU * n * 3));
     for (let i = 0; i < k; i++) { const t = m.a0 + (m.a1 - m.a0) * i / k; pts.push([s.c[0] + m.r * Math.cos(t), s.c[1] + m.r * Math.sin(t)]); }
   }
@@ -378,7 +461,7 @@ export function geoRegions(geo, solved) {
     const c = s.curve;
     for (let k = 0; k < s.params.length - 1; k++) {
       const t0 = s.params[k], t1 = s.params[k + 1]; if (t1 - t0 < 1e-12) continue;
-      const u = vid(cPoint(c, t0)), v = vid(cPoint(c, t1)); if (u === v && c.kind === 'line') continue;
+      const u = vid(cPoint(c, t0)), v = vid(cPoint(c, t1)); if (u === v && c.kind !== 'arc') continue;
       E.push({ c, t0, t1, u, v });
     }
   }
@@ -397,8 +480,13 @@ export function geoRegions(geo, solved) {
   for (const l of out.values()) l.sort((a, b) => H[a].ang - H[b].ang);
   const twin = i => i ^ 1;
   const next = i => { const t = twin(i), l = out.get(H[i].to), k = l.indexOf(t); return l[(k - 1 + l.length) % l.length]; };
-  const seg = i => { const h = H[i], e = E[h.e], a = V[h.from], b = V[h.to]; return e.c.kind === 'line' ? { t: 'line', a, b } : { t: 'arc', a, b, c: e.c.c, ccw: h.fwd }; };
-  const greenArea = i => { const h = H[i], e = E[h.e]; if (e.c.kind === 'line') { const a = V[h.from], b = V[h.to]; return (a[0] * b[1] - b[0] * a[1]) / 2; }
+  const seg = i => { const h = H[i], e = E[h.e], a = V[h.from], b = V[h.to]; if (e.c.kind === 'bez') { const Q = bezSub(e.c.P, h.fwd ? e.t0 : e.t1, h.fwd ? e.t1 : e.t0); Q[0] = a; Q[3] = b; return { t: 'bez', a, b, P: Q }; } return e.c.kind === 'line' ? { t: 'line', a, b } : { t: 'arc', a, b, c: e.c.c, ccw: h.fwd }; };
+  const greenArea = i => { const h = H[i], e = E[h.e];
+    if (e.c.kind === 'bez') {   // x·y' − y·x' is a degree-5 polynomial: 3-point Gauss–Legendre is exact
+      const s0 = h.fwd ? e.t0 : e.t1, s1 = h.fwd ? e.t1 : e.t0, hw = (s1 - s0) / 2, mid = (s0 + s1) / 2; let A = 0;
+      for (const [x, w] of [[-Math.sqrt(0.6), 5 / 9], [0, 8 / 9], [Math.sqrt(0.6), 5 / 9]]) { const t = mid + hw * x, p = bezPoint(e.c.P, t), d = bezDer(e.c.P, t); A += w * (p[0] * d[1] - p[1] * d[0]); }
+      return A * hw / 2; }
+    if (e.c.kind === 'line') { const a = V[h.from], b = V[h.to]; return (a[0] * b[1] - b[0] * a[1]) / 2; }
     const [cx, cy] = e.c.c, r = e.c.r, s = h.fwd ? e.t0 : e.t1, en = h.fwd ? e.t1 : e.t0;
     return 0.5 * (r * (cx * (Math.sin(en) - Math.sin(s)) - cy * (Math.cos(en) - Math.cos(s))) + r * r * (en - s)); };
   const seen = new Uint8Array(H.length), cycles = [];

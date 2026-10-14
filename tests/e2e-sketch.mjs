@@ -139,6 +139,42 @@ v = await vol();
 check(Math.abs(v[0] - 4000 * Math.PI) < 25, `the picked point now lies in the whole first circle, which is extruded (${(4000 * Math.PI).toFixed(0)} mm³, got ${v[0]})`);
 if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/trim.png' });
 
+// fit-point spline closing a line, extend a stray line onto it, extrude, then press pull the top face
+await page.click('#abFile'); await page.click('text=New design'); await W(1200);
+await page.click('.rbtn[aria-label^="Create Sketch"]'); await W(300);
+await page.click('#bMin'); if (!(await page.locator('.node .nlab:text-is("XY")').isVisible())) await page.click('.node:has-text("Origin") .tw');
+await page.click('.node .nlab:text-is("XY")'); await page.click('#bMin'); await W(1500);
+await page.keyboard.press('l');
+for (const [x, y] of [[0, 0], [40, 0]]) await clickAt(await sk(x, y));
+await page.keyboard.press('Escape'); await W(200);
+await page.click('.rlabel:has-text("CREATE")'); await W(200); await page.click('.menu .mi:has-text("Fit Point Spline")'); await W(300);
+for (const [x, y] of [[40, 0], [33, 18], [12, 24], [0, 0]]) await clickAt(await sk(x, y));
+await page.keyboard.press('Enter'); await W(500);
+g = await geo();
+check(g.ok && g.loops === 1 && g.regions === 1 && g.filled === 1, `line + spline make one closed area (loops ${g.loops}, regions ${g.regions})`);
+await page.keyboard.press('l');
+for (const [x, y] of [[50, 10], [62, 10]]) await clickAt(await sk(x, y));
+await page.keyboard.press('Escape'); await W(200);
+await page.click('.rlabel:has-text("MODIFY")'); await W(200); await page.click('.menu .mi:has-text("Extend")'); await W(300);
+await clickAt(await sk(51, 10)); await W(600);
+const ext = await page.evaluate(() => { const g = window.__dw.doc().features[0].geo, l = g.curves.at(-1), pa = g.points.find(p => p.id === l.a), pb = g.points.find(p => p.id === l.b); return Math.min(pa.x, pb.x); });
+check(ext > 30 && ext < 45 && (await geo()).ok, `extend runs the line back to the spline (end at x = ${ext.toFixed(2)})`);
+if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/spline.png' });
+await page.click('.palette .btn.go'); await W(800);
+await page.keyboard.press('e'); await W(1200);
+await page.fill('#dx-distance', '10'); await W(1500);
+await page.click('.dialog .btn.ok'); await W(1000);
+const v1 = (await vol())[0];
+check(v1 > 4000 && v1 < 9000, `spline profile extrudes (${v1} mm³)`);
+await page.keyboard.press('q'); await W(800);
+const topPt = await page.evaluate(() => window.__dw.screen(18, 8, 10));
+await clickAt(topPt); await W(1500);
+await page.fill('#dx-ppdist', '5'); await W(2000);
+await page.click('.dialog .btn.ok'); await W(1000);
+const v2 = (await vol())[0];
+check(Math.abs(v2 / v1 - 1.5) < 1e-3, `press pull lifts the top face 5 mm (${v1} → ${v2} mm³)`);
+if (process.env.SHOTS) { await page.click('#vcHome'); await W(800); await page.screenshot({ path: process.env.SHOTS + '/presspull.png' }); }
+
 check(errors.length === 0, 'no page errors' + (errors.length ? ': ' + errors.slice(0, 3).join(' | ') : ''));
 await browser.close(); server.close();
 process.exit(failed ? 1 : 0);

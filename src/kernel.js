@@ -81,7 +81,8 @@ export function profilePolygon(pr) {
       const pts = [];
       for (const sg of pr.segs || []) {
         pts.push(new THREE.Vector2(sg.a[0], sg.a[1]));
-        if (sg.t === 'arc') {
+        if (sg.t === 'bez') { for (let i = 1; i < 24; i++) { const q = bezPoint(sg.P, i / 24); pts.push(new THREE.Vector2(q[0], q[1])); } }
+        else if (sg.t === 'arc') {
           const { r, a0, a1 } = arcMid(sg), n = Math.max(2, Math.ceil(Math.abs(a1 - a0) / (2 * Math.PI) * CIRCLE_SEG));
           for (let i = 1; i < n; i++) { const t = a0 + (a1 - a0) * i / n; pts.push(new THREE.Vector2(sg.c[0] + r * Math.cos(t), sg.c[1] + r * Math.sin(t))); }
         }
@@ -517,7 +518,7 @@ function step(f, out) {
     } else if (f.type === 'remove') {
       if (!out.bodies.has(f.body)) throw new Error('Choose a body to remove');
       out.bodies.delete(f.body);
-    } else if (['fillet', 'chamfer', 'shell', 'draft', 'loft', 'import', 'sweep'].includes(f.type)) {
+    } else if (['fillet', 'chamfer', 'shell', 'draft', 'presspull', 'loft', 'import', 'sweep'].includes(f.type)) {
       throw new Error('This needs the exact geometry engine, which has not loaded in this view');
     }
     out.status.set(f.id, { state: 'ok' });

@@ -14,7 +14,7 @@ A design is one JSON document:
 }
 ```
 
-Feature types: `sketch`, `plane`, `extrude`, `revolve`, `loft`, `box`, `cylinder`, `sphere`, `torus`, `hole`, `pattern`, `mirror`, `move`, `combine`, `remove`, `fillet`, `chamfer`, `shell`, `draft`, `import`.
+Feature types: `sketch`, `plane`, `extrude`, `revolve`, `loft`, `sweep`, `presspull`, `box`, `cylinder`, `sphere`, `torus`, `hole`, `pattern`, `mirror`, `move`, `combine`, `remove`, `fillet`, `chamfer`, `shell`, `draft`, `import`.
 
 A plane reference is `'XY' | 'XZ' | 'YZ'`, the id of an offset-plane feature, or a picked frame `{ o, x, n }` (origin, in-plane X, normal) for angled faces. Imported STEP text lives in `doc.files[fileId]`; the `import` feature only references it, so rebuild cache keys stay small. Files are parsed once per session (async) into `importShapes` before rebuilds use them.
 
@@ -31,7 +31,9 @@ A sketch holds `geo = { points, curves, cons }`: points, lines, arcs (counter-cl
 Tangency between curves that share an endpoint uses "perpendicular to the radius at that point" instead of a distance condition. The distance form has a zero first derivative at the solution and would hide degrees of freedom.
 
 At rebuild time `sketchWithGeo` re-solves the sketch with dimension expressions evaluated, so parameters drive sketch geometry. Closed chains of non-construction lines and arcs (and circles) become `loop` / `circle` profiles for the kernels. 
-**Regions.** `geoRegions` builds a planar arrangement of all non-construction curves (`curveSplits` finds every crossing, then faces are traced), so crossing curves divide the sketch into areas like Fusion does. Each area gets an interior sample point and a default fill: even-odd over the closed loops, and areas outside every loop (closed only by crossing open curves) count as filled. An extrude or revolve stores the areas the user clicked as sample points `regions: [{x, y}]`; after any edit, each point picks whichever area now contains it, and with none stored the filled areas are used. Trim uses the same crossings: it removes the clicked piece and attaches the new end points to the cutting curve with point-on constraints.
+**Regions.** `geoRegions` builds a planar arrangement of all non-construction curves (`curveSplits` finds every crossing, then faces are traced), so crossing curves divide the sketch into areas like Fusion does. Each area gets an interior sample point and a default fill: even-odd over the closed loops, and areas outside every loop (closed only by crossing open curves) count as filled. An extrude or revolve stores the areas the user clicked as sample points `regions: [{x, y}]`; after any edit, each point picks whichever area now contains it, and with none stored the filled areas are used. **Splines.** A spline curve stores its fit points (`pts`, ordinary points, so constraints and dragging work on them). `splineBeziers` turns them into cubic Bézier spans with chord-weighted Catmull-Rom tangents; the arrangement, the region tracing (exact area by 3-point Gauss–Legendre), the mesh kernel and the exact kernel (`cubicBezierCurveTo`) all use the same spans, so the solid matches what is drawn. Crossings with a Bézier are found on a polyline and polished with Newton's method.
+
+Trim uses the same crossings: it removes the clicked piece and attaches the new end points to the cutting curve with point-on constraints.
 
 Older sketches with primitive profiles (`rect`, `circle`, `polygon`, `slot`, `poly`) still work.
 

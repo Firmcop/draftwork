@@ -169,3 +169,47 @@ test('extrude a picked region from crossing shapes (exact)', () => {
   r = K.regenerate([sk, { id: 'e', type: 'extrude', sketch: 's', distance: 10, op: 'new', regions: [{ x: 15, y: 15 }] }]);
   near([...r.bodies.values()].reduce((a, b) => a + K.signedVolume(b.geom), 0), 1000, 0.5, 'mesh kernel: just the overlap');
 });
+
+test('extend finds the nearest crossing along a line or around an arc', () => {
+  const curves = [
+    { id: 'l', kind: 'line', a: [0, 0], b: [10, 0] },
+    { id: 'w1', kind: 'line', a: [15, -5], b: [15, 5] },
+    { id: 'w2', kind: 'line', a: [25, -5], b: [25, 5] },
+    { id: 'k', kind: 'arc', c: [0, 0], r: 10, a0: 0.2, a1: 1.2 },
+    { id: 'axis', kind: 'line', a: [0, 0], b: [0, 20] },
+  ];
+  const e = K.extendTarget(curves, 'l', 'b');
+  assert.equal(e.other, 'w1'); near(e.p[0], 15, 1e-9, 'line stops at the first wall');
+  assert.equal(K.extendTarget(curves, 'l', 'a'), null, 'nothing behind the start');
+  const ea = K.extendTarget(curves, 'k', 'b');
+  assert.equal(ea.other, 'axis'); near(ea.p[1], 10, 1e-9, 'arc runs round to the vertical axis');
+  const eb = K.extendTarget(curves, 'k', 'a');
+  assert.equal(eb.other, 'l'); near(eb.p[0], 10, 1e-9, 'arc start runs back to the horizontal line');
+});
+
+test('fit-point spline closes a profile; both kernels extrude it', () => {
+  const g = {
+    points: [{ id: 'p0', x: 0, y: 0 }, { id: 'p1', x: 30, y: 0 }, { id: 'p2', x: 22, y: 14 }, { id: 'p3', x: 8, y: 18 }],
+    curves: [{ id: 'l', kind: 'line', a: 'p0', b: 'p1' }, { id: 's', kind: 'spline', pts: ['p1', 'p2', 'p3', 'p0'], a: 'p1', b: 'p0' }, { id: 'x', kind: 'line', a: 'p2', b: 'p0', constr: true }],
+    cons: [],
+  };
+  const solved = K.solveSketch(g);
+  const loops = K.geoProfiles(g, solved).profiles;
+  assert.equal(loops.length, 1, 'line + spline make one loop');
+  const regs = K.geoRegions(g, solved);
+  assert.equal(regs.length, 1); assert.ok(regs[0].filled);
+  // the curve passes through every fit point
+  const B = K.splineBeziers([[30, 0], [22, 14], [8, 18], [0, 0]]);
+  near(K.bezPoint(B[1], 0)[0], 22, 1e-12, 'span starts at a fit point');
+  const area = regs[0].area;
+  assert.ok(area > 300 && area < 600, 'plausible area ' + area);
+  const sk = { id: 'k', type: 'sketch', plane: 'XY', profiles: [], geo: g };
+  const fx = [sk, { id: 'e', type: 'extrude', sketch: 'k', distance: 10, op: 'new' }];
+  near(K.brepProps([...K.regenerateBrep(fx).bodies.values()][0]).volume, area * 10, area * 10 * 1e-4, 'exact kernel volume');
+  near([...K.regenerate(fx).bodies.values()].reduce((a, b) => a + K.signedVolume(b.geom), 0), area * 10, area * 10 * 3e-3, 'mesh kernel volume');
+  // a line across the spline splits the region in two
+  g.points.push({ id: 'q0', x: 15, y: -5 }, { id: 'q1', x: 15, y: 30 }); g.curves.push({ id: 'cut', kind: 'line', a: 'q0', b: 'q1' });
+  const r2 = K.geoRegions(g, K.solveSketch(g));
+  assert.equal(r2.length, 2, 'line crossing the spline makes two areas');
+  near(r2[0].area + r2[1].area, area, 1e-6, 'areas add up');
+});
