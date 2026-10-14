@@ -1,0 +1,532 @@
+// ===== Browser tree, timeline, dialogs, palette, modals =====
+
+// ---------- browser ----------
+const expanded = new Set(['root', 'settings', 'bodies', 'sketches', 'construction', 'analysis']);
+let renaming = null;
+function node(level, o) {
+  const row = h('div', { class: 'node' + (o.sel ? ' sel' : '') + (o.err ? ' err' : ''), role: 'treeitem', style: `padding-left:${4 + level * 14}px`, 'aria-expanded': o.key ? String(expanded.has(o.key)) : null });
+  const tw = h('button', { class: 'tw' + (o.key ? '' : ' none'), 'aria-label': o.key ? (expanded.has(o.key) ? 'Collapse ' : 'Expand ') + o.label : null, tabindex: o.key ? null : '-1', 'aria-expanded': o.key ? String(expanded.has(o.key)) : null, html: icon('chevron') });
+  if (o.key) tw.addEventListener('click', () => { expanded.has(o.key) ? expanded.delete(o.key) : expanded.add(o.key); renderBrowser(); });
+  row.append(tw);
+  if (o.vis != null) {
+    row.append(h('button', { class: 'vis' + (o.vis ? '' : ' off'), 'aria-label': (o.vis ? 'Hide ' : 'Show ') + o.label, title: o.vis ? 'Hide' : 'Show', onclick: e => { e.stopPropagation(); o.onVis(); }, html: icon(o.vis ? 'eye' : 'eyeoff') }));
+  } else row.append(h('span', { style: 'width:22px;flex:none' }));
+  if (o.swatch) row.append(h('span', { class: 'swatch', style: `background:${o.swatch}` }));
+  row.append(h('span', { class: 'nico', html: icon(o.icon) }));
+  if (renaming && renaming === o.renameKey) {
+    const inp = h('input', { class: 'rename', value: o.label, 'aria-label': 'New name' });
+    const commit = ok => { if (renaming !== o.renameKey) return; renaming = null; if (ok && inp.value.trim()) o.onRename(inp.value.trim()); renderBrowser(); };
+    inp.addEventListener('keydown', e => { if (e.key === 'Enter') commit(true); if (e.key === 'Escape') commit(false); e.stopPropagation(); });
+    inp.addEventListener('blur', () => commit(true));
+    row.append(inp); setTimeout(() => { inp.focus(); inp.select(); }, 0);
+  } else {
+    const lab = h('button', { class: 'nlab' + (o.dim ? ' dim' : ''), title: o.title || o.label }, o.label, o.sub ? h('span', { class: 'sub' }, o.sub) : null);
+    lab.addEventListener('click', () => o.onClick?.());
+    lab.addEventListener('dblclick', () => o.onDbl?.());
+    if (o.menu) lab.addEventListener('contextmenu', e => { e.preventDefault(); openMenu(lab, o.menu(), { at: { x: e.clientX, y: e.clientY } }); });
+    row.append(lab);
+  }
+  return row;
+}
+function renderBrowser() {
+  const t = $('#btree'); t.replaceChildren();
+  const add = (lvl, o) => { t.append(node(lvl, o)); return expanded.has(o.key); };
+  if (!add(0, { key: 'root', icon: 'doc', label: doc.name, renameKey: 'doc', onRename: v => { checkpoint(); doc.name = v; $('#docTitle').textContent = v; }, onDbl: () => { renaming = 'doc'; renderBrowser(); },
+    menu: () => [{ label: 'Rename', icon: 'params', action: () => { renaming = 'doc'; renderBrowser(); } }] })) return;
+  if (add(1, { key: 'settings', icon: 'gear', label: 'Document Settings' })) {
+    add(2, { icon: 'ruler', label: 'Units: mm, g', onClick: () => toast('Units are millimeters and grams in this version') });
+  }
+  if (add(1, { key: 'views', icon: 'folder', label: 'Named Views' })) {
+    for (const [k, l] of [['top', 'TOP'], ['front', 'FRONT'], ['right', 'RIGHT'], ['iso', 'HOME']]) add(2, { icon: 'lookat', label: l, onClick: () => setView(k) });
+  }
+  if (add(1, { key: 'origin', icon: 'folder', label: 'Origin', vis: !!doc.showOrigin, onVis: () => { doc.showOrigin = !doc.showOrigin; persist(); renderBrowser(); updateScene(); } })) {
+    add(2, { icon: 'point', label: 'O', dim: true });
+    for (const a of ['X', 'Y', 'Z']) add(2, { icon: 'axis', label: a, dim: true });
+    for (const p of ['XY', 'XZ', 'YZ']) add(2, { icon: 'plane', label: p, onClick: () => { if (pick?.planes) completePick({ plane: p, offset: 0, flip: false, local: null }); else { doc.showOrigin = true; renderBrowser(); updateScene(); } } });
+  }
+  if (section && add(1, { key: 'analysis', icon: 'folder', label: 'Analysis' })) {
+    add(2, { icon: 'section', label: 'Section ' + section.axis, vis: !section.hidden, onVis: () => { section.hidden = !section.hidden; applySectionVisibility(); }, onDbl: () => openSectionDialog(),
+      menu: () => [{ label: 'Edit Section', icon: 'section', action: () => openSectionDialog() }, { label: 'Delete', icon: 'delete', action: () => { section = null; updateScene(); renderBrowser(); renderRibbon(); } }] });
+  }
+  const bodies = [...result.bodies.values()];
+  if (bodies.length && add(1, { key: 'bodies', icon: 'folder', label: 'Bodies', sub: String(bodies.length), vis: !doc.hideAllBodies, onVis: () => { doc.hideAllBodies = !doc.hideAllBodies; persist(); updateScene(); renderBrowser(); renderInfo(); } })) {
+    for (const b of bodies) {
+      add(2, { icon: 'bodyi', label: bodyName(b.id), swatch: bodyColor(b.id), sel: selBody === b.id, vis: !doc.bodyMeta[b.id]?.hidden, title: bodyName(b.id) + ' · ' + bodyMaterial(b.id),
+        onVis: () => { meta(b.id).hidden = !meta(b.id).hidden; persist(); mpCache = null; updateScene(); renderBrowser(); renderInfo(); },
+        onClick: () => selectBody(b.id), onDbl: () => { renaming = 'b:' + b.id; renderBrowser(); }, renameKey: 'b:' + b.id, onRename: v => { meta(b.id).name = v; persist(); mpCache = null; renderInfo(); },
+        menu: () => bodyMenu(b.id) });
+    }
+  }
+  const sketches = doc.features.filter(f => f.type === 'sketch');
+  if (sketches.length && add(1, { key: 'sketches', icon: 'folder', label: 'Sketches' })) {
+    for (const s of sketches) add(2, { icon: 'sketch', label: s.name, sel: selFeature === s.id, err: statusOf(s.id).state === 'error', dim: statusOf(s.id).state === 'rolled',
+      vis: !!doc.sketchShown[s.id], onVis: () => { doc.sketchShown[s.id] = !doc.sketchShown[s.id]; persist(); refreshOverlays(); renderBrowser(); },
+      onClick: () => selectFeature(s.id), onDbl: () => editFeature(s.id), renameKey: 'f:' + s.id, onRename: v => { checkpoint(); s.name = v; renderTimeline(); }, menu: () => featureMenu(s.id) });
+  }
+  const planes = doc.features.filter(f => f.type === 'plane');
+  if (planes.length && add(1, { key: 'construction', icon: 'folder', label: 'Construction' })) {
+    for (const p of planes) add(2, { icon: 'plane', label: p.name, sel: selFeature === p.id, err: statusOf(p.id).state === 'error', dim: statusOf(p.id).state === 'rolled',
+      vis: !doc.planeHidden[p.id], onVis: () => { doc.planeHidden[p.id] = !doc.planeHidden[p.id]; persist(); updateScene(); renderBrowser(); },
+      onClick: () => { if (pick?.planes && result.planes.has(p.id)) completePick({ plane: p.id, offset: 0, flip: false, local: null }); else selectFeature(p.id); },
+      onDbl: () => editFeature(p.id), renameKey: 'f:' + p.id, onRename: v => { checkpoint(); p.name = v; renderTimeline(); updateScene(); }, menu: () => featureMenu(p.id) });
+  }
+  add(1, { icon: 'params', label: 'User Parameters', sub: String(doc.params.length), onClick: () => openParamsModal(), err: Object.keys(params.errors).length > 0 });
+}
+function bodyMenu(id) {
+  return [
+    { label: 'Rename', icon: 'params', action: () => { renaming = 'b:' + id; renderBrowser(); } },
+    { label: 'Physical Material', icon: 'material', action: () => { selectBody(id); openMaterialDialog(); } },
+    { label: 'Appearance', icon: 'appearance', action: () => { selectBody(id); openAppearanceDialog(); } },
+    { label: 'Move/Copy', icon: 'move', action: () => { selectBody(id); newMove(); } },
+    { label: 'Find in Timeline', icon: 'start', action: () => { const fid = result.bodies.get(id)?.feature; if (fid) selectFeature(fid); } },
+    { label: doc.bodyMeta[id]?.hidden ? 'Show' : 'Hide', icon: 'eye', action: () => { meta(id).hidden = !meta(id).hidden; updateScene(); renderBrowser(); } },
+    { label: 'Export STL…', icon: 'exportstl', action: () => openExportDialog([id]) },
+    '-',
+    { label: 'Remove', icon: 'delete', action: () => { selectBody(id); deleteSelection(); } },
+  ];
+}
+function featureMenu(id) {
+  const f = featById(id); if (!f) return [];
+  const items = [{ label: f.type === 'sketch' ? 'Edit Sketch' : 'Edit Feature', icon: featIcon(f), action: () => editFeature(id) }];
+  if ((f.type === 'extrude' || f.type === 'revolve') && featById(f.sketch)) items.push({ label: 'Edit Profile Sketch', icon: 'sketch', action: () => editFeature(f.sketch) });
+  items.push({ label: 'Rename', icon: 'params', action: () => { renaming = 'f:' + id; expanded.add(f.type === 'plane' ? 'construction' : 'sketches'); renderBrowser(); if (f.type !== 'sketch' && f.type !== 'plane') renameInTimeline(id); } },
+    { label: f.suppressed ? 'Unsuppress Feature' : 'Suppress Feature', icon: 'eyeoff', action: () => { checkpoint(); f.suppressed = !f.suppressed; scheduleRegen(0); } },
+    { label: 'Roll History Marker Here', icon: 'start', action: () => setRollback(featIndex(id)) },
+    '-', { label: 'Delete', icon: 'delete', action: () => deleteFeature(id) });
+  return items;
+}
+function renameInTimeline(id) {
+  const f = featById(id);
+  openPanelDialog({ title: 'Rename', icon: featIcon(f), body: [row('Name', (() => { const i = h('input', { type: 'text', id: 'rn-name', value: f.name }); setTimeout(() => { i.focus(); i.select(); }, 0); return i; })())],
+    onOK: () => { const v = $('#rn-name').value.trim(); if (v) { checkpoint(); f.name = v; renderTimeline(); renderBrowser(); } } });
+}
+
+// ---------- timeline ----------
+function renderTimeline() {
+  const track = $('#tlTrack'); track.replaceChildren();
+  const n = doc.features.length;
+  if (!n) { track.append(h('span', { class: 'note' }, 'The timeline records every step. Start with Create Sketch or a Box.')); return; }
+  const mk = () => { const m = h('button', { class: 'marker', 'aria-label': 'History marker. Arrow keys move it.', title: 'Drag to roll the history back' }); wireMarker(m); return m; };
+  if (doc.rollback === -1) track.append(mk());
+  doc.features.forEach((f, i) => {
+    const st = statusOf(f.id);
+    const chip = h('button', { class: `chip s-${st.state}`, 'data-i': String(i), 'aria-current': String(selFeature === f.id || dlg?.fid === f.id || sketchId === f.id),
+      'aria-label': `${i + 1}. ${f.name} (${typeLabel(f)})${st.msg ? ': ' + st.msg : ''}`, title: `${f.name} · ${typeLabel(f)}${st.msg ? '\n⚠ ' + st.msg : ''}`, html: icon(featIcon(f)) });
+    chip.addEventListener('click', () => { if (selFeature === f.id && mode === 'model' && !dlg) editFeature(f.id); else selectFeature(f.id); });
+    chip.addEventListener('dblclick', () => editFeature(f.id));
+    chip.addEventListener('contextmenu', e => { e.preventDefault(); selectFeature(f.id); openMenu(chip, featureMenu(f.id), { at: { x: e.clientX, y: e.clientY - 200 } }); });
+    track.append(chip);
+    if (doc.rollback === i) track.append(mk());
+  });
+  if (doc.rollback == null) track.append(mk());
+  const cur = track.querySelector('[aria-current="true"]') || (doc.rollback != null ? track.querySelector('.marker') : null);
+  if (cur) cur.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+function wireMarker(m) {
+  m.addEventListener('keydown', e => {
+    if (e.key === 'ArrowLeft') { e.preventDefault(); stepMarker(-1); }
+    if (e.key === 'ArrowRight') { e.preventDefault(); stepMarker(1); }
+  });
+  m.addEventListener('pointerdown', e => {
+    e.preventDefault(); m.setPointerCapture(e.pointerId);
+    const chips = [...$('#tlTrack').querySelectorAll('.chip')];
+    let target = doc.rollback;
+    const move = ev => {
+      const x = ev.clientX; let idx = -1;
+      chips.forEach((c, i) => { const r = c.getBoundingClientRect(); if (x > r.left + r.width / 2) idx = i; });
+      target = idx >= chips.length - 1 ? null : idx;
+      const ref = target == null ? null : target === -1 ? chips[0] : chips[target + 1];
+      $('#tlTrack').insertBefore(m, ref);
+    };
+    const up = () => { m.removeEventListener('pointermove', move); m.removeEventListener('pointerup', up); if (target !== doc.rollback) setRollback(target); };
+    m.addEventListener('pointermove', move); m.addEventListener('pointerup', up);
+  });
+}
+function stepMarker(d) {
+  const n = doc.features.length; const cur = doc.rollback ?? n - 1;
+  setRollback(Math.max(-1, Math.min(n - 1, cur + d)));
+}
+function setRollback(r) {
+  const n = doc.features.length;
+  if (r != null && r >= n - 1) r = null;
+  if (r != null && r < -1) r = -1;
+  if (dlg) closeDialog(true);
+  doc.rollback = r;
+  if (mode === 'sketch' && r != null && featIndex(sketchId) > r) exitSketch(true);
+  scheduleRegen(0);
+}
+function renderInfo() {
+  const mp = massProps();
+  const errs = [...result.status.values()].filter(v => v.state === 'error').length;
+  const vis = mp.bodies.filter(b => !b.hidden);
+  $('#tlInfo').innerHTML = vis.length
+    ? `<b>${vis.length}</b> ${vis.length > 1 ? 'bodies' : 'body'} · <b>${fix(mp.total.volume / 1000, 2)}</b> cm³ · <b>${fix(mp.total.mass, 1)}</b> g<br>${errs ? `<span class="bad">${errs} ${errs > 1 ? 'features need' : 'feature needs'} attention</span>` : 'Rebuilt in ' + fix(lastRegenMs, 0) + ' ms'}${doc.rollback != null ? ' · rolled back' : ''}`
+    : (errs ? `<span class="bad">${errs} ${errs > 1 ? 'features need' : 'feature needs'} attention</span>` : 'No bodies yet');
+}
+
+// ---------- form rows ----------
+function row(label, control, id) { return h('div', { class: 'row' }, h('label', { for: id || control.id || null }, label), control); }
+function exField(label, obj, key, unit = 'mm', o = {}) {
+  const id = o.id || ('dx-' + key);
+  const wrap = h('div', { class: 'exin' });
+  const val = h('span', { class: 'val' });
+  const raw = obj[key] ?? '';
+  const inp = h('input', { type: 'text', id, value: String(raw), inputmode: 'decimal', spellcheck: 'false', autocomplete: 'off' });
+  const show = () => {
+    const s = inp.value.trim(); let ok = true, v = null;
+    try { v = evalExpr(s, params.vars); if (o.min != null && v < o.min) throw new Error('Must be at least ' + o.min); if (o.max != null && v > o.max) throw new Error('Must be at most ' + o.max); } catch (e) { ok = false; inp.title = e.message; }
+    const isNum = /^-?\d*\.?\d+(e[+-]?\d+)?$/i.test(s);
+    wrap.classList.toggle('bad', !ok); wrap.classList.toggle('expr', ok && !isNum);
+    val.textContent = ok && !isNum ? '= ' + fmt(v) : '';
+    if (ok) inp.title = '';
+    return { ok, v, isNum, s };
+  };
+  inp.addEventListener('input', () => {
+    const r = show(); if (!r.ok) return;
+    checkpoint(id + ':' + (obj.id || ''));
+    obj[key] = r.isNum ? parseFloat(r.s) : r.s;
+    o.after?.(); scheduleRegen(o.delay ?? 160); if (mode === 'sketch') refreshOverlays();
+  });
+  inp.addEventListener('keydown', e => {
+    if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+      const r = show(); if (!r.ok || !r.isNum) return; e.preventDefault();
+      const step = o.step || (unit === '°' ? 5 : 1); inp.value = fmt(r.v + (e.key === 'ArrowUp' ? step : -step)); inp.dispatchEvent(new Event('input'));
+    }
+  });
+  wrap.append(inp, val, h('span', { class: 'u' }, unit));
+  show();
+  return row(label, wrap, id);
+}
+function selField(label, obj, key, options, o = {}) {
+  const id = o.id || ('ds-' + key);
+  const s = h('select', { id }, options.map(([v, t]) => h('option', { value: v, selected: String(obj[key] ?? '') === String(v) }, t)));
+  s.addEventListener('change', () => { checkpoint(); obj[key] = o.numeric ? +s.value : (s.value === '' ? null : s.value); o.after?.(); if (o.rerender) rerenderDialog(); scheduleRegen(0); });
+  return row(label, s, id);
+}
+function segField(label, obj, key, options, o = {}) {
+  const wrap = h('div', { class: 'seg', role: 'group', 'aria-label': label });
+  for (const [v, t] of options) {
+    const b = h('button', { type: 'button', 'aria-pressed': String((obj[key] ?? options[0][0]) === v), onclick: () => {
+      if (obj[key] === v) return; checkpoint(); obj[key] = v;
+      wrap.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+      o.after?.(); if (o.rerender) rerenderDialog(); scheduleRegen(0);
+    } }, t);
+    wrap.append(b);
+  }
+  return h('div', { class: 'row' }, h('span', { class: 'rl' }, label), wrap);
+}
+function chkField(label, obj, key, o = {}) {
+  const id = o.id || ('dc-' + key);
+  const c = h('input', { type: 'checkbox', id, checked: !!obj[key] });
+  c.addEventListener('change', () => { checkpoint(); obj[key] = c.checked; o.after?.(); if (o.rerender) rerenderDialog(); scheduleRegen(0); });
+  return h('div', { class: 'row' }, h('span', { class: 'rl' }), h('label', { class: 'chk', for: id }, c, label));
+}
+const section_ = (title, ...kids) => h('div', { class: 'dsec' }, title ? h('h4', {}, title) : null, ...kids);
+
+// planes / bodies / features available before a feature
+function planeOptions(beforeIdx) {
+  const opts = [['XY', 'XY plane (Top)'], ['XZ', 'XZ plane (Front)'], ['YZ', 'YZ plane (Right)']];
+  doc.features.slice(0, beforeIdx).filter(f => f.type === 'plane').forEach(p => opts.push([p.id, p.name]));
+  return opts;
+}
+function bodiesBefore(fid) { return (result.before.get(fid) || []).map(id => [id, bodyName(id)]); }
+const opOptions = [['join', 'Join'], ['cut', 'Cut'], ['intersect', 'Intersect'], ['new', 'New Body']];
+
+// ---------- command dialog ----------
+function openFeatureDialog(fid, isNew, snapshot) {
+  if (dlg) closeDialog(true);
+  dlg = { fid, isNew, snapshot: snapshot || JSON.stringify(doc), undoLen: history.undo.length };
+  selFeature = fid;
+  rerenderDialog(); updateScene(); renderTimeline(); renderBrowser();
+}
+function rerenderDialog() {
+  if (!dlg) return;
+  const el = $('#dialog'); el.hidden = false; el.replaceChildren();
+  if (dlg.custom) { buildCustomDialog(el, dlg.custom); return; }
+  const f = featById(dlg.fid); if (!f) { closeDialog(false, true); return; }
+  const idx = featIndex(f.id);
+  const head = h('div', { class: 'dhead', html: icon(featIcon(f)) + `<span>${typeLabel(f)}</span>` });
+  head.append(h('button', { class: 'x', 'aria-label': 'Cancel', onclick: () => closeDialog(false), html: icon('close') }));
+  const body = h('div', { class: 'dbody' });
+  body.append(h('div', { class: 'err', id: 'dlgErr', hidden: true }));
+  body.append(...featureFields(f, idx));
+  const foot = h('div', { class: 'dfoot' },
+    h('span', { class: 'info', title: dialogHelp(f), html: icon('info') }),
+    h('button', { class: 'btn ok', onclick: () => closeDialog(true) }, 'OK'),
+    h('button', { class: 'btn', onclick: () => closeDialog(false) }, 'Cancel'));
+  el.append(head, body, foot);
+  refreshDialogStatus();
+}
+function dialogHelp(f) {
+  return { extrude: 'Pushes a closed sketch profile into a solid.', revolve: 'Spins a profile around a sketch axis.', hole: 'Drills a hole into the bodies below the placement plane.',
+    pattern: 'Repeats a feature. Copies of a New Body feature become new bodies.', mirror: 'Mirrors a feature across an origin plane.', plane: 'A reference plane you can sketch on.',
+    move: 'Moves or copies a body. Rotation is about the origin.', fillet: 'Rounds the picked edges. Edge picks follow the model when earlier steps change.', chamfer: 'Bevels the picked edges.', shell: 'Hollows the body, opening the picked faces, with walls of the given thickness.', combine: 'Joins, cuts or intersects bodies with each other.' }[f.type] || 'Values accept expressions such as width/2 + 5.';
+}
+function featureFields(f, idx) {
+  const out = [];
+  const nameRow = h('input', { type: 'text', id: 'dx-name', value: f.name, autocomplete: 'off' });
+  nameRow.addEventListener('input', () => { checkpoint('name' + f.id); f.name = nameRow.value; renderTimeline(); renderBrowser(); });
+  const opsSection = () => {
+    const kids = [selField('Operation', f, 'op', opOptions, { rerender: true })];
+    if (f.op !== 'new') kids.push(selField('Objects', f, 'target', [['', f.op === 'cut' ? 'All bodies it touches' : 'Automatic (last body)'], ...bodiesBefore(f.id)], { id: 'ds-target' }));
+    return kids;
+  };
+  const placement = () => [selField('Plane', f, 'plane', planeOptions(idx), { id: 'ds-plane' }), segField('Direction', f, 'flip', [[false, 'Normal'], [true, 'Flipped']]), exField('Offset', f, 'offset'),
+    h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn', type: 'button', onclick: () => repositionPlaced(f), html: icon('pick') + 'Pick face and point…' }))];
+  switch (f.type) {
+    case 'extrude': {
+      const sks = doc.features.slice(0, idx).filter(g => g.type === 'sketch');
+      out.push(section_('Input', selField('Profile', f, 'sketch', sks.length ? sks.map(s => [s.id, s.name + ' (' + s.profiles.length + ')']) : [['', 'No sketch before this step']]),
+        segField('Direction', f, 'direction', [['one', 'One side'], ['symmetric', 'Symmetric'], ['reverse', 'Flipped']]), exField('Distance', f, 'distance', 'mm', { min: 0.001 })));
+      out.push(section_('Result', ...opsSection()));
+      break;
+    }
+    case 'revolve': {
+      const sks = doc.features.slice(0, idx).filter(g => g.type === 'sketch');
+      out.push(section_('Input', selField('Profile', f, 'sketch', sks.length ? sks.map(s => [s.id, s.name]) : [['', 'No sketch before this step']]),
+        segField('Axis', f, 'axis', [['v', 'Sketch Y axis'], ['u', 'Sketch X axis']]), exField('Angle', f, 'angle', '°', { min: 0.01, max: 360 })));
+      out.push(section_('Result', ...opsSection()));
+      break;
+    }
+    case 'hole':
+      out.push(section_('Placement', ...placement(), exField('Center X', f, 'cx'), exField('Center Y', f, 'cy')));
+      out.push(section_('Shape', segField('Hole type', f, 'cbore', [[false, 'Simple'], [true, 'Counterbore']], { rerender: true }), exField('Diameter', f, 'diameter', 'mm', { min: 0.01 }), exField('Depth', f, 'depth', 'mm', { min: 0.01 }),
+        ...(f.cbore ? [exField('C-bore diameter', f, 'cbDiameter', 'mm', { min: 0.01 }), exField('C-bore depth', f, 'cbDepth', 'mm', { min: 0.01 })] : []),
+        segField('Drill point', f, 'tip', [[false, 'Flat'], [true, 'Angled']], { rerender: true }), ...(f.tip ? [exField('Point angle', f, 'tipAngle', '°', { min: 30, max: 179 })] : [])));
+      break;
+    case 'box': case 'cylinder': case 'sphere': case 'torus': {
+      const dims = f.type === 'box' ? [exField('Length (X)', f, 'w', 'mm', { min: 0.01 }), exField('Width (Y)', f, 'd', 'mm', { min: 0.01 }), exField('Height', f, 'h', 'mm', { min: 0.01 })]
+        : f.type === 'cylinder' ? [exField('Diameter', f, 'diameter', 'mm', { min: 0.01 }), exField('Height', f, 'h', 'mm', { min: 0.01 })]
+        : f.type === 'sphere' ? [exField('Diameter', f, 'diameter', 'mm', { min: 0.01 })]
+        : [exField('Major diameter', f, 'major', 'mm', { min: 0.01 }), exField('Minor diameter', f, 'minor', 'mm', { min: 0.01 })];
+      out.push(section_('Placement', ...placement(), exField('Center X', f, 'cx'), exField('Center Y', f, 'cy')));
+      out.push(section_('Size', ...dims));
+      out.push(section_('Result', ...opsSection()));
+      break;
+    }
+    case 'plane':
+      out.push(section_('Reference', selField('Plane', f, 'base', planeOptions(idx)), exField('Distance', f, 'offset'), chkField('Flip normal', f, 'flip')));
+      break;
+    case 'pattern': {
+      const srcs = doc.features.slice(0, idx).filter(g => SOLIDS.has(g.type));
+      out.push(section_('Input', segField('Type', f, 'kind', [['linear', 'Rectangular'], ['circular', 'Circular']], { rerender: true }),
+        selField('Feature', f, 'source', srcs.length ? srcs.map(s => [s.id, s.name]) : [['', 'No solid feature before this step']])));
+      if (f.kind === 'circular') out.push(section_('Axis', segField('Axis', f, 'axis', [['X', 'X'], ['Y', 'Y'], ['Z', 'Z']]), exField('Quantity', f, 'count', '', { min: 2, max: 50 }), exField('Total angle', f, 'angle', '°', { min: 1, max: 360 })));
+      else {
+        out.push(section_('Direction 1', segField('Axis', f, 'axis', [['X', 'X'], ['Y', 'Y'], ['Z', 'Z']]), exField('Quantity', f, 'count', '', { min: 2, max: 50, id: 'dx-count' }), exField('Distance', f, 'spacing', 'mm', { id: 'dx-spacing' })));
+        out.push(section_('Direction 2', segField('Axis', f, 'axis2', [['X', 'X'], ['Y', 'Y'], ['Z', 'Z']]), exField('Quantity', f, 'count2', '', { min: 1, max: 50, id: 'dx-count2' }), exField('Distance', f, 'spacing2', 'mm', { id: 'dx-spacing2' })));
+      }
+      break;
+    }
+    case 'mirror': {
+      const srcs = doc.features.slice(0, idx).filter(g => SOLIDS.has(g.type));
+      out.push(section_('Input', selField('Feature', f, 'source', srcs.length ? srcs.map(s => [s.id, s.name]) : [['', 'No solid feature before this step']]),
+        segField('Mirror plane', f, 'plane', [['YZ', 'YZ'], ['XZ', 'XZ'], ['XY', 'XY']])));
+      break;
+    }
+    case 'move': {
+      const bs = bodiesBefore(f.id);
+      out.push(section_('Object', selField('Body', f, 'body', bs.length ? bs : [['', 'No body before this step']]), chkField('Create copy', f, 'copy')));
+      out.push(section_('Translate', exField('X distance', f, 'dx'), exField('Y distance', f, 'dy'), exField('Z distance', f, 'dz')));
+      out.push(section_('Rotate about origin', exField('X angle', f, 'rx', '°'), exField('Y angle', f, 'ry', '°'), exField('Z angle', f, 'rz', '°')));
+      break;
+    }
+    case 'combine': {
+      const bs = bodiesBefore(f.id);
+      const list = h('div', { class: 'picklist' });
+      for (const [id, name] of bs) {
+        if (id === f.target) continue;
+        const cid = 'cb-' + id.replace(/[^a-z0-9]/gi, '_');
+        const c = h('input', { type: 'checkbox', id: cid, checked: (f.tools || []).includes(id) });
+        c.addEventListener('change', () => { checkpoint(); f.tools = c.checked ? [...new Set([...(f.tools || []), id])] : (f.tools || []).filter(x => x !== id); scheduleRegen(0); });
+        list.append(h('label', { class: 'chk', for: cid }, c, name));
+      }
+      out.push(section_('Bodies', selField('Target body', f, 'target', bs.length ? bs : [['', 'No body before this step']], { rerender: true }), h('div', { class: 'row' }, h('span', { class: 'rl' }, 'Tool bodies'), list)));
+      out.push(section_('Result', segField('Operation', f, 'op', [['join', 'Join'], ['cut', 'Cut'], ['intersect', 'Intersect']]), chkField('Keep tool bodies', f, 'keep')));
+      break;
+    }
+    case 'fillet': case 'chamfer': case 'shell': {
+      const n = (f.edges || []).length, what = f.type === 'shell' ? 'face' : 'edge';
+      out.push(section_(f.type === 'shell' ? 'Faces to remove' : 'Edges',
+        h('p', { class: 'note' }, n ? `${n} ${what}${n > 1 ? 's' : ''} selected. Click on the model to add or remove ${what}s.` : `Click the ${what}s on the model.`),
+        h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn', type: 'button', disabled: !n, onclick: () => { checkpoint(); f.edges = []; rerenderDialog(); scheduleRegen(0); drawToolsOverlay(); } }, 'Clear selection'))));
+      out.push(section_('Size', f.type === 'fillet' ? exField('Radius', f, 'radius', 'mm', { min: 0.001 }) : f.type === 'chamfer' ? exField('Distance', f, 'distance', 'mm', { min: 0.001, id: 'dx-chdist' }) : exField('Thickness', f, 'thickness', 'mm', { min: 0.001 })));
+      break;
+    }
+    case 'remove': {
+      const bs = bodiesBefore(f.id);
+      out.push(section_('Object', selField('Body', f, 'body', bs.length ? bs : [['', 'No body before this step']])));
+      break;
+    }
+  }
+  out.push(section_(null, row('Name', nameRow, 'dx-name')));
+  return out;
+}
+function refreshDialogStatus() {
+  const box = $('#dlgErr'); if (!box || !dlg?.fid) return;
+  const st = statusOf(dlg.fid);
+  box.hidden = st.state !== 'error'; box.textContent = st.msg || '';
+}
+function closeDialog(ok, silent) {
+  if (!dlg) return;
+  const d = dlg; dlg = null;
+  $('#dialog').hidden = true; $('#dialog').replaceChildren();
+  if (d.custom) { (ok ? d.custom.onOK : d.custom.onCancel)?.(); if (!silent) { updateScene(); renderRibbon(); } return; }
+  if (!ok && !silent) {
+    const changed = d.isNew || history.undo.length > d.undoLen;
+    if (changed) {
+      doc = JSON.parse(d.snapshot);
+      history.undo.length = d.isNew ? Math.max(0, d.undoLen - 1) : d.undoLen;
+      lastTag = null;
+      if (d.isNew) selFeature = null;
+      afterDocReplace(); return;
+    }
+  }
+  if (!silent) { updateScene(); renderTimeline(); renderBrowser(); }
+}
+// Non-timeline dialogs (material, appearance, measure, section, export)
+function openPanelDialog(custom) {
+  if (dlg) closeDialog(true);
+  dlg = { custom };
+  rerenderDialog(); renderRibbon();
+}
+function buildCustomDialog(el, c) {
+  const head = h('div', { class: 'dhead', html: icon(c.icon) + `<span>${c.title}</span>` });
+  head.append(h('button', { class: 'x', 'aria-label': 'Close', onclick: () => closeDialog(false), html: icon('close') }));
+  const body = h('div', { class: 'dbody' }, ...(typeof c.body === 'function' ? c.body() : c.body));
+  const foot = h('div', { class: 'dfoot' }, h('span', { class: 'info', title: c.help || '', html: icon('info') }));
+  if (c.onOK || c.okLabel) foot.append(h('button', { class: 'btn ok', onclick: () => closeDialog(true) }, c.okLabel || 'OK'));
+  foot.append(h('button', { class: 'btn', onclick: () => closeDialog(false) }, c.cancelLabel || (c.onOK ? 'Cancel' : 'Close')));
+  el.append(head, body, foot);
+}
+
+// ---------- sketch palette ----------
+function renderPalette() {
+  const el = $('#palette');
+  if (mode !== 'sketch' || dlg) { el.hidden = true; return; }
+  const sk = featById(sketchId); if (!sk) { el.hidden = true; return; }
+  el.hidden = false; el.replaceChildren();
+  const idx = featIndex(sk.id);
+  const head = h('div', { class: 'dhead', html: icon('sketch') + '<span>Sketch Palette</span>' });
+  const opt = (label, key, after) => { const id = 'so-' + key; const c = h('input', { type: 'checkbox', id, checked: sketchOpts[key] }); c.addEventListener('change', () => { sketchOpts[key] = c.checked; after?.(); refreshOverlays(); }); return h('label', { class: 'chk', for: id }, c, label); };
+  const body = h('div', { class: 'dbody' });
+  body.append(section_('Options',
+    h('div', { class: 'btnrow', style: 'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px' }, h('button', { class: 'btn', onclick: () => lookAtMatrix(sketchMatrix(sk)), html: icon('lookat') + 'Look At' })),
+    opt('Sketch grid', 'grid'), opt('Snap to 1 mm', 'snap'), opt('Show profiles', 'profiles'), opt('Show dimensions', 'dims')));
+  const nameI = h('input', { type: 'text', id: 'sk-name', value: sk.name, autocomplete: 'off' });
+  nameI.addEventListener('input', () => { checkpoint('skname'); sk.name = nameI.value; renderBrowser(); });
+  const plSel = h('select', { id: 'sk-plane' }, planeOptions(idx).map(([v, t]) => h('option', { value: v, selected: sk.plane === v }, t)));
+  plSel.addEventListener('change', () => { checkpoint(); sk.plane = plSel.value; sk.offset = 0; sk.flip = false; scheduleRegen(0); setTimeout(() => lookAtMatrix(sketchMatrix(sk)), 60); renderPalette(); });
+  body.append(section_('Sketch', row('Name', nameI, 'sk-name'), row('Plane', plSel, 'sk-plane'), exField('Offset', sk, 'offset', 'mm', { id: 'sk-offset', after: () => setTimeout(refreshOverlays, 0) })));
+  const list = h('div', { class: 'picklist' });
+  sk.profiles.forEach(p => list.append(h('button', { class: 'mi', style: selProfile === p.id ? 'background:var(--hover)' : '', onclick: () => { selProfile = p.id; setSketchTool('select'); renderPalette(); refreshOverlays(); },
+    html: icon(p.kind === 'rect' ? 'rect2' : p.kind === 'poly' ? 'line' : p.kind) + `<span class="lab">${({ rect: 'Rectangle', circle: 'Circle', polygon: 'Polygon', slot: 'Slot', poly: 'Line profile' })[p.kind]}</span><span class="key">${profileSummary(p)}</span>` })));
+  if (!sk.profiles.length) list.append(h('p', { class: 'note', style: 'padding:4px 6px;margin:0' }, 'No profiles yet. Choose Line, Rectangle, Circle, Polygon or Slot in the Sketch tab.'));
+  body.append(section_('Profiles (' + sk.profiles.length + ')', list));
+  const pr = sk.profiles.find(p => p.id === selProfile);
+  if (pr) {
+    const F = (label, key, unit = 'mm', o = {}) => exField(label, pr, key, unit, { id: 'pf-' + (o.fid || key), ...o });
+    const kids = [];
+    if (pr.kind !== 'poly') kids.push(F('Center X', 'cx'), F('Center Y', 'cy'));
+    if (pr.kind === 'rect') kids.push(F('Width', 'w', 'mm', { min: 0.01 }), F('Height', 'h', 'mm', { min: 0.01 }), F('Corner radius', 'r', 'mm', { min: 0 }), F('Rotation', 'rot', '°'));
+    if (pr.kind === 'circle') {
+      const proxy = { id: pr.id, get d() { return typeof pr.r === 'number' ? pr.r * 2 : '2*(' + pr.r + ')'; }, set d(v) { pr.r = typeof v === 'number' ? v / 2 : '(' + v + ')/2'; } };
+      kids.push(exField('Diameter', proxy, 'd', 'mm', { id: 'pf-d', min: 0.01 }));
+    }
+    if (pr.kind === 'polygon') kids.push(F('Radius', 'r', 'mm', { min: 0.01 }), F('Sides', 'sides', '', { min: 3, max: 64 }), F('Rotation', 'rot', '°'));
+    if (pr.kind === 'slot') kids.push(F('Length', 'length', 'mm', { min: 0.01 }), F('Width', 'width', 'mm', { min: 0.01 }), F('Rotation', 'rot', '°'));
+    if (pr.kind === 'poly') pr.pts.forEach((p, i) => kids.push(h('div', { class: 'row' }, h('span', { class: 'rl' }, 'Point ' + (i + 1)),
+      h('div', { style: 'display:grid;grid-template-columns:1fr 1fr;gap:4px' }, ...[['x', 'X'], ['y', 'Y']].map(([k]) => exField('', p, k, k.toUpperCase(), { id: `pf-pts-${i}-${k}` }).lastChild)))));
+    kids.push(h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn danger', onclick: () => deleteProfile(pr.id), html: icon('delete') + 'Delete profile' })));
+    body.append(section_('Selected profile', ...kids));
+  }
+  const foot = h('div', { class: 'dfoot' }, h('span', { class: 'info', title: 'Profiles inside other profiles become holes. Values accept expressions.', html: icon('info') }), h('button', { class: 'btn go', onclick: () => finishSketch(), html: icon('finish') + 'Finish Sketch' }));
+  el.append(head, body, foot);
+}
+function profileSummary(p) {
+  const r = liveProfiles({ ...featById(sketchId), profiles: [p] })[0] || p;
+  if (p.kind === 'rect') return fmt(r.w) + ' × ' + fmt(r.h);
+  if (p.kind === 'circle') return 'Ø ' + fmt(r.r * 2);
+  if (p.kind === 'polygon') return r.sides + ' sides · R' + fmt(r.r);
+  if (p.kind === 'slot') return fmt(r.length) + ' × ' + fmt(r.width);
+  if (p.kind === 'poly') return p.pts.length + ' points';
+  return '';
+}
+
+// ---------- modals ----------
+function openModal(title, iconKey, body, buttons) {
+  const m = $('#modal'); m.replaceChildren();
+  const head = h('div', { class: 'dhead', html: icon(iconKey) + `<span>${title}</span>` });
+  head.append(h('button', { class: 'x', 'aria-label': 'Close', onclick: closeModal, html: icon('close') }));
+  const foot = h('div', { class: 'dfoot' }, h('span', { class: 'info' }), ...(buttons || [h('button', { class: 'btn ok', onclick: closeModal }, 'Close')]));
+  m.append(head, body, foot);
+  $('#modalBack').hidden = false;
+  setTimeout(() => (m.querySelector('input, button.ok') || m).focus(), 0);
+}
+function closeModal() { $('#modalBack').hidden = true; $('#modal').replaceChildren(); }
+$('#modalBack').addEventListener('pointerdown', e => { if (e.target.id === 'modalBack') closeModal(); });
+
+function openParamsModal() {
+  const before = JSON.stringify(doc.params);
+  const work = JSON.parse(before);
+  const tbody = h('tbody');
+  const draw = () => {
+    tbody.replaceChildren();
+    const { vars, errors } = evalParams(work);
+    work.forEach((p, i) => {
+      const nm = h('input', { value: p.name, 'aria-label': 'Parameter name', spellcheck: 'false', class: errors[p.name] && !/^[A-Za-z_]/.test(p.name) ? 'bad' : '' });
+      const ex = h('input', { value: p.expr, 'aria-label': 'Expression for ' + p.name, spellcheck: 'false', class: errors[p.name] ? 'bad' : '', title: errors[p.name] || '' });
+      const cm = h('input', { value: p.comment || '', 'aria-label': 'Comment' });
+      nm.addEventListener('change', () => { p.name = nm.value.trim(); draw(); });
+      ex.addEventListener('change', () => { p.expr = ex.value.trim(); draw(); });
+      cm.addEventListener('change', () => { p.comment = cm.value; });
+      tbody.append(h('tr', {}, h('td', {}, nm), h('td', {}, ex), h('td', { class: 'num' }, errors[p.name] ? '—' : fmt(vars[p.name]) + ' mm'), h('td', {}, cm),
+        h('td', {}, h('button', { class: 'iconbtn', 'aria-label': 'Delete parameter ' + p.name, onclick: () => { work.splice(i, 1); draw(); }, html: icon('delete') }))));
+    });
+    if (!work.length) tbody.append(h('tr', {}, h('td', { colspan: '5', class: 'note' }, 'No parameters yet. Add one, then type its name into any dimension, for example width/2.')));
+  };
+  draw();
+  const add = h('button', { class: 'btn', onclick: () => { let n = 1; while (work.some(p => p.name === 'param' + n)) n++; work.push({ name: 'param' + n, expr: '10', comment: '' }); draw(); }, html: icon('plus') + 'Add parameter' });
+  const body = h('div', { class: 'tablewrap' }, h('p', { class: 'note' }, 'User parameters drive dimensions anywhere in the design. Expressions can use other parameters, + − × ÷ ^, parentheses and sqrt, sin, cos, tan (degrees), min, max, abs, round, pi.'),
+    h('table', { class: 'grid' }, h('thead', {}, h('tr', {}, h('th', {}, 'Name'), h('th', {}, 'Expression'), h('th', {}, 'Value'), h('th', {}, 'Comment'), h('th', {}, ''))), tbody), h('div', { style: 'padding-top:8px' }, add));
+  openModal('Change Parameters', 'params', body, [
+    h('button', { class: 'btn ok', onclick: () => { document.activeElement?.blur?.(); if (JSON.stringify(work) !== before) { checkpoint(); doc.params = work; scheduleRegen(0); } closeModal(); } }, 'OK'),
+    h('button', { class: 'btn', onclick: closeModal }, 'Cancel')]);
+}
+function openBOMModal() {
+  const mp = massProps();
+  const rows = mp.bodies.map((b, i) => h('tr', {}, h('td', { class: 'num' }, String(i + 1)), h('td', {}, h('span', { class: 'swatch', style: `display:inline-block;margin-right:6px;background:${bodyColor(b.id)}` }), b.name),
+    h('td', {}, b.material), h('td', { class: 'num' }, '1'), h('td', { class: 'num' }, fix(b.volume / 1000, 2) + ' cm³'), h('td', { class: 'num' }, fix(b.mass, 1) + ' g'),
+    h('td', { class: 'num' }, `${fix(b.size.x)} × ${fix(b.size.y)} × ${fix(b.size.z)}`)));
+  const total = mp.bodies.reduce((s, b) => s + b.mass, 0);
+  const body = h('div', { class: 'tablewrap' }, h('table', { class: 'grid' },
+    h('thead', {}, h('tr', {}, ...['#', 'Body', 'Material', 'Qty', 'Volume', 'Mass', 'Size (mm)'].map(t => h('th', {}, t)))), h('tbody', {}, rows.length ? rows : h('tr', {}, h('td', { colspan: '7', class: 'note' }, 'No bodies yet.'))),
+    h('tfoot', {}, h('tr', {}, h('td', {}), h('td', {}, 'Total'), h('td', {}), h('td', { class: 'num' }, String(mp.bodies.length)), h('td', {}), h('td', { class: 'num' }, fix(total, 1) + ' g'), h('td', {})))));
+  const csv = () => ['#,Body,Material,Qty,Volume cm3,Mass g,Size X,Size Y,Size Z', ...mp.bodies.map((b, i) => [i + 1, '"' + b.name + '"', '"' + b.material + '"', 1, (b.volume / 1000).toFixed(3), b.mass.toFixed(2), b.size.x.toFixed(2), b.size.y.toFixed(2), b.size.z.toFixed(2)].join(','))].join('\n');
+  openModal('Bill of Materials', 'bom', body, [h('button', { class: 'btn', onclick: () => saveFile(slug() + '-bom.csv', csv(), 'text/csv'), html: icon('exportstl') + 'Save CSV' }), h('button', { class: 'btn ok', onclick: closeModal }, 'Close')]);
+}
+function openPropertiesModal() {
+  const mp = massProps();
+  const dl = (pairs) => h('dl', { class: 'stat' }, ...pairs.flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]));
+  const c = mp.total.com;
+  const body = h('div', { class: 'tablewrap' },
+    h('p', { class: 'note' }, isBrep() ? 'Computed exactly from the solid geometry.' : 'Computed from the display mesh (the exact engine is not running).'),
+    h('h4', { style: 'margin:4px 0 8px' }, 'Visible bodies'),
+    dl([['Mass', fix(mp.total.mass, 2) + ' g'], ['Volume', fix(mp.total.volume / 1000, 3) + ' cm³'], ['Surface area', fix(mp.total.area / 100, 2) + ' cm²'], ['Center of mass', `${fix(c.x, 2)}, ${fix(c.y, 2)}, ${fix(c.z, 2)} mm`]]),
+    ...mp.bodies.map(b => h('div', { style: 'border-top:1px solid var(--line);margin-top:10px;padding-top:8px' }, h('h4', { style: 'margin:0 0 6px' }, b.name + (b.hidden ? ' (hidden)' : '')),
+      dl([['Material', b.material], ['Density', MATERIALS[b.material]?.density + ' g/cm³'], ['Mass', fix(b.mass, 2) + ' g'], ['Volume', fix(b.volume / 1000, 3) + ' cm³'], ['Area', fix(b.area / 100, 2) + ' cm²'],
+        ['Bounding box', `${fix(b.size.x, 2)} × ${fix(b.size.y, 2)} × ${fix(b.size.z, 2)} mm`], ['Center of mass', `${fix(b.com.x, 2)}, ${fix(b.com.y, 2)}, ${fix(b.com.z, 2)}`], ['Triangles', b.tris.toLocaleString('en-US')]]))));
+  openModal('Properties', 'properties', body);
+}
+function openHelpModal() {
+  const keys = [['Create Sketch', 'Sketch button, then pick a plane or flat face'], ['E', 'Extrude'], ['H', 'Hole'], ['M', 'Move/Copy'], ['I', 'Measure'], ['A', 'Appearance'], ['Del', 'Delete selection'],
+    ['L / R / C / P / S', 'Sketch: Line, Rectangle, Circle, Polygon, Slot'], ['Enter', 'Close a line profile · OK in a dialog'], ['Esc', 'Cancel the current tool or dialog'], ['Ctrl Z / Ctrl Y', 'Undo / Redo'],
+    ['Mouse', 'Left-drag orbits, right- or middle-drag pans, wheel zooms'], ['Timeline', 'Click selects, click again or double-click edits, right-click for more, drag the orange marker to roll back']];
+  const road = [[P1, 'Done: exact geometry engine, fillet, chamfer, shell, STEP export. Next: draft, sweep, loft, press pull, STEP import, sketch constraints, arcs and splines, mesh tools'],
+    [P2, 'Components and assemblies with joints, animation, 2D drawings, render, decals, add-ins'], [P3, 'Manufacture (CAM toolpaths, G-code), sheet metal, plastic design, nesting'], [P4, 'Simulation (stress, deflection)'], [P5, 'Generative design and freeform']];
+  const body = h('div', { class: 'tablewrap' },
+    h('table', { class: 'grid' }, h('thead', {}, h('tr', {}, h('th', {}, 'Shortcut'), h('th', {}, 'Action'))), h('tbody', {}, keys.map(([k, v]) => h('tr', {}, h('td', { class: 'num', style: 'text-align:left' }, k), h('td', {}, v))))),
+    h('h4', { style: 'margin:14px 0 6px' }, 'Roadmap'),
+    h('table', { class: 'grid' }, h('tbody', {}, road.map(([k, v]) => h('tr', {}, h('td', { style: 'white-space:nowrap;font-weight:600' }, k), h('td', {}, v))))));
+  openModal('Help', 'help', body);
+}

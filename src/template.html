@@ -1,0 +1,76 @@
+<title>Draftwork Modeler</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@500;600&display=swap">
+<style>
+/*__CSS__*/
+</style>
+
+<div class="app" id="app">
+  <header class="appbar">
+    <div class="ab-left">
+      <span class="logo" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 17l8 4 8-4M4 12l8 4 8-4M12 3l8 4-8 4-8-4 8-4z"/></svg></span>
+      <button class="abtn" id="abData" aria-label="Data panel" title="Data panel"></button>
+      <button class="abtn wide" id="abFile" aria-haspopup="true" aria-label="File menu" title="File"></button>
+      <button class="abtn" id="abSave" aria-label="Save project" title="Save project"></button>
+      <span class="ab-sep" aria-hidden="true"></span>
+      <button class="abtn" id="abUndo" aria-label="Undo" title="Undo (Ctrl+Z)"></button>
+      <button class="abtn" id="abRedo" aria-label="Redo" title="Redo (Ctrl+Y)"></button>
+    </div>
+    <div class="doctab" title="Document"><span class="doc-ico" id="docIco"></span><span id="docTitle">Untitled</span><span class="dirty" id="dirty" hidden>edited</span></div>
+    <div class="ab-right"><button class="engine loading" id="engineBadge" type="button"></button><span class="brand">Draftwork</span><button class="abtn" id="abHelp" aria-label="Help" title="Help"></button></div>
+  </header>
+
+  <div class="ribbon">
+    <div class="ws"><button id="wsBtn" aria-haspopup="true" aria-expanded="false"><span>DESIGN</span></button></div>
+    <div class="rmain">
+      <div class="rtabs" id="rtabs" role="tablist" aria-label="Workspace tabs"></div>
+      <div class="rgroups" id="rgroups" role="toolbar" aria-label="Commands"></div>
+    </div>
+  </div>
+
+  <main class="stage" id="stage">
+    <div class="viewport" id="viewport" aria-label="3D canvas"></div>
+    <aside class="browser" id="browser" aria-label="Browser">
+      <div class="bhead"><span>BROWSER</span><button class="bmin" id="bMin" aria-label="Collapse browser" aria-expanded="true">–</button></div>
+      <div class="btree" id="btree" role="tree"></div>
+    </aside>
+    <div class="viewcube" id="viewcube"><button class="vc-home" id="vcHome" aria-label="Home view" title="Home view"></button></div>
+    <section class="dialog" id="dialog" hidden aria-live="polite"></section>
+    <section class="palette" id="palette" hidden aria-label="Sketch palette"></section>
+    <div class="navbar" id="navbar" role="toolbar" aria-label="Navigation"></div>
+    <div class="hint" id="hint"></div>
+    <div class="busy" id="busy" hidden>Computing…</div>
+  </main>
+
+  <footer class="timeline" aria-label="Timeline">
+    <div class="tl-ctrl" role="group" aria-label="History marker">
+      <button id="tlStart" aria-label="Go to beginning" title="Go to beginning"></button>
+      <button id="tlPrev" aria-label="Step back" title="Step back"></button>
+      <button id="tlNext" aria-label="Step forward" title="Step forward"></button>
+      <button id="tlEnd" aria-label="Go to end" title="Go to end"></button>
+    </div>
+    <div class="tl-track" id="tlTrack"></div>
+    <div class="tl-info" id="tlInfo"></div>
+  </footer>
+
+  <div id="menus"></div>
+  <div class="modal-back" id="modalBack" hidden><section class="modal" id="modal" role="dialog" aria-modal="true"></section></div>
+  <div class="toast" id="toast" role="status" hidden></div>
+  <input type="file" id="fileInput" accept=".json,application/json" hidden>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.184.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.184.0/examples/jsm/",
+  "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.15/build/index.module.js",
+  "three-bvh-csg": "https://cdn.jsdelivr.net/npm/three-bvh-csg@0.0.18/build/index.module.js",
+  "replicad": "https://cdn.jsdelivr.net/npm/replicad@1.1.0/dist/replicad.js",
+  "replicad-occ": "https://cdn.jsdelivr.net/npm/replicad-opencascadejs@1.1.0/dist/replicad_single.js"
+} }
+</script>
+<script type="module">
+/*__JS__*/
+</script>

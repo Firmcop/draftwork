@@ -1,0 +1,822 @@
+// ===== Commands, picking, sketching, measuring, view cube, navigation, boot =====
+const NAMES = { sketch: 'Sketch', plane: 'Plane', extrude: 'Extrude', revolve: 'Revolve', box: 'Box', cylinder: 'Cylinder', sphere: 'Sphere', torus: 'Torus', hole: 'Hole', pattern: 'Pattern', mirror: 'Mirror', move: 'Move', combine: 'Combine', remove: 'Remove', fillet: 'Fillet', chamfer: 'Chamfer', shell: 'Shell' };
+function nextName(type) {
+  let n = doc.features.filter(f => f.type === type).length + 1;
+  while (doc.features.some(f => f.name === NAMES[type] + ' ' + n)) n++;
+  return NAMES[type] + ' ' + n;
+}
+const insertIndex = () => doc.rollback == null ? doc.features.length : doc.rollback + 1;
+function bodiesAtInsert() {
+  const i = insertIndex();
+  return i < doc.features.length ? (result.before.get(doc.features[i].id) || []) : [...result.bodies.keys()];
+}
+function insertFeature(f) {
+  const i = insertIndex();
+  doc.features.splice(i, 0, f);
+  if (doc.rollback != null) doc.rollback = i >= doc.features.length - 1 ? null : i;
+  selFeature = f.id; selBody = null;
+}
+function deleteFeature(id) {
+  const i = featIndex(id); if (i < 0) return;
+  const f = doc.features[i];
+  if (dlg?.fid === id) closeDialog(true, true);
+  checkpoint();
+  doc.features.splice(i, 1);
+  if (doc.rollback != null) { if (doc.rollback >= i) doc.rollback--; if (doc.rollback >= doc.features.length - 1) doc.rollback = null; }
+  if (sketchId === id) exitSketch(true);
+  selFeature = null; scheduleRegen(0);
+  toast(`Deleted ${f.name}. Undo brings it back.`);
+}
+function setHint(t) { $('#hint').textContent = t || ''; }
+function defaultHint() {
+  if (pick) return setHint(pick.prompt + ' · Esc cancels');
+  if (measure) return setHint('Click points on the model to measure between them · Esc closes');
+  if (mode === 'sketch') {
+    const t = { select: 'Click a profile to select it, drag to move it', line: lineDraft?.pts.length ? 'Click to add points. Click the first point or press Enter to close the profile' : 'Click to place the first point of a closed line profile',
+      rect2: 'Drag from corner to corner', rectc: 'Drag from the center to a corner', circle: 'Drag from the center outward', polygon: 'Drag from the center to a corner (6 sides, editable)', slot: 'Drag from one end center to the other' }[sketchTool];
+    return setHint(t);
+  }
+  setHint('');
+}
+
+// ---------- selection & editing ----------
+function selectFeature(id) {
+  if (mode === 'sketch' && id !== sketchId) finishSketch(true);
+  if (dlg) closeDialog(true);
+  selFeature = id; selBody = null;
+  updateScene(); renderTimeline(); renderBrowser();
+}
+function selectBody(id) {
+  if (dlg && !dlg.custom) closeDialog(true);
+  selBody = id; selFeature = null;
+  updateScene(); renderTimeline(); renderBrowser();
+}
+function editFeature(id) {
+  const f = featById(id); if (!f) return;
+  const i = featIndex(id);
+  if (doc.rollback != null && i > doc.rollback) { doc.rollback = i >= doc.features.length - 1 ? null : i; scheduleRegen(0); }
+  if (f.type === 'sketch') enterSketch(id); else openFeatureDialog(id, false);
+}
+
+// ---------- create commands ----------
+let lastSketchId = null;
+function activeSketch() {
+  const end = insertIndex();
+  const ok = s => s && s.type === 'sketch' && s.profiles.length && featIndex(s.id) < end && statusOf(s.id).state === 'ok';
+  const sel = selFeature && featById(selFeature);
+  if (ok(sel)) return sel;
+  if (lastSketchId && ok(featById(lastSketchId))) return featById(lastSketchId);
+  for (let i = end - 1; i >= 0; i--) if (ok(doc.features[i])) return doc.features[i];
+  return null;
+}
+function newProfileFeature(type) {
+  const sk = activeSketch();
+  if (!sk) { toast('Create a sketch with a closed profile first'); return; }
+  const snap = JSON.stringify(doc); checkpoint();
+  const op = bodiesAtInsert().length ? 'join' : 'new';
+  const f = type === 'extrude'
+    ? { id: uid(), type, name: nextName(type), sketch: sk.id, distance: 10, direction: 'one', op, target: null }
+    : { id: uid(), type, name: nextName(type), sketch: sk.id, axis: 'v', angle: 360, op, target: null };
+  insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
+}
+function startCreateSketch() {
+  startPick({ prompt: 'Select a plane or flat face to sketch on', planes: true, faces: true, then: c => {
+    checkpoint();
+    const f = { id: uid(), type: 'sketch', name: nextName('sketch'), plane: c.plane, offset: c.offset || 0, flip: !!c.flip, profiles: [] };
+    insertFeature(f); lastSketchId = f.id;
+    doRegen(); enterSketch(f.id); setSketchTool('rect2');
+  } });
+}
+const PLACED_DEFAULTS = {
+  hole: { diameter: 6, depth: 10, cbore: false, cbDiameter: 11, cbDepth: 4, tip: true, tipAngle: 118 },
+  box: { w: 40, d: 30, h: 20 }, cylinder: { diameter: 30, h: 30 }, sphere: { diameter: 30 }, torus: { major: 40, minor: 10 },
+};
+function startPlaced(type) {
+  startPick({ prompt: type === 'hole' ? 'Click a flat face or plane where the hole goes' : `Click a plane or flat face to place the ${TYPE[type].label.toLowerCase()}`, planes: true, faces: true, then: c => {
+    const snap = JSON.stringify(doc); checkpoint();
+    const f = { id: uid(), type, name: nextName(type), plane: c.plane, offset: c.offset || 0, flip: !!c.flip, cx: c.local ? c.local.x : 0, cy: c.local ? c.local.y : 0, ...PLACED_DEFAULTS[type] };
+    if (type !== 'hole') { f.op = bodiesAtInsert().length && c.face ? 'join' : 'new'; f.target = null; }
+    insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
+  } });
+}
+function repositionPlaced(f) {
+  startPick({ prompt: 'Click the new face and point', planes: true, faces: true, then: c => {
+    checkpoint(); Object.assign(f, { plane: c.plane, offset: c.offset || 0, flip: !!c.flip, cx: c.local ? c.local.x : f.cx, cy: c.local ? c.local.y : f.cy });
+    rerenderDialog(); scheduleRegen(0);
+  } });
+}
+function startOffsetPlane() {
+  startPick({ prompt: 'Select a plane or flat face to offset from', planes: true, faces: true, then: c => {
+    const snap = JSON.stringify(doc); checkpoint();
+    const f = { id: uid(), type: 'plane', name: nextName('plane'), base: c.plane, offset: fmt((c.offset || 0) + (c.flip ? -10 : 10)) * 1, flip: !!c.flip };
+    insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
+  } });
+}
+function lastSolidBefore() {
+  const end = insertIndex(), sel = selFeature && featById(selFeature);
+  if (sel && SOLIDS.has(sel.type) && featIndex(sel.id) < end) return sel;
+  for (let i = end - 1; i >= 0; i--) if (SOLIDS.has(doc.features[i].type) && !doc.features[i].suppressed) return doc.features[i];
+  return null;
+}
+function newRepeat(type, kind) {
+  const src = lastSolidBefore();
+  if (!src) { toast('Create a solid feature first, then pattern or mirror it'); return; }
+  const snap = JSON.stringify(doc); checkpoint();
+  const f = type === 'pattern'
+    ? { id: uid(), type, name: nextName(type), kind, source: src.id, axis: kind === 'circular' ? 'Z' : 'X', count: kind === 'circular' ? 4 : 3, angle: 360, spacing: 20, axis2: 'Y', count2: 1, spacing2: 20 }
+    : { id: uid(), type, name: nextName(type), source: src.id, plane: 'YZ' };
+  insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
+}
+function newMove() {
+  const bodies = bodiesAtInsert();
+  if (!bodies.length) { toast('There is no body to move yet'); return; }
+  const body = selBody && bodies.includes(selBody) ? selBody : bodies[bodies.length - 1];
+  const snap = JSON.stringify(doc); checkpoint();
+  const f = { id: uid(), type: 'move', name: nextName('move'), body, copy: false, dx: 0, dy: 0, dz: 0, rx: 0, ry: 0, rz: 0 };
+  insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
+}
+function newCombine() {
+  const bodies = bodiesAtInsert();
+  if (bodies.length < 2) { toast('Combine needs at least two bodies. Use New Body when you extrude or add a box.'); return; }
+  const target = selBody && bodies.includes(selBody) ? selBody : bodies[0];
+  const snap = JSON.stringify(doc); checkpoint();
+  const f = { id: uid(), type: 'combine', name: nextName('combine'), target, tools: bodies.filter(b => b !== target).slice(0, 1), op: 'join', keep: false };
+  insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
+}
+function newEdgeFeature(type) {
+  if (!isBrep()) { toast(engineState === 'loading' ? 'The exact geometry engine is still loading. Try again in a moment.' : `${TYPE[type].label} needs the exact geometry engine, which could not start here: ${engineMsg}`); return; }
+  if (!bodiesAtInsert().length) { toast('There is no body yet'); return; }
+  const snap = JSON.stringify(doc); checkpoint();
+  const f = { id: uid(), type, name: nextName(type), edges: [], ...(type === 'fillet' ? { radius: 2 } : type === 'chamfer' ? { distance: 1 } : { thickness: 2 }) };
+  insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
+  toast(type === 'shell' ? 'Click the faces to open' : 'Click the edges to ' + (type === 'fillet' ? 'round' : 'bevel'));
+}
+// ---- edge / face picking for fillet, chamfer, shell ----
+function mmPerPx() { const r = renderer.domElement.getBoundingClientRect(); return camera.position.distanceTo(controls.target) * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / r.height; }
+function brepEdgeHit(e) {
+  raycaster.setFromCamera(ndcOf(e), camera);
+  raycaster.params.Line.threshold = mmPerPx() * 6;
+  const objs = []; for (const [, s] of shownBodies) if (s.edges.visible !== false && s.rec.shape && s.mesh.visible) objs.push(s.edges);
+  scene.updateMatrixWorld();
+  const hit = raycaster.intersectObjects(objs, false)[0];
+  if (!hit) return null;
+  const s = shownBodies.get(hit.object.userData.body); if (!s) return null;
+  const m = brepMeshOf(s.rec), hash = m.segEdge[Math.floor(hit.index / 2)];
+  return hash == null ? null : { body: s.rec.id, rec: s.rec, hash, sig: brepSigMap(s.rec, 'edge').get(hash) };
+}
+function brepFaceHit(e) {
+  raycaster.setFromCamera(ndcOf(e), camera);
+  const objs = []; for (const [, s] of shownBodies) if (s.rec.shape && s.mesh.visible) objs.push(s.mesh);
+  scene.updateMatrixWorld();
+  const hit = raycaster.intersectObjects(objs, false)[0];
+  if (!hit) return null;
+  const s = shownBodies.get(hit.object.userData.body); const m = brepMeshOf(s.rec), hash = m.triFace[hit.faceIndex];
+  return { body: s.rec.id, rec: s.rec, hash, sig: brepSigMap(s.rec, 'face').get(hash) };
+}
+function toggleRef(f, hit) {
+  if (!hit?.sig) return;
+  checkpoint();
+  const key = f.type === 'shell' ? 'c' : 'p';
+  const cur = brepRefHashes(hit.rec, f.edges || [], f.type === 'shell' ? 'face' : 'edge');
+  if (cur.has(hit.hash)) {
+    // remove the stored reference that resolves to this item
+    f.edges = (f.edges || []).filter(r => !brepRefHashes(hit.rec, [r], f.type === 'shell' ? 'face' : 'edge').has(hit.hash));
+  } else f.edges = [...(f.edges || []), JSON.parse(JSON.stringify(hit.sig))];
+  void key;
+  rerenderDialog(); drawToolsOverlay(); scheduleRegen(60);
+}
+function deleteSelection() {
+  if (selFeature) return deleteFeature(selFeature);
+  if (selBody) {
+    checkpoint();
+    const f = { id: uid(), type: 'remove', name: 'Remove ' + bodyName(selBody), body: selBody };
+    insertFeature(f); selFeature = null; selBody = null; scheduleRegen(0);
+    toast('Body removed. The Remove step is in the timeline.');
+    return;
+  }
+  toast('Select a body or a timeline step first');
+}
+
+// ---------- material & appearance (not in the timeline) ----------
+function bodyTargetSelect(state) {
+  const s = h('select', { id: 'mt-body' }, h('option', { value: '' }, 'All bodies (default)'), [...result.bodies.keys()].map(id => h('option', { value: id, selected: state.body === id }, bodyName(id))));
+  s.addEventListener('change', () => { state.body = s.value || null; rerenderDialog(); });
+  return row('Bodies', s, 'mt-body');
+}
+function openMaterialDialog() {
+  const before = JSON.stringify({ m: doc.bodyMeta, d: doc.material });
+  const st = { body: selBody };
+  let changed = false;
+  openPanelDialog({ title: 'Physical Material', icon: 'material', help: 'Material sets density for mass and the default color.',
+    body: () => {
+      const cur = st.body ? bodyMaterial(st.body) : doc.material;
+      const list = h('div', { class: 'picklist', style: 'max-height:260px' });
+      for (const [name, m] of Object.entries(MATERIALS)) {
+        list.append(h('button', { class: 'mi', style: name === cur ? 'background:var(--hover)' : '', 'aria-pressed': String(name === cur), onclick: () => {
+          if (!changed) { checkpoint(); changed = true; }
+          if (st.body) { meta(st.body).material = name; delete meta(st.body).color; } else { doc.material = name; for (const k in doc.bodyMeta) { delete doc.bodyMeta[k].material; delete doc.bodyMeta[k].color; } }
+          mpCache = null; updateScene(); renderBrowser(); renderInfo(); rerenderDialog(); persist();
+        }, html: `<span class="swatch" style="background:${m.color};width:14px;height:14px"></span><span class="lab">${name}</span><span class="key">${m.density} g/cm³</span>` }));
+      }
+      return [section_('Apply to', bodyTargetSelect(st)), section_('Library', list)];
+    },
+    onOK: () => { },
+    onCancel: () => { if (changed) { const b = JSON.parse(before); doc.bodyMeta = b.m; doc.material = b.d; history.undo.pop(); updateUndoButtons(); mpCache = null; updateScene(); renderBrowser(); renderInfo(); } },
+  });
+}
+function openAppearanceDialog() {
+  const before = JSON.stringify(doc.bodyMeta);
+  const st = { body: selBody || [...result.bodies.keys()][0] || null };
+  if (!st.body) { toast('There is no body to color yet'); return; }
+  let changed = false;
+  openPanelDialog({ title: 'Appearance', icon: 'appearance', help: 'Appearance changes color only. Mass still comes from the physical material.',
+    body: () => {
+      const s = h('select', { id: 'ap-body' }, [...result.bodies.keys()].map(id => h('option', { value: id, selected: st.body === id }, bodyName(id))));
+      s.addEventListener('change', () => { st.body = s.value; rerenderDialog(); });
+      const c = h('input', { type: 'color', id: 'ap-color', value: bodyColor(st.body), style: 'width:100%;height:32px;border:1px solid var(--line);border-radius:3px;background:var(--raised)' });
+      c.addEventListener('input', () => { if (!changed) { checkpoint(); changed = true; } meta(st.body).color = c.value; updateScene(); renderBrowser(); persist(); });
+      const sw = h('div', { style: 'display:flex;flex-wrap:wrap;gap:4px' }, ['#D24D3E', '#E58A2E', '#E8C547', '#4DA463', '#3F8FD6', '#7559C7', '#2F3640', '#F2F2EE'].map(col => h('button', { class: 'iconbtn', 'aria-label': 'Color ' + col, style: `background:${col};border:1px solid var(--line)`, onclick: () => { if (!changed) { checkpoint(); changed = true; } meta(st.body).color = col; updateScene(); renderBrowser(); rerenderDialog(); persist(); } })));
+      return [section_('Body', row('Body', s, 'ap-body')), section_('Color', row('Custom', c, 'ap-color'), h('div', { class: 'row' }, h('span', { class: 'rl' }, 'Swatches'), sw),
+        h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn', onclick: () => { if (!changed) { checkpoint(); changed = true; } delete meta(st.body).color; updateScene(); renderBrowser(); rerenderDialog(); } }, 'Use material color')))];
+    },
+    onOK: () => { },
+    onCancel: () => { if (changed) { doc.bodyMeta = JSON.parse(before); history.undo.pop(); updateUndoButtons(); updateScene(); renderBrowser(); } },
+  });
+}
+
+// ---------- inspect ----------
+function startMeasure() {
+  if (measure) { closeDialog(false); return; }
+  cancelPick();
+  measure = { pts: [] };
+  openPanelDialog({ title: 'Measure', icon: 'measure', cancelLabel: 'Close', help: 'Points snap to nearby corners.',
+    body: () => {
+      const [a, b] = measure?.pts || [];
+      const kids = [h('p', { class: 'note' }, a && b ? 'Click again to start a new measurement.' : a ? 'Click the second point.' : 'Click the first point on the model.')];
+      if (a && b) {
+        const d = b.clone().sub(a);
+        kids.push(h('dl', { class: 'stat' }, ...[['Distance', fix(d.length(), 3) + ' mm'], ['ΔX', fix(d.x, 3) + ' mm'], ['ΔY', fix(d.y, 3) + ' mm'], ['ΔZ', fix(d.z, 3) + ' mm'],
+          ['Point 1', `${fix(a.x, 2)}, ${fix(a.y, 2)}, ${fix(a.z, 2)}`], ['Point 2', `${fix(b.x, 2)}, ${fix(b.y, 2)}, ${fix(b.z, 2)}`]].flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])));
+      }
+      return [section_('Result', ...kids), section_(null, h('button', { class: 'btn', onclick: () => { measure.pts = []; drawToolsOverlay(); rerenderDialog(); } }, 'Clear'))];
+    },
+    onCancel: () => { measure = null; drawToolsOverlay(); defaultHint(); renderRibbon(); },
+  });
+  defaultHint(); renderRibbon();
+}
+function openSectionDialog() {
+  const prev = section ? { ...section } : null;
+  if (!section) { const b = visibleBox(); section = { axis: 'Z', offset: +fix(b.getCenter(new THREE.Vector3()).z, 1).replace(/,/g, ''), flip: false }; }
+  section.hidden = false;
+  const apply = () => { updateScene(); renderBrowser(); };
+  openPanelDialog({ title: 'Section Analysis', icon: 'section', help: 'Cuts the view, not the model.',
+    body: () => {
+      const b = visibleBox(), lo = b.min[section.axis.toLowerCase()], hi = b.max[section.axis.toLowerCase()];
+      const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Section plane' });
+      for (const [v, t] of [['X', 'YZ (X)'], ['Y', 'XZ (Y)'], ['Z', 'XY (Z)']]) seg.append(h('button', { type: 'button', 'aria-pressed': String(section.axis === v), onclick: () => { section.axis = v; const bb = visibleBox(); section.offset = +((bb.min[v.toLowerCase()] + bb.max[v.toLowerCase()]) / 2).toFixed(1); apply(); rerenderDialog(); } }, t));
+      const num = h('input', { type: 'number', id: 'sec-off', step: '0.5', value: String(section.offset), style: 'width:100%;height:28px;border:1px solid var(--line);border-radius:3px;background:var(--raised);padding:0 6px;font-family:var(--font-data)' });
+      const rng = h('input', { type: 'range', id: 'sec-rng', min: String(Math.floor(lo - 1)), max: String(Math.ceil(hi + 1)), step: '0.5', value: String(section.offset), style: 'width:100%', 'aria-label': 'Section position' });
+      num.addEventListener('input', () => { if (isFinite(+num.value)) { section.offset = +num.value; rng.value = num.value; apply(); } });
+      rng.addEventListener('input', () => { section.offset = +rng.value; num.value = rng.value; apply(); });
+      const fl = h('input', { type: 'checkbox', id: 'sec-flip', checked: section.flip });
+      fl.addEventListener('change', () => { section.flip = fl.checked; apply(); });
+      return [section_('Plane', h('div', { class: 'row' }, h('span', { class: 'rl' }, 'Cut along'), seg), row('Position (mm)', num, 'sec-off'), h('div', { class: 'row' }, h('span', { class: 'rl' }), rng),
+        h('div', { class: 'row' }, h('span', { class: 'rl' }), h('label', { class: 'chk', for: 'sec-flip' }, fl, 'Flip side')))];
+    },
+    onOK: () => { apply(); renderRibbon(); },
+    onCancel: () => { section = prev; apply(); renderRibbon(); },
+  });
+  apply();
+}
+function applySectionVisibility() { updateScene(); renderBrowser(); }
+function toggleCOM() {
+  if (showCOM) { showCOM = false; if (dlg?.custom?.title === 'Center of Mass') closeDialog(false); drawToolsOverlay(); renderRibbon(); return; }
+  showCOM = true; drawToolsOverlay();
+  openPanelDialog({ title: 'Center of Mass', icon: 'com', cancelLabel: 'Close', help: 'Uses each body\'s physical material.',
+    body: () => { const mp = massProps(), c = mp.total.com; return [section_('Visible bodies', h('dl', { class: 'stat' }, ...[['X', fix(c.x, 3) + ' mm'], ['Y', fix(c.y, 3) + ' mm'], ['Z', fix(c.z, 3) + ' mm'], ['Mass', fix(mp.total.mass, 2) + ' g']].flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])))]; },
+    onCancel: () => { showCOM = false; drawToolsOverlay(); renderRibbon(); },
+  });
+}
+
+// ---------- files ----------
+let downloadsNS = null;
+try { window.claude?.use?.('downloads')?.then(ns => { downloadsNS = ns; }).catch(() => { }); } catch (e) { }
+async function saveFile(filename, data, mime = 'application/octet-stream') {
+  if (downloadsNS) {
+    try { await downloadsNS.save({ filename, data }); toast('Saved ' + filename); }
+    catch (e) { toast(e?.code === 'declined' ? 'Save cancelled' : 'This view cannot save files (' + (e?.code || 'unavailable') + ')'); }
+    return;
+  }
+  const url = URL.createObjectURL(data instanceof Blob ? data : new Blob([data], { type: mime }));
+  const a = h('a', { href: url, download: filename }); document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 4000);
+  toast('Saved ' + filename);
+}
+const slug = () => (doc.name || 'design').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'design';
+function saveProject() { saveFile(slug() + '.draftwork.json', JSON.stringify(doc, null, 2), 'application/json'); dirty = false; $('#dirty').hidden = true; }
+function openExportDialog(only) {
+  const ids = [...result.bodies.keys()];
+  if (!ids.length) { toast('There is no body to export yet'); return; }
+  const st = { pick: new Set(only || ids.filter(id => !bodyHidden(id))), separate: false, format: isBrep() ? 'step' : 'stl' };
+  openPanelDialog({ title: 'Export', icon: 'exportstl', okLabel: 'Export', help: 'Files are packed in a .zip together with the project file.',
+    body: () => {
+      const list = h('div', { class: 'picklist' });
+      for (const id of ids) {
+        const cid = 'ex-' + id.replace(/[^a-z0-9]/gi, '_');
+        const c = h('input', { type: 'checkbox', id: cid, checked: st.pick.has(id) });
+        c.addEventListener('change', () => { c.checked ? st.pick.add(id) : st.pick.delete(id); });
+        list.append(h('label', { class: 'chk', for: cid }, c, h('span', { class: 'swatch', style: `background:${bodyColor(id)}` }), bodyName(id)));
+      }
+      const sep = h('input', { type: 'checkbox', id: 'ex-sep', checked: st.separate });
+      sep.addEventListener('change', () => { st.separate = sep.checked; });
+      const fmtSel = h('select', { id: 'ex-fmt' }, h('option', { value: 'step', selected: st.format === 'step', disabled: !isBrep() }, 'STEP (exact solids, for CAD and CAM)'), h('option', { value: 'stl', selected: st.format === 'stl' }, 'STL (mesh, for 3D printing)'));
+      fmtSel.addEventListener('change', () => { st.format = fmtSel.value; });
+      return [section_('Format', row('Format', fmtSel, 'ex-fmt'), isBrep() ? null : h('p', { class: 'note' }, 'STEP needs the exact engine, which is not running.')), section_('Bodies', list),
+        section_('Options', h('label', { class: 'chk', for: 'ex-sep' }, sep, 'One file per body'), h('p', { class: 'note' }, 'Units: millimeters.'))];
+    },
+    onOK: () => {
+      const chosen = ids.filter(id => st.pick.has(id));
+      if (!chosen.length) { toast('Choose at least one body'); return; }
+      const niOf = id => { const b = result.bodies.get(id); return b.shape ? brepGeomNI(b) : b.geom; };
+      const fname = id => bodyName(id).replace(/[^a-z0-9]+/gi, '-') || 'body';
+      (async () => {
+        let files;
+        if (st.format === 'step' && isBrep()) {
+          const item = id => ({ shape: result.bodies.get(id).shape, name: bodyName(id), color: bodyColor(id) });
+          const groups = st.separate ? chosen.map(id => [fname(id), [item(id)]]) : [[slug(), chosen.map(item)]];
+          files = [];
+          for (const [n, items] of groups) files.push({ name: n + '.step', data: new Uint8Array(await brepSTEP(items).arrayBuffer()) });
+        } else {
+          files = st.separate ? chosen.map(id => ({ name: fname(id) + '.stl', data: toBinarySTL(niOf(id), bodyName(id)) }))
+            : [{ name: slug() + '.stl', data: toBinarySTL(mergeBodies(chosen.map(niOf)), doc.name) }];
+        }
+        files.push({ name: slug() + '.draftwork.json', data: JSON.stringify(doc, null, 2) });
+        saveFile(slug() + '-' + st.format + '.zip', makeZip(files), 'application/zip');
+      })().catch(err => toast('Export failed: ' + occMsg(err)));
+    },
+  });
+}
+function loadDoc(d, msg) {
+  if (dlg) closeDialog(true, true);
+  if (mode === 'sketch') exitSketch(true);
+  cancelPick(); measure = null; section = null; showCOM = false;
+  checkpoint(); doc = d; cache = []; selFeature = null; selBody = null; lastSketchId = null;
+  afterDocReplace(); defaultHint(); renderRibbon(); setTimeout(() => setView('iso'), 80); if (msg) toast(msg);
+}
+$('#fileInput').addEventListener('change', e => {
+  const file = e.target.files?.[0]; if (!file) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try { const d = upgradeDoc(JSON.parse(rd.result)); if (!d) throw new Error('bad'); loadDoc(d, 'Opened ' + file.name); }
+    catch (err) { toast('That file is not a Draftwork project'); }
+  };
+  rd.readAsText(file); e.target.value = '';
+});
+
+// ---------- sketch mode ----------
+function enterSketch(id) {
+  const sk = featById(id); if (!sk) return;
+  if (dlg) closeDialog(true);
+  cancelPick();
+  mode = 'sketch'; sketchId = id; selFeature = id; selBody = null; selProfile = null; lineDraft = null; drag = null; activeTab = 'SKETCH';
+  lastSketchId = id;
+  renderRibbon(); renderPalette(); updateScene(); renderTimeline(); renderBrowser();
+  lookAtMatrix(sketchMatrix(sk));
+  setSketchTool('select');
+}
+function exitSketch(silent) {
+  mode = 'model'; sketchId = null; drag = null; lineDraft = null; selProfile = null; sketchTool = 'select';
+  viewport.classList.remove('drawing', 'moving'); activeTab = 'SOLID';
+  renderRibbon(); renderPalette(); defaultHint();
+  if (!silent) { updateScene(); renderTimeline(); renderBrowser(); }
+}
+function finishSketch(silent) {
+  const sk = featById(sketchId);
+  const M = sk ? sketchMatrix(sk) : null;
+  exitSketch(false);
+  if (!sk) return;
+  const used = doc.features.some(f => f.sketch === sk.id);
+  if (!silent && sk.profiles.length && !used) toast('Sketch finished. Press E to extrude it.');
+  const n = new THREE.Vector3(0, 0, 1).transformDirection(M), view = camera.position.clone().sub(controls.target).normalize();
+  if (!silent && Math.abs(n.dot(view)) > 0.97) setView('iso');
+  scheduleRegen(0);
+}
+function setSketchTool(t) {
+  sketchTool = t; lineDraft = null; drag = null;
+  viewport.classList.toggle('drawing', mode === 'sketch' && t !== 'select');
+  renderRibbon(); defaultHint(); refreshOverlays();
+}
+function deleteProfile(id) {
+  const sk = featById(sketchId); if (!sk) return;
+  checkpoint();
+  sk.profiles = sk.profiles.filter(p => p.id !== id);
+  if (selProfile === id) selProfile = null;
+  renderPalette(); refreshOverlays(); scheduleRegen(0);
+}
+
+// ---------- picking ----------
+const raycaster = new THREE.Raycaster();
+function ndcOf(e) { const r = renderer.domElement.getBoundingClientRect(); return new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1); }
+function startPick(o) {
+  if (measure) closeDialog(false);
+  pick = o; pickHover = null;
+  viewport.classList.add('picking');
+  updateScene(); defaultHint();
+}
+function cancelPick() {
+  if (!pick) return;
+  pick = null; pickHover = null; viewport.classList.remove('picking');
+  updateScene(); defaultHint();
+}
+function completePick(c) {
+  const p = pick; pick = null; pickHover = null;
+  viewport.classList.remove('picking'); defaultHint();
+  updateScene();
+  p.then(c);
+}
+const snapHalf = v => Math.round(v * 2) / 2;
+function pickAt(e) {
+  raycaster.setFromCamera(ndcOf(e), camera);
+  const targets = [];
+  if (pick.planes) { originGroup.traverse(o => { if (o.isMesh && o.userData.pickable) targets.push(o); }); planesGroup.traverse(o => { if (o.isMesh && o.userData.pickable) targets.push(o); }); }
+  if (pick.faces) for (const [id, s] of shownBodies) if (s.mesh.visible) targets.push(s.mesh);
+  scene.updateMatrixWorld();
+  const hits = raycaster.intersectObjects(targets, false);
+  for (const hit of hits) {
+    const ud = hit.object.userData;
+    if (ud.plane) {
+      const M = PLANES[ud.plane] ? planeMatrix(ud.plane, 0) : planeMatrixOf(ud.plane);
+      const l = hit.point.clone().applyMatrix4(M.clone().invert());
+      return { plane: ud.plane, offset: 0, flip: false, M, local: { x: snapHalf(l.x), y: snapHalf(l.y) }, label: PLANES[ud.plane] ? ud.plane + ' plane' : featById(ud.plane)?.name };
+    }
+    if (ud.body) {
+      const n = hit.face.normal.clone(), a = [Math.abs(n.x), Math.abs(n.y), Math.abs(n.z)];
+      const ax = a.indexOf(Math.max(...a));
+      if (a[ax] < 0.999) return { invalid: true, msg: 'Angled and curved faces come with the Phase 1 geometry engine. Pick a flat face that faces an axis.' };
+      const p = hit.point; let base, offset, flip;
+      if (ax === 2) { base = 'XY'; offset = p.z; flip = n.z < 0; }
+      else if (ax === 1) { base = 'XZ'; offset = -p.y; flip = n.y > 0; }
+      else { base = 'YZ'; offset = p.x; flip = n.x < 0; }
+      offset = Math.round(offset * 1000) / 1000;
+      const M = planeMatrix(base, offset, flip);
+      const l = p.clone().applyMatrix4(M.clone().invert());
+      return { plane: base, offset, flip, face: true, M, local: { x: snapHalf(l.x), y: snapHalf(l.y) }, label: `Face of ${bodyName(ud.body)} (${base} at ${fmt(offset)} mm${flip ? ', facing back' : ''})` };
+    }
+  }
+  return null;
+}
+function bodyHit(e) {
+  raycaster.setFromCamera(ndcOf(e), camera);
+  const meshes = []; for (const [, s] of shownBodies) if (s.mesh.visible) meshes.push(s.mesh);
+  const hit = raycaster.intersectObjects(meshes, false)[0];
+  if (!hit) return null;
+  // snap to the nearest corner of the triangle when close on screen
+  const r = renderer.domElement.getBoundingClientRect();
+  const pos = hit.object.geometry.attributes.position;
+  let best = hit.point.clone(), bestD = 10;
+  for (const k of [hit.face.a, hit.face.b, hit.face.c]) {
+    const v = new THREE.Vector3().fromBufferAttribute(pos, k), s = v.clone().project(camera);
+    const d = Math.hypot((s.x + 1) / 2 * r.width - (e.clientX - r.left), (1 - s.y) / 2 * r.height - (e.clientY - r.top));
+    if (d < bestD) { bestD = d; best = v; }
+  }
+  return { point: best, body: hit.object.userData.body };
+}
+
+// ---------- viewport pointer handling ----------
+let downAt = null;
+viewport.addEventListener('pointerdown', e => { downAt = { x: e.clientX, y: e.clientY, b: e.button }; });
+viewport.addEventListener('pointerup', e => {
+  if (!downAt || downAt.b !== 0 || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 5) { downAt = null; return; }
+  downAt = null;
+  if (e.target.closest('.dim')) return;
+  if (pick) {
+    const c = pickAt(e);
+    if (!c) return;
+    if (c.invalid) { toast(c.msg); return; }
+    completePick(c); return;
+  }
+  const ef = edgeDialogFeature();
+  if (ef) { toggleRef(ef, ef.type === 'shell' ? brepFaceHit(e) : brepEdgeHit(e)); return; }
+  if (measure) {
+    const hit = bodyHit(e); if (!hit) return;
+    if (measure.pts.length >= 2) measure.pts = [];
+    measure.pts.push(hit.point); drawToolsOverlay(); rerenderDialog(); return;
+  }
+  if (mode === 'model') {
+    const hit = bodyHit(e);
+    if (hit) selectBody(hit.body);
+    else if (selBody || selFeature) { selBody = null; selFeature = null; updateScene(); renderTimeline(); renderBrowser(); }
+  }
+});
+let hoverRaf = 0;
+viewport.addEventListener('pointermove', e => {
+  if (hoverRaf) return;
+  hoverRaf = requestAnimationFrame(() => {
+    hoverRaf = 0;
+    if (pick && !e.buttons) {
+      const c = pickAt(e);
+      pickHover = c && !c.invalid ? c : null;
+      setHint(c ? (c.invalid ? 'This face cannot be used yet' : c.label) : pick.prompt + ' · Esc cancels');
+      drawToolsOverlay();
+    } else if (edgeDialogFeature() && !e.buttons) {
+      const ef = edgeDialogFeature(), hit = ef.type === 'shell' ? brepFaceHit(e) : brepEdgeHit(e);
+      const nh = hit ? { body: hit.body, hash: hit.hash } : null;
+      if (JSON.stringify(nh) !== JSON.stringify(edgeHover)) { edgeHover = nh; drawToolsOverlay(); }
+    } else if (mode === 'sketch' && sketchTool === 'line' && lineDraft?.pts.length) {
+      const hit = planeHit(e); if (hit) { lineDraft.hover = { x: snap(hit.x), y: snap(hit.y) }; refreshOverlays(); }
+    }
+  });
+});
+
+// sketch input
+function planeHit(e) {
+  const sk = featById(sketchId); if (!sk) return null;
+  const M = sketchMatrix(sk);
+  raycaster.setFromCamera(ndcOf(e), camera);
+  const n = new THREE.Vector3(0, 0, 1).transformDirection(M), o = new THREE.Vector3().setFromMatrixPosition(M);
+  const p = new THREE.Vector3();
+  if (!raycaster.ray.intersectPlane(new THREE.Plane().setFromNormalAndCoplanarPoint(n, o), p)) return null;
+  p.applyMatrix4(M.clone().invert());
+  const r = renderer.domElement.getBoundingClientRect();
+  const mmPerPx = camera.position.distanceTo(controls.target) * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / r.height;
+  return { x: p.x, y: p.y, tol: mmPerPx * 8 };
+}
+const snap = v => sketchOpts.snap ? Math.round(v) : Math.round(v * 100) / 100;
+function distToPoly(p, poly) {
+  let best = Infinity;
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length];
+    const dx = b.x - a.x, dy = b.y - a.y, L = dx * dx + dy * dy || 1;
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L));
+    best = Math.min(best, Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy)));
+  }
+  return best;
+}
+function pickProfile(sk, hit) {
+  let best = null, bestArea = Infinity;
+  const pt = new THREE.Vector2(hit.x, hit.y);
+  const live = liveProfiles(sk);
+  sk.profiles.forEach((pr, i) => {
+    let poly; try { poly = profilePolygon(live[i]); } catch (e) { return; }
+    const near = distToPoly(pt, poly) < hit.tol;
+    if (near || polyContains(poly, pt)) { const a = near ? 0 : polyArea(poly); if (a < bestArea) { best = pr; bestArea = a; } }
+  });
+  return best;
+}
+function draftFrom(a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), ang = Math.atan2(dy, dx) * 180 / Math.PI;
+  const R = v => sketchOpts.snap ? Math.round(v) : Math.round(v * 100) / 100;
+  switch (sketchTool) {
+    case 'rect2': return { id: uid(), kind: 'rect', cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, w: Math.abs(dx), h: Math.abs(dy), r: 0, rot: 0 };
+    case 'rectc': return { id: uid(), kind: 'rect', cx: a.x, cy: a.y, w: 2 * Math.abs(dx), h: 2 * Math.abs(dy), r: 0, rot: 0 };
+    case 'circle': return { id: uid(), kind: 'circle', cx: a.x, cy: a.y, r: R(d) };
+    case 'polygon': return { id: uid(), kind: 'polygon', cx: a.x, cy: a.y, r: R(d), sides: 6, rot: Math.round(ang - 90) };
+    case 'slot': { const W = 10; return { id: uid(), kind: 'slot', cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, length: R(d + W), width: W, rot: Math.round(ang) }; }
+  }
+  return null;
+}
+const draftSize = p => p.kind === 'rect' ? Math.min(p.w, p.h) : p.kind === 'slot' ? p.length - p.width : p.r;
+function finalizeLine() {
+  const sk = featById(sketchId);
+  if (!sk || !lineDraft || lineDraft.pts.length < 3) { toast('A line profile needs at least 3 points'); return; }
+  checkpoint();
+  const p = { id: uid(), kind: 'poly', pts: lineDraft.pts.map(q => ({ x: q.x, y: q.y })) };
+  sk.profiles.push(p); selProfile = p.id; lineDraft = null;
+  renderPalette(); refreshOverlays(); scheduleRegen(0); defaultHint();
+}
+viewport.addEventListener('pointerdown', e => {
+  if (mode !== 'sketch' || pick || measure || e.button !== 0 || e.target.closest('.dim')) return;
+  const hit = planeHit(e); if (!hit) return;
+  const sk = featById(sketchId);
+  if (sketchTool === 'line') {
+    e.stopImmediatePropagation(); e.preventDefault();
+    const p = { x: snap(hit.x), y: snap(hit.y) };
+    lineDraft ||= { pts: [] };
+    const first = lineDraft.pts[0];
+    if (first && lineDraft.pts.length >= 3 && Math.hypot(p.x - first.x, p.y - first.y) <= Math.max(hit.tol, 0.6)) { finalizeLine(); return; }
+    const last = lineDraft.pts[lineDraft.pts.length - 1];
+    if (!last || last.x !== p.x || last.y !== p.y) lineDraft.pts.push(p);
+    refreshOverlays(); defaultHint();
+    return;
+  }
+  if (sketchTool === 'select') {
+    const pr = pickProfile(sk, hit);
+    if (!pr) { if (selProfile) { selProfile = null; refreshOverlays(); renderPalette(); } return; }
+    selProfile = pr.id;
+    drag = { kind: 'move', start: hit, pr, orig: JSON.parse(JSON.stringify(pr)), moved: false };
+    renderPalette(); refreshOverlays();
+  } else drag = { kind: 'draw', start: { x: snap(hit.x), y: snap(hit.y) }, draft: null };
+  e.stopImmediatePropagation(); e.preventDefault();
+  window.addEventListener('pointermove', onDragMove);
+  window.addEventListener('pointerup', onDragEnd, { once: true });
+}, { capture: true });
+function onDragMove(e) {
+  if (!drag) return;
+  const hit = planeHit(e); if (!hit) return;
+  if (drag.kind === 'draw') drag.draft = draftFrom(drag.start, { x: snap(hit.x), y: snap(hit.y) });
+  else {
+    const dx = snap(hit.x - drag.start.x), dy = snap(hit.y - drag.start.y);
+    if (!drag.moved && (dx || dy)) { checkpoint(); drag.moved = true; viewport.classList.add('moving'); }
+    if (drag.moved) {
+      const live = liveProfiles({ ...featById(sketchId), profiles: [drag.orig] })[0];
+      if (drag.pr.kind === 'poly') drag.pr.pts = live.pts.map(q => ({ x: q.x + dx, y: q.y + dy }));
+      else { drag.pr.cx = Math.round((live.cx + dx) * 100) / 100; drag.pr.cy = Math.round((live.cy + dy) * 100) / 100; }
+    }
+  }
+  refreshOverlays();
+}
+function onDragEnd() {
+  window.removeEventListener('pointermove', onDragMove);
+  const d = drag; drag = null; viewport.classList.remove('moving');
+  if (!d) return;
+  const sk = featById(sketchId);
+  if (d.kind === 'draw' && d.draft && draftSize(d.draft) >= 0.5 && sk) {
+    checkpoint(); sk.profiles.push(d.draft); selProfile = d.draft.id;
+    renderPalette(); scheduleRegen(0);
+  } else if (d.kind === 'move' && d.moved) { renderPalette(); scheduleRegen(0); }
+  refreshOverlays();
+}
+function cancelModes(toSelect) {
+  closeMenus(); cancelPick();
+  if (measure) closeDialog(false);
+  if (mode === 'sketch' && toSelect) setSketchTool('select');
+}
+
+// ---------- view cube ----------
+const vcEl = $('#viewcube');
+const vcRenderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+vcRenderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+vcEl.append(vcRenderer.domElement);
+vcRenderer.domElement.setAttribute('role', 'img'); vcRenderer.domElement.setAttribute('aria-label', 'View cube. Click a face to look from that side.');
+const vcScene = new THREE.Scene();
+const vcCam = new THREE.OrthographicCamera(-1.75, 1.75, 1.75, -1.75, 0.1, 30);
+const vcGeo = new THREE.BoxGeometry(1.5, 1.5, 1.5); vcGeo.rotateX(Math.PI / 2);
+const VC_FACES = ['right', 'left', 'top', 'bottom', 'front', 'back'];
+const vcMats = VC_FACES.map(() => new THREE.MeshBasicMaterial({ color: 0xffffff }));
+const vcCube = new THREE.Mesh(vcGeo, vcMats); vcScene.add(vcCube);
+const vcEdges = new THREE.LineSegments(new THREE.EdgesGeometry(vcGeo), new THREE.LineBasicMaterial({ color: 0x8a939c })); vcScene.add(vcEdges);
+const vcTriad = new THREE.Group(); vcScene.add(vcTriad);
+for (const [d, c] of [[[1, 0, 0], 0xd9534a], [[0, 1, 0], 0x3faa5b], [[0, 0, 1], 0x3d7be0]]) {
+  const o = new THREE.Vector3(-0.78, -0.78, -0.78);
+  vcTriad.add(line([o, o.clone().add(new THREE.Vector3(...d).multiplyScalar(1.95))], c));
+}
+let vcHover = -1;
+function drawViewCubeFaces() {
+  if (!colors.panel) return;
+  VC_FACES.forEach((name, i) => {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 128;
+    const g = cv.getContext('2d');
+    g.fillStyle = '#' + colors.panel.getHexString(); g.fillRect(0, 0, 128, 128);
+    g.strokeStyle = '#' + colors.line.getHexString(); g.lineWidth = 4; g.strokeRect(2, 2, 124, 124);
+    g.fillStyle = '#' + colors.fg.getHexString(); g.font = '600 24px "IBM Plex Sans Condensed", "Arial Narrow", sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(name.toUpperCase(), 64, 66);
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = 4;
+    vcMats[i].map?.dispose(); vcMats[i].map = tex; vcMats[i].needsUpdate = true;
+  });
+  requestRender();
+}
+function renderViewCube() {
+  const dir = camera.position.clone().sub(controls.target).normalize();
+  vcCam.position.copy(dir.multiplyScalar(8)); vcCam.up.copy(camera.up); vcCam.lookAt(0, 0, 0);
+  vcMats.forEach((m, i) => m.color.set(i === vcHover ? 0xbcd3fa : 0xffffff));
+  vcRenderer.render(vcScene, vcCam);
+}
+new ResizeObserver(() => { const s = vcEl.clientWidth; vcRenderer.setSize(s, s); requestRender(); }).observe(vcEl);
+function vcFaceAt(e) {
+  const r = vcRenderer.domElement.getBoundingClientRect();
+  const rc = new THREE.Raycaster(); rc.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), vcCam);
+  const hit = rc.intersectObject(vcCube)[0];
+  return hit ? hit.face.materialIndex : -1;
+}
+vcRenderer.domElement.addEventListener('pointermove', e => { const f = vcFaceAt(e); if (f !== vcHover) { vcHover = f; requestRender(); } });
+vcRenderer.domElement.addEventListener('pointerleave', () => { vcHover = -1; requestRender(); });
+vcRenderer.domElement.addEventListener('click', e => { const f = vcFaceAt(e); if (f >= 0) setView(VC_FACES[f]); });
+$('#vcHome').innerHTML = icon('home');
+$('#vcHome').addEventListener('click', () => setView('iso'));
+
+// ---------- navigation bar ----------
+function renderNavbar() {
+  const nb = $('#navbar'); nb.replaceChildren();
+  const b = (ic, label, fn, o = {}) => h('button', { class: 'nbtn' + (o.cls ? ' ' + o.cls : ''), title: label, 'aria-label': label, 'aria-pressed': o.pressed != null ? String(o.pressed) : null, onclick: fn, html: icon(ic) });
+  const setNav = m => { navMode = m; controls.mouseButtons.LEFT = m === 'pan' ? THREE.MOUSE.PAN : m === 'zoom' ? THREE.MOUSE.DOLLY : THREE.MOUSE.ROTATE; renderNavbar(); };
+  nb.append(b('orbit', 'Orbit', () => setNav('orbit'), { pressed: navMode === 'orbit' }), b('pan', 'Pan', () => setNav('pan'), { pressed: navMode === 'pan' }), b('zoom', 'Zoom', () => setNav('zoom'), { pressed: navMode === 'zoom' }),
+    b('fit', 'Fit', () => setView('fit')), h('span', { class: 'nsep hide-narrow' }),
+    b('lookat', 'Look At', () => {
+      if (mode === 'sketch') return lookAtMatrix(sketchMatrix(featById(sketchId)));
+      const f = selFeature && featById(selFeature);
+      if (f?.type === 'sketch') return lookAtMatrix(sketchMatrix(f));
+      if (f?.type === 'plane' && result.planes.has(f.id)) { const p = result.planes.get(f.id); return lookAtMatrix(planeMatrix(p.base, p.offset, p.flip)); }
+      toast('Select a sketch or plane to look at');
+    }, { cls: 'hide-narrow' }), h('span', { class: 'nsep' }));
+  const disp = b('display', 'Display settings', e => {
+    e.stopPropagation();
+    openMenu(disp, [{ head: 'Visual style' }, ...[['shaded', 'Shaded'], ['edges', 'Shaded with visible edges'], ['wire', 'Wireframe']].map(([k, l]) => ({ label: l, icon: 'display', checked: visualStyle === k, action: () => { visualStyle = k; updateScene(); } })),
+      '-', { label: 'Show origin', icon: 'axis', checked: !!doc.showOrigin, action: () => { doc.showOrigin = !doc.showOrigin; updateScene(); renderBrowser(); } }]);
+  });
+  disp.setAttribute('aria-haspopup', 'true');
+  nb.append(disp, b('grid', 'Layout grid', () => { showGrid = !showGrid; updateScene(); renderNavbar(); }, { pressed: showGrid }));
+}
+
+// ---------- keyboard ----------
+window.addEventListener('keydown', e => {
+  const tag = e.target.tagName, typing = tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA';
+  const k = e.key.toLowerCase();
+  if ((e.ctrlKey || e.metaKey) && k === 's') { e.preventDefault(); saveProject(); return; }
+  if ((e.ctrlKey || e.metaKey) && (k === 'z' || k === 'y')) { if (typing) return; e.preventDefault(); (k === 'y' || e.shiftKey) ? redo() : undo(); return; }
+  if (e.key === 'Escape') {
+    if ($('#menus').children.length) return closeMenus();
+    if (!$('#modalBack').hidden) return closeModal();
+    if (pick) return cancelPick();
+    if (lineDraft) { lineDraft = null; refreshOverlays(); defaultHint(); return; }
+    if (drag) { drag = null; refreshOverlays(); return; }
+    if (mode === 'sketch' && sketchTool !== 'select') return setSketchTool('select');
+    if (dlg) return closeDialog(false);
+    if (mode === 'sketch' && selProfile) { selProfile = null; refreshOverlays(); renderPalette(); return; }
+    if (selBody || selFeature) { selBody = null; selFeature = null; updateScene(); renderTimeline(); renderBrowser(); }
+    return;
+  }
+  if (e.key === 'Enter') {
+    if (lineDraft) { e.preventDefault(); finalizeLine(); return; }
+    if (dlg && $('#modalBack').hidden && tag !== 'SELECT' && tag !== 'BUTTON' && tag !== 'TEXTAREA') {
+      if (dlg.custom && !dlg.custom.onOK && !dlg.custom.okLabel) return;
+      e.preventDefault(); closeDialog(true); return;
+    }
+  }
+  if (typing || e.ctrlKey || e.metaKey || e.altKey || !$('#modalBack').hidden) return;
+  if (mode === 'sketch') {
+    if (e.key === 'Backspace' && lineDraft?.pts.length) { e.preventDefault(); lineDraft.pts.pop(); if (!lineDraft.pts.length) lineDraft = null; refreshOverlays(); return; }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && selProfile) { e.preventDefault(); deleteProfile(selProfile); return; }
+    const map = { l: 'k.line', r: 'k.rect2', c: 'k.circle', p: 'k.polygon', s: 'k.slot', d: 'k.dimension', v: 'k.select', t: 'k.trim', o: 'k.offset' };
+    if (map[k]) { runCmd(map[k]); return; }
+    if (k === 'e') { runCmd('extrude'); return; }
+    return;
+  }
+  const map = { e: 'extrude', h: 'hole', m: 'move', i: 'measure', a: 'appearance', q: 'presspull', f: 'fillet', j: 'joint' };
+  if (map[k]) { e.preventDefault(); runCmd(map[k]); return; }
+  if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelection(); }
+});
+
+// ---------- chrome wiring ----------
+$('#abData').innerHTML = icon('apps'); $('#abData').addEventListener('click', () => toast('The data panel for cloud projects is planned for Phase 2. Use Project files for now.'));
+$('#abFile').innerHTML = icon('file') + icon('caret'); $('#abFile').addEventListener('click', e => { e.stopPropagation(); openFileMenu(); });
+$('#abSave').innerHTML = icon('save'); $('#abSave').addEventListener('click', saveProject);
+$('#abUndo').innerHTML = icon('undo'); $('#abUndo').addEventListener('click', undo);
+$('#abRedo').innerHTML = icon('redo'); $('#abRedo').addEventListener('click', redo);
+$('#abHelp').innerHTML = icon('help'); $('#abHelp').addEventListener('click', openHelpModal);
+$('#docIco').innerHTML = icon('doc');
+$('#wsBtn').insertAdjacentHTML('beforeend', icon('caret')); $('#wsBtn').addEventListener('click', e => { e.stopPropagation(); openWorkspaceMenu(); });
+$('#bMin').addEventListener('click', () => { const b = $('#browser'); b.classList.toggle('min'); $('#bMin').setAttribute('aria-expanded', String(!b.classList.contains('min'))); $('#bMin').textContent = b.classList.contains('min') ? '+' : '–'; });
+for (const [id, ic, fn] of [['#tlStart', 'start', () => setRollback(-1)], ['#tlPrev', 'prev', () => stepMarker(-1)], ['#tlNext', 'next', () => stepMarker(1)], ['#tlEnd', 'end', () => setRollback(null)]]) { $(id).innerHTML = icon(ic); $(id).addEventListener('click', fn); }
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => readTheme());
+new MutationObserver(() => readTheme()).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+document.fonts?.ready?.then(() => drawViewCubeFaces());
+if (window.innerWidth < 820) { $('#browser').classList.add('min'); $('#bMin').textContent = '+'; $('#bMin').setAttribute('aria-expanded', 'false'); }
+
+// ---------- exact geometry engine ----------
+function setEngineBadge() {
+  const b = $('#engineBadge');
+  const txt = { loading: 'Loading exact engine…', ready: 'Exact engine', failed: 'Mesh engine' }[engineState];
+  b.className = 'engine ' + engineState; b.innerHTML = '<span class="dot"></span><span class="et">' + txt + '</span>';
+  b.title = engineState === 'ready' ? 'OpenCascade B-rep kernel: exact solids, fillets, chamfers, shells, STEP export'
+    : engineState === 'loading' ? 'Downloading the OpenCascade kernel. You can keep working meanwhile.' : 'The exact engine could not start (' + engineMsg + '). Modeling continues with the mesh engine; fillet, chamfer, shell and STEP are unavailable.';
+}
+$('#engineBadge').addEventListener('click', () => toast($('#engineBadge').title));
+async function loadEngine() {
+  engineState = 'loading'; setEngineBadge();
+  try {
+    if (typeof WebAssembly !== 'object') throw new Error('WebAssembly is not available');
+    const [glue, rep] = await Promise.all([import('replicad-occ'), import('replicad')]);
+    const res = await fetch('engine/occ-gz.wasm');
+    if (!res.ok) throw new Error('engine file missing (' + res.status + ')');
+    let buf = new Uint8Array(await res.arrayBuffer());
+    if (buf[0] === 0x1f && buf[1] === 0x8b) {
+      if (typeof DecompressionStream === 'undefined') throw new Error('this browser cannot unpack the engine');
+      buf = new Uint8Array(await new Response(new Blob([buf]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer());
+    }
+    const oc = await glue.default({ wasmBinary: buf.buffer });
+    rep.setOC(oc); RC = rep;
+    engine = 'brep'; engineState = 'ready'; cache = []; mpCache = null;
+    setEngineBadge(); scheduleRegen(0);
+  } catch (e) {
+    console.warn('Exact engine unavailable:', e);
+    engine = 'mesh'; engineState = 'failed'; engineMsg = (e && e.message) || String(e);
+    setEngineBadge(); scheduleRegen(0);
+  }
+}
+
+// ---------- boot ----------
+function start(data) {
+  doc = upgradeDoc(data?.doc) || loadStored() || sampleDoc();
+  $('#docTitle').textContent = doc.name;
+  readTheme(); updateUndoButtons(); renderRibbon(); renderNavbar(); renderBrowser(); renderTimeline(); defaultHint();
+  $('#tlInfo').textContent = 'Building…';
+  setTimeout(() => { doRegen(); setView('iso', true); setTimeout(loadEngine, 50); }, 30);
+}
+try { window.claude?.hot?.snapshot?.(() => ({ doc })); } catch (e) { }
+if (window.claude?.hot?.ready) window.claude.hot.ready(start); else start(window.claude?.hot?.data ?? {});
+// test hook (local development only)
+if (location.hostname === 'localhost') window.__dw = {
+  screen: (x, y, z) => { const v = new THREE.Vector3(x, y, z).project(camera), r = renderer.domElement.getBoundingClientRect(); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; },
+  sketchScreen: (x, y) => { const v = new THREE.Vector3(x, y, 0).applyMatrix4(sketchMatrix(featById(sketchId))).project(camera), r = renderer.domElement.getBoundingClientRect(); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; },
+  state: () => ({ mode, sketchTool, features: doc.features.map(f => f.type + ':' + statusOf(f.id).state + (statusOf(f.id).msg ? '(' + statusOf(f.id).msg + ')' : '')), bodies: [...result.bodies.keys()].map(id => bodyName(id) + '=' + fix(massProps().bodies.find(b => b.id === id)?.volume || 0, 0)) }),
+};
