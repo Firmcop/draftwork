@@ -203,9 +203,17 @@ function csg(a, b, op) {
 }
 
 // ---- feature tools ----
+// Closed areas a feature uses from a sketch: legacy profiles (nested ones become holes) + picked regions.
+export function sketchAreas(sk, refs) {
+  const use = sketchUse(sk, refs);
+  const { regions } = buildRegions(use.profiles);
+  const out = regions.map(r => ({ outer: r.outer, holes: r.holes }));
+  for (const rg of use.regions) out.push({ outer: profilePolygon({ kind: 'loop', segs: rg.outer }), holes: rg.holes.map(h => profilePolygon({ kind: 'loop', segs: h })) });
+  return out;
+}
 export function extrudeTool(sk, f, extend, M) {
-  const { regions } = buildRegions(sk.profiles || []);
-  if (!regions.length) throw new Error('The sketch has no closed profiles to extrude');
+  const regions = sketchAreas(sk, f.regions);
+  if (!regions.length) throw new Error(f.regions?.length ? 'The picked profiles no longer exist. Edit this feature and pick them again.' : 'The sketch has no closed profiles to extrude');
   const d = Math.abs(+f.distance);
   if (!(d > 0)) throw new Error('Distance must be greater than 0 mm');
   let z0, z1;
@@ -265,7 +273,7 @@ function revolveContour(poly, axis, angleDeg) {
 }
 
 export function revolveTool(sk, f, M) {
-  const { regions } = buildRegions(sk.profiles || []);
+  const regions = sketchAreas(sk, f.regions);
   if (!regions.length) throw new Error('The sketch has no closed profiles to revolve');
   const ang = Math.min(360, Math.abs(+f.angle));
   if (!(ang > 0)) throw new Error('Angle must be greater than 0°');

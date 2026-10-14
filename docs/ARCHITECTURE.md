@@ -30,7 +30,10 @@ A sketch holds `geo = { points, curves, cons }`: points, lines, arcs (counter-cl
 
 Tangency between curves that share an endpoint uses "perpendicular to the radius at that point" instead of a distance condition. The distance form has a zero first derivative at the solution and would hide degrees of freedom.
 
-At rebuild time `sketchWithGeo` re-solves the sketch with dimension expressions evaluated, so parameters drive sketch geometry. Closed chains of non-construction lines and arcs (and circles) become `loop` / `circle` profiles for the kernels. Older sketches with primitive profiles (`rect`, `circle`, `polygon`, `slot`, `poly`) still work.
+At rebuild time `sketchWithGeo` re-solves the sketch with dimension expressions evaluated, so parameters drive sketch geometry. Closed chains of non-construction lines and arcs (and circles) become `loop` / `circle` profiles for the kernels. 
+**Regions.** `geoRegions` builds a planar arrangement of all non-construction curves (`curveSplits` finds every crossing, then faces are traced), so crossing curves divide the sketch into areas like Fusion does. Each area gets an interior sample point and a default fill: even-odd over the closed loops, and areas outside every loop (closed only by crossing open curves) count as filled. An extrude or revolve stores the areas the user clicked as sample points `regions: [{x, y}]`; after any edit, each point picks whichever area now contains it, and with none stored the filled areas are used. Trim uses the same crossings: it removes the clicked piece and attaches the new end points to the cutting curve with point-on constraints.
+
+Older sketches with primitive profiles (`rect`, `circle`, `polygon`, `slot`, `poly`) still work.
 
 ## Rebuild
 

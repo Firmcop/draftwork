@@ -18,10 +18,11 @@ Done
 - [x] Three-point arcs, construction geometry
 - [x] Sweep and pipe (solid or hollow) along open or closed sketched paths
 - [x] Sketch fillet (keeps a virtual corner so dimensions survive), sketch offset, symmetry constraint, point-to-line dimension
+- [x] Regions from crossing curves; pick which areas to extrude or revolve by clicking them
+- [x] Sketch trim (cuts back to crossings, keeps the new ends attached)
 
 Next
-- [ ] Sketch trim, extend, splines
-- [ ] Regions from crossing curves (auto-trim like Fusion); today only closed chains of lines/arcs become profiles
+- [ ] Sketch extend, splines, text
 - [ ] Press pull; sweep with guide rails/twist
 - [ ] Run the kernel in a Web Worker so long rebuilds don't pause the UI
 - [ ] Desktop packaging (Tauri)

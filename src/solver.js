@@ -244,8 +244,11 @@ export function sketchWithGeo(f) {
   if (!f.geo || !f.geo.curves?.length) return f;
   const s = solveSketch(f.geo);
   if (!s.ok) throw new Error('The sketch constraints conflict. Edit the sketch to fix them.');
-  const { profiles } = geoProfiles(f.geo, s);
-  return { ...f, profiles: [...(f.profiles || []), ...profiles] };
+  return { ...f, regions: geoRegions(f.geo, s) };
+}
+// Everything a solid feature uses from a sketch: legacy primitive profiles + chosen regions.
+export function sketchUse(sk, refs) {
+  return { profiles: sk.profiles || [], regions: pickRegions(sk.regions || [], refs) };
 }
 
 // Open chains of non-construction lines/arcs (sweep paths), ordered from one free end to the other.
@@ -275,4 +278,172 @@ export function geoPaths(geo, solved) {
   for (const [node, list] of adj) if (list.length === 1 && !used.has(list[0].id)) open.push(walk(node, list[0]));
   for (const c of edges) if (!used.has(c.id)) closed.push(walk(find(c.a), c));
   return { paths: [...open.map(segs => ({ segs, closed: false })), ...closed.map(segs => ({ segs, closed: true }))], branching: false };
+}
+
+// ===== Planar arrangement: regions bounded by crossing curves =====
+// Curves are split where they cross; the faces of the resulting planar graph are the regions.
+// Each region: { outer: segs, holes: [segs], sample: [x, y] interior point, filled: even-odd over closed loops (regions outside every loop count as filled), area }.
+const TAU = Math.PI * 2;
+function arrCurves(geo, solved) {
+  const pts = solved ? solved.points : new Map(geo.points.map(p => [p.id, p]));
+  const P = id => { const p = id === 'O' ? { x: 0, y: 0 } : pts.get(id); return [p.x, p.y]; };
+  const out = [];
+  for (const c of geo.curves) {
+    if (c.constr) continue;
+    if (c.kind === 'line') { const a = P(c.a), b = P(c.b); if (Math.hypot(b[0] - a[0], b[1] - a[1]) > 1e-9) out.push({ id: c.id, kind: 'line', a, b }); }
+    else {
+      const cc = P(c.c);
+      if (c.kind === 'circle') { const r = solved?.radii.get(c.id) ?? Math.abs(+c.r); if (r > 1e-9) out.push({ id: c.id, kind: 'arc', c: cc, r, a0: 0, a1: TAU, full: true }); }
+      else { const a = P(c.a), b = P(c.b), r = Math.hypot(a[0] - cc[0], a[1] - cc[1]); let a0 = Math.atan2(a[1] - cc[1], a[0] - cc[0]), a1 = Math.atan2(b[1] - cc[1], b[0] - cc[0]); while (a1 <= a0 + 1e-12) a1 += TAU; if (r > 1e-9) out.push({ id: c.id, kind: 'arc', c: cc, r, a0, a1 }); }
+    }
+  }
+  return out;
+}
+const angIn = (c, th, tol = 1e-9) => { if (c.full) { let t = th % TAU; if (t < 0) t += TAU; return t; } let t = th; while (t < c.a0 - tol) t += TAU; while (t > c.a0 + TAU - tol) t -= TAU; return t <= c.a1 + tol ? t : null; };
+const normAng = (c, th) => { if (c.full) { let t = th % TAU; if (t < 0) t += TAU; return t; } let t = th; while (t < c.a0 - 1e-9) t += TAU; while (t > c.a1 + 1e-9 && t - TAU >= c.a0 - 1e-9) t -= TAU; return t; };
+const cPoint = (c, t) => c.kind === 'line' ? [c.a[0] + (c.b[0] - c.a[0]) * t, c.a[1] + (c.b[1] - c.a[1]) * t] : [c.c[0] + c.r * Math.cos(t), c.c[1] + c.r * Math.sin(t)];
+// parameters (t on lines, angle on arcs) where curve i meets curve j
+function intersect(A, B) {
+  const res = []; const tol = 1e-9;
+  if (A.kind === 'line' && B.kind === 'line') {
+    const d1 = [A.b[0] - A.a[0], A.b[1] - A.a[1]], d2 = [B.b[0] - B.a[0], B.b[1] - B.a[1]], den = d1[0] * d2[1] - d1[1] * d2[0];
+    if (Math.abs(den) < 1e-12) {
+      // collinear overlap: endpoints of each lying on the other
+      const onSeg = (L, p) => { const d = [L.b[0] - L.a[0], L.b[1] - L.a[1]], ll = d[0] * d[0] + d[1] * d[1], t = ((p[0] - L.a[0]) * d[0] + (p[1] - L.a[1]) * d[1]) / ll, q = cPoint(L, t); return Math.hypot(q[0] - p[0], q[1] - p[1]) < 1e-7 && t > -tol && t < 1 + tol ? t : null; };
+      for (const p of [B.a, B.b]) { const t = onSeg(A, p); if (t != null) res.push([t, null]); }
+      for (const p of [A.a, A.b]) { const u = onSeg(B, p); if (u != null) res.push([null, u]); }
+      return res;
+    }
+    const w = [B.a[0] - A.a[0], B.a[1] - A.a[1]], t = (w[0] * d2[1] - w[1] * d2[0]) / den, u = (w[0] * d1[1] - w[1] * d1[0]) / den;
+    if (t > -tol && t < 1 + tol && u > -tol && u < 1 + tol) res.push([Math.min(1, Math.max(0, t)), Math.min(1, Math.max(0, u))]);
+    return res;
+  }
+  if (A.kind === 'arc' && B.kind === 'line') return intersect(B, A).map(([x, y]) => [y, x]);
+  if (A.kind === 'line') {
+    const d = [A.b[0] - A.a[0], A.b[1] - A.a[1]], f = [A.a[0] - B.c[0], A.a[1] - B.c[1]];
+    const a = d[0] * d[0] + d[1] * d[1], b = 2 * (f[0] * d[0] + f[1] * d[1]), c = f[0] * f[0] + f[1] * f[1] - B.r * B.r;
+    let disc = b * b - 4 * a * c;
+    if (disc < -1e-9 * a * B.r * B.r) return res;
+    disc = Math.max(0, disc);
+    const ts = disc < 1e-18 ? [-b / (2 * a)] : [(-b - Math.sqrt(disc)) / (2 * a), (-b + Math.sqrt(disc)) / (2 * a)];
+    for (const t of ts) { if (t < -tol || t > 1 + tol) continue; const p = cPoint(A, Math.min(1, Math.max(0, t))), th = angIn(B, Math.atan2(p[1] - B.c[1], p[0] - B.c[0]), 1e-7); if (th != null) res.push([Math.min(1, Math.max(0, t)), th]); }
+    return res;
+  }
+  const dx = B.c[0] - A.c[0], dy = B.c[1] - A.c[1], d = Math.hypot(dx, dy);
+  if (d < 1e-12 || d > A.r + B.r + 1e-9 || d < Math.abs(A.r - B.r) - 1e-9) return res;
+  const a = (A.r * A.r - B.r * B.r + d * d) / (2 * d), hh = Math.sqrt(Math.max(0, A.r * A.r - a * a));
+  const mx = A.c[0] + a * dx / d, my = A.c[1] + a * dy / d;
+  const pts = hh < 1e-9 ? [[mx, my]] : [[mx + hh * dy / d, my - hh * dx / d], [mx - hh * dy / d, my + hh * dx / d]];
+  for (const p of pts) { const ta = angIn(A, Math.atan2(p[1] - A.c[1], p[0] - A.c[0]), 1e-7), tb = angIn(B, Math.atan2(p[1] - B.c[1], p[0] - B.c[0]), 1e-7); if (ta != null && tb != null) res.push([ta, tb]); }
+  return res;
+}
+// Split points of every curve: [{ curve, params: sorted unique, hits: [{ t, other }] }]
+export function curveSplits(curves) {
+  const splits = curves.map(c => ({ curve: c, params: c.kind === 'line' ? [0, 1] : c.full ? [0, Math.PI] : [c.a0, c.a1], hits: [] }));
+  for (let i = 0; i < curves.length; i++) for (let j = i + 1; j < curves.length; j++) {
+    for (const [ti, tj] of intersect(curves[i], curves[j])) {
+      if (ti != null) { const t = curves[i].kind === 'line' ? ti : normAng(curves[i], ti); splits[i].params.push(t); splits[i].hits.push({ t, other: curves[j].id }); }
+      if (tj != null) { const t = curves[j].kind === 'line' ? tj : normAng(curves[j], tj); splits[j].params.push(t); splits[j].hits.push({ t, other: curves[i].id }); }
+    }
+  }
+  for (const s of splits) {
+    const c = s.curve, lo = c.kind === 'line' ? 0 : c.a0, hi = c.kind === 'line' ? 1 : c.full ? c.a0 + TAU : c.a1;
+    const ps = s.params.map(t => Math.min(hi, Math.max(lo, t))).sort((x, y) => x - y), u = [];
+    const eps = c.kind === 'line' ? 1e-9 : 1e-9;
+    for (const t of ps) if (!u.length || t - u[u.length - 1] > eps) u.push(t);
+    if (c.full) { if (u[u.length - 1] < hi - eps) u.push(hi); else u[u.length - 1] = hi; if (u[0] > lo + eps) u.unshift(lo); }
+    s.params = u;
+  }
+  return splits;
+}
+function polyOfSegs(segs, n = 24) {
+  const pts = [];
+  for (const s of segs) {
+    if (s.t === 'line') { pts.push(s.a); continue; }
+    const m = arcMid(s), k = Math.max(2, Math.ceil(Math.abs(m.a1 - m.a0) / TAU * n * 3));
+    for (let i = 0; i < k; i++) { const t = m.a0 + (m.a1 - m.a0) * i / k; pts.push([s.c[0] + m.r * Math.cos(t), s.c[1] + m.r * Math.sin(t)]); }
+  }
+  return pts;
+}
+function pip(p, poly) { let inside = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if ((a[1] > p[1]) !== (b[1] > p[1]) && p[0] < (b[0] - a[0]) * (p[1] - a[1]) / (b[1] - a[1]) + a[0]) inside = !inside; } return inside; }
+export function regionContains(region, p) { return pip(p, polyOfSegs(region.outer)) && !region.holes.some(h => pip(p, polyOfSegs(h))); }
+export function geoRegions(geo, solved) {
+  const curves = arrCurves(geo, solved);
+  if (!curves.length) return [];
+  const splits = curveSplits(curves);
+  // vertices (merged) and edges
+  const V = []; const vid = p => { for (let i = 0; i < V.length; i++) if (Math.hypot(V[i][0] - p[0], V[i][1] - p[1]) < 1e-6) return i; V.push(p); return V.length - 1; };
+  let E = [];
+  for (const s of splits) {
+    const c = s.curve;
+    for (let k = 0; k < s.params.length - 1; k++) {
+      const t0 = s.params[k], t1 = s.params[k + 1]; if (t1 - t0 < 1e-12) continue;
+      const u = vid(cPoint(c, t0)), v = vid(cPoint(c, t1)); if (u === v && c.kind === 'line') continue;
+      E.push({ c, t0, t1, u, v });
+    }
+  }
+  // prune dangling edges
+  for (;;) { const deg = new Array(V.length).fill(0); for (const e of E) { deg[e.u]++; deg[e.v]++; } const n = E.length; E = E.filter(e => deg[e.u] > 1 && deg[e.v] > 1); if (E.length === n) break; }
+  if (!E.length) return [];
+  // half-edges with a departure direction (chord to a nearby point handles tangent ties)
+  const H = [];
+  E.forEach((e, i) => {
+    const near = (from, to) => { const f = 0.02; return e.c.kind === 'line' ? (from === 0 ? cPoint(e.c, e.t0 + (e.t1 - e.t0) * f) : cPoint(e.c, e.t1 - (e.t1 - e.t0) * f)) : (from === 0 ? cPoint(e.c, e.t0 + (e.t1 - e.t0) * f) : cPoint(e.c, e.t1 - (e.t1 - e.t0) * f)); };
+    const pu = V[e.u], pv = V[e.v], nu = near(0), nv = near(1);
+    H.push({ e: i, fwd: true, from: e.u, to: e.v, ang: Math.atan2(nu[1] - pu[1], nu[0] - pu[0]) });
+    H.push({ e: i, fwd: false, from: e.v, to: e.u, ang: Math.atan2(nv[1] - pv[1], nv[0] - pv[0]) });
+  });
+  const out = new Map(); H.forEach((h, i) => { if (!out.has(h.from)) out.set(h.from, []); out.get(h.from).push(i); });
+  for (const l of out.values()) l.sort((a, b) => H[a].ang - H[b].ang);
+  const twin = i => i ^ 1;
+  const next = i => { const t = twin(i), l = out.get(H[i].to), k = l.indexOf(t); return l[(k - 1 + l.length) % l.length]; };
+  const seg = i => { const h = H[i], e = E[h.e], a = V[h.from], b = V[h.to]; return e.c.kind === 'line' ? { t: 'line', a, b } : { t: 'arc', a, b, c: e.c.c, ccw: h.fwd }; };
+  const greenArea = i => { const h = H[i], e = E[h.e]; if (e.c.kind === 'line') { const a = V[h.from], b = V[h.to]; return (a[0] * b[1] - b[0] * a[1]) / 2; }
+    const [cx, cy] = e.c.c, r = e.c.r, s = h.fwd ? e.t0 : e.t1, en = h.fwd ? e.t1 : e.t0;
+    return 0.5 * (r * (cx * (Math.sin(en) - Math.sin(s)) - cy * (Math.cos(en) - Math.cos(s))) + r * r * (en - s)); };
+  const seen = new Uint8Array(H.length), cycles = [];
+  for (let i = 0; i < H.length; i++) {
+    if (seen[i]) continue;
+    const cyc = []; let j = i, guard = 0;
+    while (!seen[j] && guard++ < H.length + 2) { seen[j] = 1; cyc.push(j); j = next(j); }
+    const area = cyc.reduce((s, k) => s + greenArea(k), 0);
+    // component id via union of edges
+    cycles.push({ hs: cyc, area, segs: cyc.map(seg) });
+  }
+  // connected components of edges
+  const comp = new Array(V.length).fill(-1); let nc = 0;
+  for (let s = 0; s < V.length; s++) { if (comp[s] >= 0 || !out.has(s)) continue; const st = [s]; comp[s] = nc; while (st.length) { const x = st.pop(); for (const hi of out.get(x) || []) { const y = H[hi].to; if (comp[y] < 0) { comp[y] = nc; st.push(y); } } } nc++; }
+  const faces = cycles.filter(c => c.area > 1e-9).map(c => ({ ...c, comp: comp[H[c.hs[0]].from], holes: [], poly: polyOfSegs(c.segs) }));
+  const outers = cycles.filter(c => c.area < -1e-9).map(c => ({ ...c, comp: comp[H[c.hs[0]].from] }));
+  for (const o of outers) {
+    const p = V[H[o.hs[0]].from];
+    let best = null;
+    for (const f of faces) if (f.comp !== o.comp && pip(p, f.poly) && (!best || f.area < best.area)) best = f;
+    if (best) best.holes.push(o.segs);
+  }
+  // interior sample point; even-odd fill counts the closed shapes as drawn (loops and circles) around it
+  const allPolys = geoProfiles(geo, solved).profiles.map(p => p.kind === 'circle'
+    ? Array.from({ length: 96 }, (_, i) => [p.cx + p.r * Math.cos(i * TAU / 96), p.cy + p.r * Math.sin(i * TAU / 96)]) : polyOfSegs(p.segs));
+  return faces.map(f => {
+    const holes = f.holes.map(h => polyOfSegs(h));
+    const ys = f.poly.map(p => p[1]), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    let sample = null, bestW = -1;
+    for (const fr of [0.5, 0.37, 0.63, 0.25, 0.75, 0.13, 0.87]) {
+      const y = y0 + (y1 - y0) * fr + 1e-7, xs = [];
+      for (const poly of [f.poly, ...holes]) for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const a = poly[i], b = poly[j]; if ((a[1] > y) !== (b[1] > y)) xs.push(a[0] + (y - a[1]) * (b[0] - a[0]) / (b[1] - a[1])); }
+      xs.sort((a, b) => a - b);
+      for (let k = 0; k + 1 < xs.length; k += 2) { const w = xs[k + 1] - xs[k]; if (w > bestW) { bestW = w; sample = [(xs[k] + xs[k + 1]) / 2, y]; } }
+      if (bestW > (y1 - y0) * 0.05) break;
+    }
+    if (!sample) sample = f.poly[0];
+    let depth = 0; for (const poly of allPolys) if (pip(sample, poly)) depth++;
+    return { outer: f.segs, holes: f.holes, sample, filled: depth % 2 === 1 || depth === 0, area: f.area };   // depth 0: closed only by crossing open curves (e.g. after a trim)
+  });
+}
+// Regions chosen by stored sample points (or the even-odd default when none are stored).
+export function pickRegions(regions, refs) {
+  if (!refs?.length) return regions.filter(r => r.filled);
+  const out = new Set();
+  for (const p of refs) { const r = regions.find(x => regionContains(x, [p.x, p.y])); if (r) out.add(r); }
+  return [...out];
 }

@@ -59,16 +59,34 @@ function profileDrawing(pr) {
   return d.translate(cx, cy);
 }
 // Profiles nested inside others become holes; islands inside holes become solids again.
-function sketchDrawing(profiles) {
-  if (!profiles?.length) throw new Error('The sketch has no closed profiles');
-  const { regions, polys } = buildRegions(profiles);
-  let all = null;
-  for (const r of regions) {
-    let d = profileDrawing(profiles[r.index]);
-    for (const hp of r.holes) { const k = polys.indexOf(hp); d = d.cut(profileDrawing(profiles[k])); }
-    all = all ? all.fuse(d) : d;
+function loopDrawing(segs) {
+  const n = segs.length;
+  let pen = RC.draw(segs[0].a);
+  segs.forEach((sg, i) => {
+    const end = i === n - 1 ? segs[0].a : sg.b;
+    if (sg.t === 'arc') pen = pen.threePointsArcTo(end, arcMid(sg).mid);
+    else if (i < n - 1) pen = pen.lineTo(end);
+  });
+  return pen.close();
+}
+// Legacy profiles (nested ones become holes, islands fuse back) + picked regions, as one drawing.
+function sketchDrawing(sk, refs) {
+  const use = sketchUse(sk, refs);
+  const parts = [];
+  if (use.profiles.length) {
+    const { regions, polys } = buildRegions(use.profiles);
+    for (const r of regions) { let d = profileDrawing(use.profiles[r.index]); for (const hp of r.holes) d = d.cut(profileDrawing(use.profiles[polys.indexOf(hp)])); parts.push(d); }
   }
-  return all;
+  for (const rg of use.regions) { let d = loopDrawing(rg.outer); for (const hh of rg.holes) d = d.cut(loopDrawing(hh)); parts.push(d); }
+  if (!parts.length) throw new Error(refs?.length ? 'The picked profiles no longer exist. Edit this feature and pick them again.' : 'The sketch has no closed profiles');
+  return parts.reduce((a, d) => a.fuse(d));
+}
+// Exactly one closed area (loft sections, sweep profiles).
+function singleAreaDrawing(sk, refs, what) {
+  const use = sketchUse(sk, refs);
+  const n = buildRegions(use.profiles).regions.length + use.regions.length;
+  if (n !== 1) throw new Error(`${sk.name || 'The sketch'} needs exactly one closed profile for a ${what}${n > 1 ? ' (pick one in the feature dialog)' : ''}`);
+  return sketchDrawing(sk, refs);
 }
 const asSketches = s => s?.sketches ? s.sketches : [s];
 function extrudeDrawing(drawing, pl, distance) {
@@ -89,7 +107,7 @@ function brepTool(f, out) {
       const sk = out.sketches.get(f.sketch);
       if (!sk) throw new Error('Choose a sketch that comes before this feature');
       const pi = placementInfo(sk.feature, out);
-      const drawing = sketchDrawing(sk.feature.profiles);
+      const drawing = sketchDrawing(sk.feature, f.regions);
       if (f.type === 'extrude') {
         const d = Math.abs(+f.distance); if (!(d > 0)) throw new Error('Distance must be greater than 0 mm');
         const shift = f.direction === 'reverse' ? -d : f.direction === 'symmetric' ? -d / 2 : 0;
@@ -296,9 +314,7 @@ function brepStep(f, out) {
       if (ids.length < 2) throw new Error('Choose at least two sketches to loft between');
       const parts = ids.map(id => {
         const sk = out.sketches.get(id), pi = placementInfo(sk.feature, out);
-        const { regions } = buildRegions(sk.feature.profiles || []);
-        if (regions.length !== 1) throw new Error(`${sk.feature.name || 'A sketch'} needs exactly one closed profile for a loft`);
-        const s = profileDrawing(sk.feature.profiles[regions[0].index]).sketchOnPlane(brepPlane(pi.base, pi.offset, pi.flip).plane);
+        const s = singleAreaDrawing(sk.feature, null, 'loft').sketchOnPlane(brepPlane(pi.base, pi.offset, pi.flip).plane);
         return asSketches(s)[0];
       });
       const tool = T(parts[0].loftWith(parts.slice(1), { ruled: !!f.ruled }));
@@ -466,11 +482,11 @@ function sweepTool(f, out) {
   } else {
     const prs = out.sketches.get(f.profile);
     if (!prs) throw new Error('Choose a profile sketch that comes before this feature');
-    const profiles = prs.feature.profiles || [];
-    const { regions, polys } = buildRegions(profiles);
-    if (regions.length !== 1) throw new Error('The profile sketch needs exactly one closed profile (holes inside it are fine)');
-    outer = profileDrawing(profiles[regions[0].index]);
-    holes = regions[0].holes.map(hp => profileDrawing(profiles[polys.indexOf(hp)]));
+    const use = sketchUse(prs.feature, f.profileRegions);
+    const legacy = buildRegions(use.profiles);
+    if (legacy.regions.length + use.regions.length !== 1) throw new Error('The profile sketch needs exactly one closed profile (holes inside it are fine)');
+    if (use.regions.length) { outer = loopDrawing(use.regions[0].outer); holes = use.regions[0].holes.map(loopDrawing); }
+    else { const r0 = legacy.regions[0]; outer = profileDrawing(use.profiles[r0.index]); holes = r0.holes.map(hp => profileDrawing(use.profiles[legacy.polys.indexOf(hp)])); }
   }
   const cfg = { forceProfileSpineOthogonality: true, frenet: true };
   const sweepOne = d => RC.genericSweep(d.sketchOnPlane(frame(), sp).wire, spine.wire, cfg);

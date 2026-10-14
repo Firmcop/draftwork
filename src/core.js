@@ -419,6 +419,7 @@ function drawSketch(sk, active) {
     g.add(line(pts.map(p => [p.x, p.y, 0.06]), isSel ? colors.select : col, { loop: true, depthTest: !active, order: 4 }));
     if (isSel && sketchOpts.dims) for (const d of profileDims(pr)) g.add(d);
   }
+  if (!active || sketchOpts.profiles) drawRegions(sk, g, active);
   drawGeo(sk, g, active);
   return g;
 }

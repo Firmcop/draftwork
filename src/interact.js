@@ -35,6 +35,7 @@ function defaultHint() {
     const t = { select: geoSel.size ? geoSel.size + ' selected · apply a constraint, press D to dimension, Delete to remove' : 'Click geometry to select it (Shift adds). Drag points and lines to reshape.',
       line: lineDraft ? 'Click to add the next point. Click the first point to close; Enter or Esc ends the line.' : 'Click to place the first point. Points snap to existing points.',
       fillet2d: 'Click a corner where two lines meet, then type the radius',
+      trim: 'Click the piece of a curve to remove; it is cut back to where it crosses other curves',
       arc3: !gdraw?.pts?.length ? 'Click the arc start' : gdraw.pts.length === 1 ? 'Click the arc end' : 'Click a point the arc passes through',
       rect2: 'Drag from corner to corner', rectc: 'Drag from the center to a corner', circle: 'Drag from the center outward', polygon: 'Drag from the center to a corner (6 equal sides)', slot: 'Drag from one end center to the other' }[sketchTool];
     return setHint(t);
@@ -468,7 +469,7 @@ function finishSketch(silent) {
   scheduleRegen(0);
 }
 function setSketchTool(t) {
-  sketchTool = t; lineDraft = null; drag = null; gdraw = null;
+  sketchTool = t; lineDraft = null; drag = null; gdraw = null; trimHover = null;
   viewport.classList.toggle('drawing', mode === 'sketch' && t !== 'select');
   renderRibbon(); defaultHint(); refreshOverlays();
 }
@@ -575,6 +576,8 @@ viewport.addEventListener('pointerup', e => {
     if (c.invalid) { toast(c.msg); return; }
     completePick(c); return;
   }
+  const rf = regionDialogFeature();
+  if (rf && toggleRegion(rf, regionAt(e, rf))) return;
   const ef = edgeDialogFeature();
   if (ef) { toggleRef(ef, FACE_PICK.has(ef.type) ? brepFaceHit(e) : brepEdgeHit(e)); return; }
   if (measure) {
@@ -826,6 +829,6 @@ if (location.hostname === 'localhost') window.__dw = {
   sketchScreen: (x, y) => { const v = new THREE.Vector3(x, y, 0).applyMatrix4(sketchMatrix(featById(sketchId))).project(camera), r = renderer.domElement.getBoundingClientRect(); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; },
   doc: () => JSON.parse(JSON.stringify(doc)),
   curveScreen: i => { const sk = featById(sketchId), c = sk.geo.curves[i]; const pts = curvePts(sk, c, id => geoPos(sk, id), cc => geoRadius(sk, cc)); const m = pts[Math.floor(pts.length / 2)], m2 = pts.length === 2 ? [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2] : m; return window.__dw.sketchScreen(m2[0], m2[1]); },
-  geo: () => { const sk = featById(sketchId); const st = sk && geoState(sk); return st ? { dof: st.analysis.dof, ok: !!st.solved?.ok, loops: st.loops.profiles.length, sel: [...geoSel] } : null; },
+  geo: () => { const sk = featById(sketchId); const st = sk && geoState(sk); return st ? { dof: st.analysis.dof, ok: !!st.solved?.ok, loops: st.loops.profiles.length, regions: st.regions.length, filled: st.regions.filter(r => r.filled).length, sel: [...geoSel] } : null; },
   state: () => ({ mode, sketchTool, features: doc.features.map(f => f.type + ':' + statusOf(f.id).state + (statusOf(f.id).msg ? '(' + statusOf(f.id).msg + ')' : '')), bodies: [...result.bodies.keys()].map(id => bodyName(id) + '=' + fix(massProps().bodies.find(b => b.id === id)?.volume || 0, 0)) }),
 };

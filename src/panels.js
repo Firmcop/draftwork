@@ -275,18 +275,26 @@ function featureFields(f, idx) {
   };
   const placement = () => [selField('Plane', f, 'plane', planeOptions(idx, f.plane), { id: 'ds-plane' }), segField('Direction', f, 'flip', [[false, 'Normal'], [true, 'Flipped']]), exField('Offset', f, 'offset'),
     h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn', type: 'button', onclick: () => repositionPlaced(f), html: icon('pick') + 'Pick face and point…' }))];
+  const profileRow = () => {
+    const sk = featById(f.sketch), st = sk?.geo ? geoState(sk) : null;
+    if (!st?.regions.length) return null;
+    const n = pickRegions(st.regions, f.regions).length;
+    return h('div', { class: 'row' }, h('span', { class: 'rl' }, 'Areas'), h('div', {},
+      h('div', { class: 'note', style: 'margin:0' }, f.regions?.length ? `${n} picked. Click areas in the sketch to add or remove.` : `All filled areas (${n}). Click areas in the sketch to pick instead.`),
+      f.regions?.length ? h('button', { class: 'btn', type: 'button', style: 'margin-top:4px', onclick: () => { checkpoint(); delete f.regions; rerenderDialog(); refreshOverlays(); scheduleRegen(0); } }, 'Use all filled areas') : null));
+  };
   switch (f.type) {
     case 'extrude': {
       const sks = doc.features.slice(0, idx).filter(g => g.type === 'sketch');
       out.push(section_('Input', selField('Profile', f, 'sketch', sks.length ? sks.map(s => [s.id, s.name + ' (' + profCount(s) + ')']) : [['', 'No sketch before this step']]),
-        segField('Direction', f, 'direction', [['one', 'One side'], ['symmetric', 'Symmetric'], ['reverse', 'Flipped']]), exField('Distance', f, 'distance', 'mm', { min: 0.001 })));
+        profileRow(), segField('Direction', f, 'direction', [['one', 'One side'], ['symmetric', 'Symmetric'], ['reverse', 'Flipped']]), exField('Distance', f, 'distance', 'mm', { min: 0.001 })));
       out.push(section_('Result', ...opsSection()));
       break;
     }
     case 'revolve': {
       const sks = doc.features.slice(0, idx).filter(g => g.type === 'sketch');
       out.push(section_('Input', selField('Profile', f, 'sketch', sks.length ? sks.map(s => [s.id, s.name]) : [['', 'No sketch before this step']]),
-        segField('Axis', f, 'axis', [['v', 'Sketch Y axis'], ['u', 'Sketch X axis']]), exField('Angle', f, 'angle', '°', { min: 0.01, max: 360 })));
+        profileRow(), segField('Axis', f, 'axis', [['v', 'Sketch Y axis'], ['u', 'Sketch X axis']]), exField('Angle', f, 'angle', '°', { min: 0.01, max: 360 })));
       out.push(section_('Result', ...opsSection()));
       break;
     }

@@ -107,6 +107,38 @@ g = await geo();
 check(g.loops === 1 && g.ok && g.dof === 5, `slot tool makes one closed profile with 5 degrees of freedom (got ${g.dof})`);
 if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/slot.png' });
 
+// regions from crossing circles: pick the overlap in the Extrude dialog, then trim
+await page.click('#abFile'); await page.click('text=New design'); await W(1200);
+await page.click('.rbtn[aria-label^="Create Sketch"]'); await W(300);
+await page.click('#bMin'); if (!(await page.locator('.node .nlab:text-is("XY")').isVisible())) await page.click('.node:has-text("Origin") .tw');
+await page.click('.node .nlab:text-is("XY")'); await page.click('#bMin'); await W(1500);
+await page.keyboard.press('c');
+for (const [cx, rx] of [[0, 20], [24, 44]]) { const p0 = await sk(cx, 0), p1 = await sk(rx, 0); await page.mouse.move(p0.x, p0.y); await page.mouse.down(); await page.mouse.move(p1.x, p1.y, { steps: 6 }); await page.mouse.up(); await W(500); }
+g = await geo();
+check(g.regions === 3 && g.filled === 2, `two crossing circles make 3 regions, 2 filled by default (got ${g.regions}/${g.filled})`);
+await page.click('.palette .btn.go'); await W(800);
+await page.keyboard.press('e'); await W(1200);
+await page.fill('#dx-distance', '10'); await W(1500);
+const lens = 800 * Math.acos(0.6) - 384, cres = 400 * Math.PI - (800 * Math.acos(0.6) - 384);
+const vol = () => page.evaluate(() => window.__dw.state().bodies.map(b => parseFloat(b.split('=')[1].replace(/,/g, ''))));
+let v = await vol();
+check(Math.abs(v[0] - 2 * cres * 10) < 20, `default extrudes the two crescents (${(2 * cres * 10).toFixed(0)} mm³, got ${v[0]})`);
+const mid = await page.evaluate(() => window.__dw.screen(12, 0, 0));
+await clickAt(mid); await W(1500);
+v = await vol();
+check(Math.abs(v[0] - lens * 10) < 20, `clicking the overlap extrudes only the lens (${(lens * 10).toFixed(0)} mm³, got ${v[0]})`);
+if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/regions.png' });
+await page.click('.dialog .btn.ok'); await W(1000);
+await page.locator('.chip').first().dblclick(); await W(1200);
+await page.keyboard.press('t'); await W(200);
+await clickAt(await sk(4, 0)); await W(800);
+g = await geo();
+check(g.ok && g.regions === 2, `trim removes the arc inside the first circle (regions ${g.regions})`);
+await page.click('.palette .btn.go'); await W(2000);
+v = await vol();
+check(Math.abs(v[0] - 4000 * Math.PI) < 25, `the picked point now lies in the whole first circle, which is extruded (${(4000 * Math.PI).toFixed(0)} mm³, got ${v[0]})`);
+if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/trim.png' });
+
 check(errors.length === 0, 'no page errors' + (errors.length ? ': ' + errors.slice(0, 3).join(' | ') : ''));
 await browser.close(); server.close();
 process.exit(failed ? 1 : 0);

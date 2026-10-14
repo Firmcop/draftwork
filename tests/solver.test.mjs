@@ -118,3 +118,54 @@ test('open paths are found in order', () => {
   assert.equal(paths.length, 1); assert.equal(paths[0].closed, false);
   assert.deepEqual(paths[0].segs.map(s => s.id), ['l2', 'l1']);
 });
+
+test('regions from crossing curves', () => {
+  // two overlapping squares: 3 faces; even-odd fills the two outer parts, not the overlap
+  const sq = (id, x, y, s) => ({
+    points: [[0, 0], [s, 0], [s, s], [0, s]].map(([a, b], i) => ({ id: id + i, x: x + a, y: y + b })),
+    curves: [0, 1, 2, 3].map(i => ({ id: id + 'l' + i, kind: 'line', a: id + i, b: id + ((i + 1) % 4) })),
+  });
+  const A = sq('a', 0, 0, 20), B = sq('b', 10, 10, 20);
+  const g = { points: [...A.points, ...B.points], curves: [...A.curves, ...B.curves], cons: [] };
+  const regs = K.geoRegions(g, K.solveSketch(g));
+  assert.equal(regs.length, 3);
+  const areas = regs.map(r => r.area).sort((x, y) => x - y);
+  near(areas[0], 100, 1e-6, 'overlap'); near(areas[1], 300, 1e-6, 'L part'); near(areas[2], 300, 1e-6, 'L part');
+  assert.equal(regs.filter(r => r.filled).length, 2);
+  // picking the overlap by a point inside it
+  const pick = K.pickRegions(regs, [{ x: 15, y: 15 }]);
+  assert.equal(pick.length, 1); near(pick[0].area, 100, 1e-6, 'picked overlap');
+});
+
+test('circle crossing a line splits it; nested circle becomes a hole', () => {
+  const g = {
+    points: [{ id: 'c', x: 0, y: 0 }, { id: 'p', x: -20, y: 0 }, { id: 'q', x: 20, y: 0 }, { id: 'c2', x: 30, y: 30 }],
+    curves: [{ id: 'k', kind: 'circle', c: 'c', r: 10 }, { id: 'l', kind: 'line', a: 'p', b: 'q' }, { id: 'big', kind: 'circle', c: 'c2', r: 8 }, { id: 'small', kind: 'circle', c: 'c2', r: 3 }],
+    cons: [],
+  };
+  const regs = K.geoRegions(g, K.solveSketch(g));
+  const areas = regs.map(r => r.area).sort((x, y) => x - y);
+  // half disks (50π each), annulus (64π-9π outer face area counted as 64π... face area excludes nothing: its own cycle area), small disk 9π
+  assert.equal(regs.length, 4);
+  near(areas[0], 9 * Math.PI, 1e-6, 'small disk');
+  near(areas[1], 50 * Math.PI, 1e-6, 'half disk'); near(areas[2], 50 * Math.PI, 1e-6, 'half disk');
+  const ann = regs.find(r => Math.abs(r.area - 64 * Math.PI) < 1e-6);
+  assert.ok(ann && ann.holes.length === 1, 'annulus has the small circle as a hole');
+  assert.equal(regs.find(r => Math.abs(r.area - 9 * Math.PI) < 1e-6).filled, false, 'even-odd leaves the inner disk empty');
+});
+
+test('extrude a picked region from crossing shapes (exact)', () => {
+  const sq = (id, x, y, s) => ({
+    points: [[0, 0], [s, 0], [s, s], [0, s]].map(([a, b], i) => ({ id: id + i, x: x + a, y: y + b })),
+    curves: [0, 1, 2, 3].map(i => ({ id: id + 'l' + i, kind: 'line', a: id + i, b: id + ((i + 1) % 4) })),
+  });
+  const A = sq('a', 0, 0, 20), B = sq('b', 10, 10, 20);
+  const g = { points: [...A.points, ...B.points], curves: [...A.curves, ...B.curves], cons: [] };
+  const sk = { id: 's', type: 'sketch', plane: 'XY', profiles: [], geo: g };
+  let r = K.regenerateBrep([sk, { id: 'e', type: 'extrude', sketch: 's', distance: 10, op: 'new' }]);
+  near(K.brepProps([...r.bodies.values()][0]).volume, 6000, 1e-6, 'default even-odd: two L shapes');
+  r = K.regenerateBrep([sk, { id: 'e', type: 'extrude', sketch: 's', distance: 10, op: 'new', regions: [{ x: 5, y: 5 }, { x: 15, y: 15 }, { x: 25, y: 25 }] }]);
+  near(K.brepProps([...r.bodies.values()][0]).volume, 7000, 1e-6, 'all three regions: the union');
+  r = K.regenerate([sk, { id: 'e', type: 'extrude', sketch: 's', distance: 10, op: 'new', regions: [{ x: 15, y: 15 }] }]);
+  near([...r.bodies.values()].reduce((a, b) => a + K.signedVolume(b.geom), 0), 1000, 0.5, 'mesh kernel: just the overlap');
+});

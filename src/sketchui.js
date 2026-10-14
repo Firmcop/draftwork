@@ -1,6 +1,7 @@
 // ===== Constrained sketch editing: drawing tools, selection, dragging, constraints, dimensions =====
 // lineDraft (core) = { start, last, hover } while drawing a line chain; gdraw = in-progress drag/arc/shape.
-let geoSel = new Set(), geoHover = null, gdraw = null, geoCache = null;
+let geoSel = new Set(), geoHover = null, gdraw = null, geoCache = null, trimHover = null;
+const regionCache = new Map();   // non-active sketches: key -> state (small LRU)
 
 function geoOf(sk) { if (!sk.geo) sk.geo = emptyGeo(); return sk.geo; }
 const cloneGeo = g => JSON.parse(JSON.stringify(g || emptyGeo()));
@@ -10,15 +11,19 @@ function geoState(sk) {
   if (!sk?.geo || (!sk.geo.points.length && !sk.geo.curves.length)) return null;
   const key = sk.id + JSON.stringify(sk.geo) + JSON.stringify(params.vars);
   if (geoCache?.key === key) return geoCache;
+  if (regionCache.has(key)) return regionCache.get(key);
   const rg = resolvedGeo(sk.geo);
-  let solved = null, analysis = { dof: 0, free: new Set() }, loops = { profiles: [], info: { open: 0, branching: 0 } };
-  try { solved = solveSketch(rg); analysis = analyzeSketch(rg, solved); loops = geoProfiles(rg, solved); } catch (e) { console.warn(e); }
-  return (geoCache = { key, rg, solved, analysis, loops });
+  let solved = null, analysis = { dof: 0, free: new Set() }, loops = { profiles: [], info: { open: 0, branching: 0 } }, regions = [];
+  try { solved = solveSketch(rg); analysis = analyzeSketch(rg, solved); loops = geoProfiles(rg, solved); regions = geoRegions(rg, solved); } catch (e) { console.warn(e); }
+  const st = { key, rg, solved, analysis, loops, regions };
+  if (sk.id === sketchId) geoCache = st;
+  else { regionCache.set(key, st); if (regionCache.size > 24) regionCache.delete(regionCache.keys().next().value); }
+  return st;
 }
 function profCount(sk) {
   if (!sk || sk.type !== 'sketch') return 0;
   const st = geoState(sk);
-  return (sk.profiles?.length || 0) + (st?.loops.profiles.length || 0);
+  return (sk.profiles?.length || 0) + (st?.regions.filter(r => r.filled).length || 0);
 }
 // Re-solves `g` (optionally with dragged ids held near their new spots) and stores it. Returns false on conflict.
 function commitGeo(sk, g, o = {}) {
@@ -172,6 +177,7 @@ viewport.addEventListener('pointerdown', e => {
   if (sketchTool === 'line') return lineClick(sk, hit);
   if (sketchTool === 'arc3') return arcClick(sk, hit);
   if (sketchTool === 'fillet2d') return filletClick(sk, hit);
+  if (sketchTool === 'trim') return trimClick(sk, hit);
   gdraw = { kind: 'shape', tool: sketchTool, s: snapPoint(sk, hit), e: null };
   window.addEventListener('pointermove', onGeoMove); window.addEventListener('pointerup', onGeoUp, { once: true });
 }, { capture: true });
@@ -262,6 +268,7 @@ function sketchHover(e) {
   if (lineDraft) { const sp = snapPoint(sk, hit); lineDraft.hover = sp; changed = true; }
   if (gdraw?.kind === 'arc') { gdraw.hover = snapPoint(sk, hit); changed = true; }
   if (sketchTool === 'select' && !gdraw) { const gp = pickGeo(sk, hit), id = gp?.id || null; if (id !== geoHover) { geoHover = id; changed = true; } }
+  if (sketchTool === 'trim') { const tp = trimPiece(sk, hit); const key = tp ? tp.curve.id + ':' + tp.t0 : null; if (key !== (trimHover?.key ?? null)) { trimHover = tp ? { ...tp, key } : null; changed = true; } }
   if (changed) refreshOverlays();
 }
 function endLineChain() { if (lineDraft) { lineDraft = null; refreshOverlays(); defaultHint(); } }
@@ -329,6 +336,11 @@ function drawGeo(sk, grp, active) {
       const s = gdraw.s, e2 = gdraw.e, txt = gdraw.tool.startsWith('rect') ? `${fmt(Math.abs(e2.x - s.x) * (gdraw.tool === 'rectc' ? 2 : 1))} × ${fmt(Math.abs(e2.y - s.y) * (gdraw.tool === 'rectc' ? 2 : 1))}` : (gdraw.tool === 'circle' ? 'Ø' : '') + fmt(Math.hypot(e2.x - s.x, e2.y - s.y) * (gdraw.tool === 'circle' ? 2 : 1));
       const o = new CSS2DObject(h('div', { class: 'mlabel' }, txt)); o.position.set(e2.x, e2.y, 0.1); grp.add(o);
     }
+  }
+  if (sketchTool === 'trim' && trimHover) {
+    const c = trimHover.curve, n = 32, pts = [];
+    for (let i = 0; i <= n; i++) { const t = trimHover.t0 + (trimHover.t1 - trimHover.t0) * i / n; pts.push(c.kind === 'line' ? [c.a[0] + (c.b[0] - c.a[0]) * t, c.a[1] + (c.b[1] - c.a[1]) * t, 0.11] : [c.c[0] + c.r * Math.cos(t), c.c[1] + c.r * Math.sin(t), 0.11]); }
+    grp.add(line(pts, colors.err, { depthTest: false, order: 9, dashed: true, dash: 4 * zoom, gap: 2.5 * zoom }));
   }
   if (gdraw?.kind === 'arc') {
     const pts = [...gdraw.pts, ...(gdraw.hover ? [gdraw.hover] : [])];
@@ -614,4 +626,112 @@ function offsetLoop(sk, g, loop, d) {
   // tangent joints stay tangent
   segs.forEach((sg, i) => { const j = (i + 1) % n; if ((sg.t === 'arc') !== (segs[j].t === 'arc') || (sg.t === 'arc' && segs[j].t === 'arc')) { const cur = offs[i], nxt = offs[j]; if (Math.hypot(cur.b[0] - nxt.a[0], cur.b[1] - nxt.a[1]) < 1e-6) g.cons.push({ id: cid(), type: 'tangent', e: [ids[i], ids[j]] }); } });
   return ids;
+}
+
+// ---------- trim: remove the piece of a curve between crossings ----------
+function trimPiece(sk, hit) {
+  const st = geoState(sk); if (!st?.solved) return null;
+  const curves = arrCurvesFor(st);
+  let best = null, bd = hit.tol;
+  for (const c of curves) {
+    let d, t;
+    if (c.kind === 'line') { const dx = c.b[0] - c.a[0], dy = c.b[1] - c.a[1], L = dx * dx + dy * dy; t = Math.max(0, Math.min(1, ((hit.x - c.a[0]) * dx + (hit.y - c.a[1]) * dy) / L)); d = Math.hypot(hit.x - c.a[0] - t * dx, hit.y - c.a[1] - t * dy); }
+    else { const raw = Math.atan2(hit.y - c.c[1], hit.x - c.c[0]); let th; if (c.full) th = ((raw % TAU) + TAU) % TAU; else { th = raw; while (th < c.a0 - 1e-9) th += TAU; while (th > c.a0 + TAU) th -= TAU; if (th > c.a1 + 1e-9) continue; } t = th; d = Math.abs(Math.hypot(hit.x - c.c[0], hit.y - c.c[1]) - c.r); }
+    if (d <= bd) { bd = d; best = { c, t }; }
+  }
+  if (!best) return null;
+  const sp = curveSplits(curves).find(s => s.curve.id === best.c.id);
+  if (best.c.full) {
+    const hs = [...new Set(sp.hits.map(hh => Math.round((((hh.t % TAU) + TAU) % TAU) * 1e9) / 1e9))].sort((x, y) => x - y);
+    if (hs.length < 2) return { curve: best.c, t0: 0, t1: TAU, hits: sp.hits, whole: true };
+    let t = best.t; if (t < hs[0]) t += TAU;
+    const ext = [...hs, hs[0] + TAU];
+    for (let k = 0; k < ext.length - 1; k++) if (t >= ext[k] - 1e-9 && t <= ext[k + 1] + 1e-9) return { curve: best.c, t0: ext[k], t1: ext[k + 1], hits: sp.hits };
+    return null;
+  }
+  const ps = sp.params, t = best.t;
+  for (let k = 0; k < ps.length - 1; k++) if (t >= ps[k] - 1e-9 && t <= ps[k + 1] + 1e-9) return { curve: best.c, t0: ps[k], t1: ps[k + 1], hits: sp.hits, params: ps };
+  return null;
+}
+function arrCurvesFor(st) { return arrCurves(st.rg, st.solved); }
+function trimClick(sk, hit) {
+  const tp = trimPiece(sk, hit); if (!tp) return;
+  const g = cloneGeo(sk.geo), src = g.curves.find(c => c.id === tp.curve.id), c = tp.curve;
+  const lo = c.kind === 'line' ? 0 : c.a0, hi = c.kind === 'line' ? 1 : (c.full ? c.a0 + TAU : c.a1);
+  const isEndLo = Math.abs(tp.t0 - lo) < 1e-9, isEndHi = Math.abs(tp.t1 - hi) < 1e-9;
+  const hitAt = t => tp.hits.find(hh => c.full ? Math.abs(Math.atan2(Math.sin(hh.t - t), Math.cos(hh.t - t))) < 1e-7 : Math.abs(hh.t - t) < 1e-7);
+  const pointAt = t => c.kind === 'line' ? [c.a[0] + (c.b[0] - c.a[0]) * t, c.a[1] + (c.b[1] - c.a[1]) * t] : [c.c[0] + c.r * Math.cos(t), c.c[1] + c.r * Math.sin(t)];
+  const att = [];
+  const attach = (pid, t) => { const hh = hitAt(t); if (!hh) return; const other = g.curves.find(x => x.id === hh.other); if (other) { const k = { id: cid(), type: other.kind === 'line' ? 'onLine' : 'onCircle', e: [pid, other.id] }; att.push(k.id); g.cons.push(k); } };
+  const dropCons = (id, types) => { g.cons = g.cons.filter(k => !((k.e || []).includes(id) && types.includes(k.type))); };
+  const removeCurve = id => { g.curves = g.curves.filter(x => x.id !== id); g.cons = g.cons.filter(k => !(k.e || []).includes(id)); };
+  if (tp.whole || (isEndLo && isEndHi && !c.full)) {
+    removeCurve(src.id);
+  } else if (c.full) {
+    // circle -> the arc that remains after removing [t0, t1]
+    const p1 = addPoint(g, ...pointAt(tp.t1)), p0 = addPoint(g, ...pointAt(tp.t0));
+    const arc = { id: 'a' + uid(), kind: 'arc', c: src.c, a: p1, b: p0 };
+    for (const k of g.cons) if ((k.e || []).includes(src.id)) { k.e = k.e.map(x => x === src.id ? arc.id : x); if (k.type === 'diameter') { k.type = 'radius'; k.value = typeof k.value === 'number' ? k.value / 2 : '(' + k.value + ')/2'; } }
+    g.curves = g.curves.filter(x => x.id !== src.id); g.curves.push(arc);
+    attach(p1, tp.t1); attach(p0, tp.t0);
+  } else if (isEndLo || isEndHi) {
+    // shorten from one end
+    const t = isEndLo ? tp.t1 : tp.t0, np = addPoint(g, ...pointAt(t));
+    const key = src.kind === 'arc' ? (isEndLo ? 'a' : 'b') : (isEndLo ? 'a' : 'b');
+    src[key] = np; dropCons(src.id, ['length', 'equal', 'midpoint']);
+    attach(np, t);
+  } else {
+    // split in two, removing the middle piece
+    const pA = addPoint(g, ...pointAt(tp.t0)), pB = addPoint(g, ...pointAt(tp.t1));
+    const piece = { ...src, id: (src.kind === 'line' ? 'l' : 'a') + uid(), a: pB, b: src.b };
+    src.b = pA;
+    g.curves.push(piece);
+    dropCons(src.id, ['length', 'equal', 'midpoint']);
+    for (const k of [...g.cons]) if ((k.e || []).includes(src.id) && ['horizontal', 'vertical', 'parallel', 'perpendicular', 'construction'].includes(k.type)) g.cons.push({ ...k, id: cid(), e: k.e.map(x => x === src.id ? piece.id : x) });
+    g.cons.push(src.kind === 'line' ? { id: cid(), type: 'collinear', e: [src.id, piece.id] } : { id: cid(), type: 'equal', e: [src.id, piece.id] });
+    attach(pA, tp.t0); attach(pB, tp.t1);
+  }
+  // drop points no longer used by any curve (and their constraints), except virtual corners
+  const used = new Set(g.curves.flatMap(x => [x.a, x.b, x.c].filter(Boolean)));
+  const gone = new Set(g.points.filter(p => !used.has(p.id) && !p.virtual && !g.cons.some(k => k.type === 'fix' && k.e[0] === p.id)).map(p => p.id));
+  g.points = g.points.filter(p => !gone.has(p.id)); g.cons = g.cons.filter(k => !(k.e || []).some(x => gone.has(x)));
+  trimHover = null;
+  if (!commitGeo(sk, g, { quiet: true })) { g.cons = g.cons.filter(k => !att.includes(k.id)); commitGeo(sk, g, { msg: 'Could not trim that piece without breaking other constraints' }); }
+}
+// ---------- picking profiles (regions) for extrude / revolve ----------
+function regionDialogFeature() { const f = dlg && !dlg.custom && featById(dlg.fid); return f && (f.type === 'extrude' || f.type === 'revolve') ? f : null; }
+function regionAt(e, f) {
+  const sk = featById(f.sketch); if (!sk?.geo) return null;
+  const st = geoState(sk); if (!st?.regions.length) return null;
+  const M = sketchMatrix(sk);
+  raycaster.setFromCamera(ndcOf(e), camera);
+  const n = new THREE.Vector3(0, 0, 1).transformDirection(M), o = new THREE.Vector3().setFromMatrixPosition(M), p = new THREE.Vector3();
+  if (!raycaster.ray.intersectPlane(new THREE.Plane().setFromNormalAndCoplanarPoint(n, o), p)) return null;
+  p.applyMatrix4(M.clone().invert());
+  const r = st.regions.find(x => regionContains(x, [p.x, p.y]));
+  return r ? { sk, st, region: r } : null;
+}
+function toggleRegion(f, hit) {
+  if (!hit) return false;
+  checkpoint();
+  const st = hit.st, cur = pickRegions(st.regions, f.regions);
+  const set = new Set(cur.includes(hit.region) && f.regions?.length ? cur.filter(r => r !== hit.region) : f.regions?.length ? [...cur, hit.region] : [hit.region]);
+  f.regions = [...set].map(r => ({ x: Math.round(r.sample[0] * 1e4) / 1e4, y: Math.round(r.sample[1] * 1e4) / 1e4 }));
+  if (!f.regions.length) delete f.regions;
+  rerenderDialog(); refreshOverlays(); scheduleRegen(0);
+  return true;
+}
+// shaded regions for the sketch overlay
+function drawRegions(sk, grp, active) {
+  const st = geoState(sk); if (!st?.regions.length) return;
+  const rf = regionDialogFeature(), editing = rf && rf.sketch === sk.id;
+  const picked = editing ? new Set(pickRegions(st.regions, rf.regions)) : null;
+  for (const r of st.regions) {
+    let shape; try { shape = new THREE.Shape(profilePolygon({ kind: 'loop', segs: r.outer })); shape.holes = r.holes.map(h => new THREE.Path(profilePolygon({ kind: 'loop', segs: h }))); } catch (e) { continue; }
+    const on = editing ? picked.has(r) : r.filled;
+    const col = editing ? (on ? colors.select : colors.accent) : active ? colors.sketch : colors.accent;
+    const op = editing ? (on ? 0.42 : 0.1) : active ? (on ? 0.16 : 0.05) : (on ? 0.1 : 0.03);
+    const m = new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: op, side: THREE.DoubleSide, depthWrite: false, depthTest: !(active || editing) }));
+    m.position.z = 0.03; m.renderOrder = editing ? 7 : 3; grp.add(m);
+  }
 }
