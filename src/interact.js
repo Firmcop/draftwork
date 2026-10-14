@@ -1,5 +1,5 @@
 // ===== Commands, picking, sketching, measuring, view cube, navigation, boot =====
-const NAMES = { sketch: 'Sketch', plane: 'Plane', extrude: 'Extrude', revolve: 'Revolve', box: 'Box', cylinder: 'Cylinder', sphere: 'Sphere', torus: 'Torus', hole: 'Hole', pattern: 'Pattern', mirror: 'Mirror', move: 'Move', combine: 'Combine', remove: 'Remove', fillet: 'Fillet', chamfer: 'Chamfer', shell: 'Shell' };
+const NAMES = { sketch: 'Sketch', plane: 'Plane', extrude: 'Extrude', revolve: 'Revolve', box: 'Box', cylinder: 'Cylinder', sphere: 'Sphere', torus: 'Torus', hole: 'Hole', pattern: 'Pattern', mirror: 'Mirror', move: 'Move', combine: 'Combine', remove: 'Remove', fillet: 'Fillet', chamfer: 'Chamfer', shell: 'Shell', draft: 'Draft', loft: 'Loft', import: 'Import' };
 function nextName(type) {
   let n = doc.features.filter(f => f.type === type).length + 1;
   while (doc.features.some(f => f.name === NAMES[type] + ' ' + n)) n++;
@@ -147,9 +147,9 @@ function newEdgeFeature(type) {
   if (!isBrep()) { toast(engineState === 'loading' ? 'The exact geometry engine is still loading. Try again in a moment.' : `${TYPE[type].label} needs the exact geometry engine, which could not start here: ${engineMsg}`); return; }
   if (!bodiesAtInsert().length) { toast('There is no body yet'); return; }
   const snap = JSON.stringify(doc); checkpoint();
-  const f = { id: uid(), type, name: nextName(type), edges: [], ...(type === 'fillet' ? { radius: 2 } : type === 'chamfer' ? { distance: 1 } : { thickness: 2 }) };
+  const f = { id: uid(), type, name: nextName(type), edges: [], ...(type === 'fillet' ? { radius: 2 } : type === 'chamfer' ? { distance: 1 } : type === 'draft' ? { angle: 3, neutral: 'XY', neutralOffset: 0, flipPull: false } : { thickness: 2 }) };
   insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
-  toast(type === 'shell' ? 'Click the faces to open' : 'Click the edges to ' + (type === 'fillet' ? 'round' : 'bevel'));
+  toast(type === 'shell' ? 'Click the faces to open' : type === 'draft' ? 'Click the faces to taper' : 'Click the edges to ' + (type === 'fillet' ? 'round' : 'bevel'));
 }
 // ---- edge / face picking for fillet, chamfer, shell ----
 function mmPerPx() { const r = renderer.domElement.getBoundingClientRect(); return camera.position.distanceTo(controls.target) * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / r.height; }
@@ -177,14 +177,60 @@ function toggleRef(f, hit) {
   if (!hit?.sig) return;
   checkpoint();
   const key = f.type === 'shell' ? 'c' : 'p';
-  const cur = brepRefHashes(hit.rec, f.edges || [], f.type === 'shell' ? 'face' : 'edge');
+  const kind = FACE_PICK.has(f.type) ? 'face' : 'edge';
+  const cur = brepRefHashes(hit.rec, f.edges || [], kind);
   if (cur.has(hit.hash)) {
     // remove the stored reference that resolves to this item
-    f.edges = (f.edges || []).filter(r => !brepRefHashes(hit.rec, [r], f.type === 'shell' ? 'face' : 'edge').has(hit.hash));
+    f.edges = (f.edges || []).filter(r => !brepRefHashes(hit.rec, [r], kind).has(hit.hash));
   } else f.edges = [...(f.edges || []), JSON.parse(JSON.stringify(hit.sig))];
   void key;
   rerenderDialog(); drawToolsOverlay(); scheduleRegen(60);
 }
+function newLoft() {
+  if (!isBrep()) { toast(engineState === 'loading' ? 'The exact geometry engine is still loading. Try again in a moment.' : 'Loft needs the exact geometry engine, which could not start here: ' + engineMsg); return; }
+  const end = insertIndex();
+  const cands = doc.features.slice(0, end).filter(g => g.type === 'sketch' && g.profiles.length === 1 && statusOf(g.id).state === 'ok');
+  if (cands.length < 2) { toast('Loft needs two sketches with one closed profile each, on different planes'); return; }
+  const snap = JSON.stringify(doc); checkpoint();
+  const f = { id: uid(), type: 'loft', name: nextName('loft'), sketches: cands.slice(-2).map(s => s.id), ruled: false, op: bodiesAtInsert().length ? 'join' : 'new', target: null };
+  insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
+}
+// ---- STEP import ----
+const importPending = new Set();
+function ensureImports() {
+  for (const f of doc.features) {
+    if (f.type !== 'import' || !f.file || importShapes.has(f.file) || importPending.has(f.file)) continue;
+    const file = doc.files?.[f.file]; if (!file) continue;
+    importPending.add(f.file);
+    brepImportSTEP(f.file, file.text).catch(e => { importShapes.set(f.file, []); toast('Could not read ' + file.name + ': ' + occMsg(e)); })
+      .finally(() => { importPending.delete(f.file); cache = []; scheduleRegen(0); });
+  }
+}
+function startImportSTEP() {
+  if (!isBrep()) { toast(engineState === 'loading' ? 'The exact geometry engine is still loading. Try again in a moment.' : 'STEP import needs the exact geometry engine, which could not start here: ' + engineMsg); return; }
+  $('#stepInput').click();
+}
+$('#stepInput').addEventListener('change', e => {
+  const file = e.target.files?.[0]; e.target.value = ''; if (!file) return;
+  if (file.size > 25e6) { toast('That file is over 25 MB. Larger imports come with background processing.'); return; }
+  const rd = new FileReader();
+  rd.onload = async () => {
+    const text = String(rd.result);
+    if (!/ISO-10303-21/.test(text.slice(0, 2000))) { toast('That is not a STEP file'); return; }
+    const fileId = uid();
+    toast('Reading ' + file.name + '…');
+    try {
+      const n = await brepImportSTEP(fileId, text);
+      if (!n) { toast('No solid bodies found in ' + file.name); return; }
+      checkpoint();
+      doc.files ||= {}; doc.files[fileId] = { name: file.name, text };
+      const f = { id: uid(), type: 'import', name: file.name.replace(/\.(step|stp)$/i, ''), file: fileId };
+      insertFeature(f); cache = []; doRegen(); setView('fit');
+      toast(`Imported ${n} bod${n === 1 ? 'y' : 'ies'} from ${file.name}`);
+    } catch (err) { toast('Could not read ' + file.name + ': ' + occMsg(err)); }
+  };
+  rd.readAsText(file);
+});
 function deleteSelection() {
   if (selFeature) return deleteFeature(selFeature);
   if (selBody) {
@@ -441,7 +487,10 @@ function pickAt(e) {
   if (pick.planes) { originGroup.traverse(o => { if (o.isMesh && o.userData.pickable) targets.push(o); }); planesGroup.traverse(o => { if (o.isMesh && o.userData.pickable) targets.push(o); }); }
   if (pick.faces) for (const [id, s] of shownBodies) if (s.mesh.visible) targets.push(s.mesh);
   scene.updateMatrixWorld();
-  const hits = raycaster.intersectObjects(targets, false);
+  let hits = raycaster.intersectObjects(targets, false);
+  // A face beats a plane at (nearly) the same depth: origin planes often slice through parts.
+  const firstBody = hits.find(x => x.object.userData.body);
+  if (firstBody) hits = hits.filter(x => x.object.userData.body || x.distance < firstBody.distance - Math.max(0.05, firstBody.distance * 1e-3));
   for (const hit of hits) {
     const ud = hit.object.userData;
     if (ud.plane) {
@@ -452,7 +501,18 @@ function pickAt(e) {
     if (ud.body) {
       const n = hit.face.normal.clone(), a = [Math.abs(n.x), Math.abs(n.y), Math.abs(n.z)];
       const ax = a.indexOf(Math.max(...a));
-      if (a[ax] < 0.999) return { invalid: true, msg: 'Angled and curved faces come with the Phase 1 geometry engine. Pick a flat face that faces an axis.' };
+      if (a[ax] < 0.999) {
+        const s = shownBodies.get(ud.body);
+        let nn = n.clone();
+        if (s?.rec.shape) {
+          const sig = brepSigMap(s.rec, 'face').get(brepMeshOf(s.rec).triFace[hit.faceIndex]);
+          if (sig && sig.type !== 'PLANE') return { invalid: true, msg: 'Curved faces cannot hold a sketch. Pick a flat face or a plane.' };
+          if (sig) { const sn = new THREE.Vector3(...sig.n); if (sn.lengthSq() > 0.5) nn = sn.dot(n) < 0 ? sn.negate() : sn; }
+        }
+        const frame = frameFromPoint(hit.point, nn);
+        const M = planeMatrix(frame, 0, false);
+        return { plane: frame, offset: 0, flip: false, face: true, M, local: { x: 0, y: 0 }, label: `Angled face of ${bodyName(ud.body)}` };
+      }
       const p = hit.point; let base, offset, flip;
       if (ax === 2) { base = 'XY'; offset = p.z; flip = n.z < 0; }
       else if (ax === 1) { base = 'XZ'; offset = -p.y; flip = n.y > 0; }
@@ -496,7 +556,7 @@ viewport.addEventListener('pointerup', e => {
     completePick(c); return;
   }
   const ef = edgeDialogFeature();
-  if (ef) { toggleRef(ef, ef.type === 'shell' ? brepFaceHit(e) : brepEdgeHit(e)); return; }
+  if (ef) { toggleRef(ef, FACE_PICK.has(ef.type) ? brepFaceHit(e) : brepEdgeHit(e)); return; }
   if (measure) {
     const hit = bodyHit(e); if (!hit) return;
     if (measure.pts.length >= 2) measure.pts = [];
@@ -519,7 +579,7 @@ viewport.addEventListener('pointermove', e => {
       setHint(c ? (c.invalid ? 'This face cannot be used yet' : c.label) : pick.prompt + ' · Esc cancels');
       drawToolsOverlay();
     } else if (edgeDialogFeature() && !e.buttons) {
-      const ef = edgeDialogFeature(), hit = ef.type === 'shell' ? brepFaceHit(e) : brepEdgeHit(e);
+      const ef = edgeDialogFeature(), hit = FACE_PICK.has(ef.type) ? brepFaceHit(e) : brepEdgeHit(e);
       const nh = hit ? { body: hit.body, hash: hit.hash } : null;
       if (JSON.stringify(nh) !== JSON.stringify(edgeHover)) { edgeHover = nh; drawToolsOverlay(); }
     } else if (mode === 'sketch' && sketchTool === 'line' && lineDraft?.pts.length) {
@@ -818,5 +878,6 @@ if (window.claude?.hot?.ready) window.claude.hot.ready(start); else start(window
 if (location.hostname === 'localhost') window.__dw = {
   screen: (x, y, z) => { const v = new THREE.Vector3(x, y, z).project(camera), r = renderer.domElement.getBoundingClientRect(); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; },
   sketchScreen: (x, y) => { const v = new THREE.Vector3(x, y, 0).applyMatrix4(sketchMatrix(featById(sketchId))).project(camera), r = renderer.domElement.getBoundingClientRect(); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; },
+  doc: () => JSON.parse(JSON.stringify(doc)),
   state: () => ({ mode, sketchTool, features: doc.features.map(f => f.type + ':' + statusOf(f.id).state + (statusOf(f.id).msg ? '(' + statusOf(f.id).msg + ')' : '')), bodies: [...result.bodies.keys()].map(id => bodyName(id) + '=' + fix(massProps().bodies.find(b => b.id === id)?.volume || 0, 0)) }),
 };

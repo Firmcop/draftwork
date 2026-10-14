@@ -199,8 +199,9 @@ function exField(label, obj, key, unit = 'mm', o = {}) {
 }
 function selField(label, obj, key, options, o = {}) {
   const id = o.id || ('ds-' + key);
-  const s = h('select', { id }, options.map(([v, t]) => h('option', { value: v, selected: String(obj[key] ?? '') === String(v) }, t)));
-  s.addEventListener('change', () => { checkpoint(); obj[key] = o.numeric ? +s.value : (s.value === '' ? null : s.value); o.after?.(); if (o.rerender) rerenderDialog(); scheduleRegen(0); });
+  const cur = obj[key] && typeof obj[key] === 'object' ? '__face' : String(obj[key] ?? '');
+  const s = h('select', { id }, options.map(([v, t]) => h('option', { value: v, selected: cur === String(v) }, t)));
+  s.addEventListener('change', () => { if (s.value === '__face') return; checkpoint(); obj[key] = o.numeric ? +s.value : (s.value === '' ? null : s.value); o.after?.(); if (o.rerender) rerenderDialog(); scheduleRegen(0); });
   return row(label, s, id);
 }
 function segField(label, obj, key, options, o = {}) {
@@ -224,8 +225,9 @@ function chkField(label, obj, key, o = {}) {
 const section_ = (title, ...kids) => h('div', { class: 'dsec' }, title ? h('h4', {}, title) : null, ...kids);
 
 // planes / bodies / features available before a feature
-function planeOptions(beforeIdx) {
+function planeOptions(beforeIdx, cur) {
   const opts = [['XY', 'XY plane (Top)'], ['XZ', 'XZ plane (Front)'], ['YZ', 'YZ plane (Right)']];
+  if (cur && typeof cur === 'object') opts.unshift(['__face', 'Picked face']);
   doc.features.slice(0, beforeIdx).filter(f => f.type === 'plane').forEach(p => opts.push([p.id, p.name]));
   return opts;
 }
@@ -260,7 +262,7 @@ function rerenderDialog() {
 function dialogHelp(f) {
   return { extrude: 'Pushes a closed sketch profile into a solid.', revolve: 'Spins a profile around a sketch axis.', hole: 'Drills a hole into the bodies below the placement plane.',
     pattern: 'Repeats a feature. Copies of a New Body feature become new bodies.', mirror: 'Mirrors a feature across an origin plane.', plane: 'A reference plane you can sketch on.',
-    move: 'Moves or copies a body. Rotation is about the origin.', fillet: 'Rounds the picked edges. Edge picks follow the model when earlier steps change.', chamfer: 'Bevels the picked edges.', shell: 'Hollows the body, opening the picked faces, with walls of the given thickness.', combine: 'Joins, cuts or intersects bodies with each other.' }[f.type] || 'Values accept expressions such as width/2 + 5.';
+    move: 'Moves or copies a body. Rotation is about the origin.', draft: 'Tilts the picked faces so the part releases from a mold.', loft: 'Blends a solid through two or more profiles.', import: 'Solids read from a STEP file.', fillet: 'Rounds the picked edges. Edge picks follow the model when earlier steps change.', chamfer: 'Bevels the picked edges.', shell: 'Hollows the body, opening the picked faces, with walls of the given thickness.', combine: 'Joins, cuts or intersects bodies with each other.' }[f.type] || 'Values accept expressions such as width/2 + 5.';
 }
 function featureFields(f, idx) {
   const out = [];
@@ -271,7 +273,7 @@ function featureFields(f, idx) {
     if (f.op !== 'new') kids.push(selField('Objects', f, 'target', [['', f.op === 'cut' ? 'All bodies it touches' : 'Automatic (last body)'], ...bodiesBefore(f.id)], { id: 'ds-target' }));
     return kids;
   };
-  const placement = () => [selField('Plane', f, 'plane', planeOptions(idx), { id: 'ds-plane' }), segField('Direction', f, 'flip', [[false, 'Normal'], [true, 'Flipped']]), exField('Offset', f, 'offset'),
+  const placement = () => [selField('Plane', f, 'plane', planeOptions(idx, f.plane), { id: 'ds-plane' }), segField('Direction', f, 'flip', [[false, 'Normal'], [true, 'Flipped']]), exField('Offset', f, 'offset'),
     h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn', type: 'button', onclick: () => repositionPlaced(f), html: icon('pick') + 'Pick face and point…' }))];
   switch (f.type) {
     case 'extrude': {
@@ -345,12 +347,38 @@ function featureFields(f, idx) {
       out.push(section_('Result', segField('Operation', f, 'op', [['join', 'Join'], ['cut', 'Cut'], ['intersect', 'Intersect']]), chkField('Keep tool bodies', f, 'keep')));
       break;
     }
-    case 'fillet': case 'chamfer': case 'shell': {
-      const n = (f.edges || []).length, what = f.type === 'shell' ? 'face' : 'edge';
-      out.push(section_(f.type === 'shell' ? 'Faces to remove' : 'Edges',
+    case 'fillet': case 'chamfer': case 'shell': case 'draft': {
+      const n = (f.edges || []).length, what = FACE_PICK.has(f.type) ? 'face' : 'edge';
+      out.push(section_(f.type === 'shell' ? 'Faces to remove' : f.type === 'draft' ? 'Faces to taper' : 'Edges',
         h('p', { class: 'note' }, n ? `${n} ${what}${n > 1 ? 's' : ''} selected. Click on the model to add or remove ${what}s.` : `Click the ${what}s on the model.`),
         h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn', type: 'button', disabled: !n, onclick: () => { checkpoint(); f.edges = []; rerenderDialog(); scheduleRegen(0); drawToolsOverlay(); } }, 'Clear selection'))));
+      if (f.type === 'draft') {
+        out.push(section_('Pull direction', selField('Neutral plane', f, 'neutral', planeOptions(idx, f.neutral), { id: 'ds-neutral' }), exField('Plane offset', f, 'neutralOffset', 'mm', { id: 'dx-noff' }),
+          exField('Angle', f, 'angle', '°', { min: -59, max: 59, id: 'dx-dangle' }), chkField('Flip pull direction', f, 'flipPull'),
+          h('p', { class: 'note' }, 'Faces stay put where they cross the neutral plane and tilt away from it.')));
+        break;
+      }
       out.push(section_('Size', f.type === 'fillet' ? exField('Radius', f, 'radius', 'mm', { min: 0.001 }) : f.type === 'chamfer' ? exField('Distance', f, 'distance', 'mm', { min: 0.001, id: 'dx-chdist' }) : exField('Thickness', f, 'thickness', 'mm', { min: 0.001 })));
+      break;
+    }
+    case 'loft': {
+      const sks = doc.features.slice(0, idx).filter(g => g.type === 'sketch');
+      const list = h('div', { class: 'picklist' });
+      for (const s of sks) {
+        const cid = 'lf-' + s.id;
+        const c = h('input', { type: 'checkbox', id: cid, checked: (f.sketches || []).includes(s.id) });
+        c.addEventListener('change', () => { checkpoint(); const set = new Set(f.sketches || []); c.checked ? set.add(s.id) : set.delete(s.id); f.sketches = sks.map(x => x.id).filter(id => set.has(id)); scheduleRegen(0); });
+        list.append(h('label', { class: 'chk', for: cid }, c, s.name, h('span', { class: 'note', style: 'margin:0 0 0 auto' }, s.profiles.length + ' profile' + (s.profiles.length === 1 ? '' : 's'))));
+      }
+      out.push(section_('Profiles', h('p', { class: 'note' }, 'Pick two or more sketches, one closed profile each. They are joined in timeline order.'), list, chkField('Straight (ruled) sides', f, 'ruled')));
+      out.push(section_('Result', ...opsSection()));
+      break;
+    }
+    case 'import': {
+      const file = doc.files?.[f.file];
+      out.push(section_('File', h('dl', { class: 'stat' }, h('dt', {}, 'Name'), h('dd', {}, file?.name || 'missing'), h('dt', {}, 'Size'), h('dd', {}, file ? fix(file.text.length / 1024, 0) + ' KB' : '—'),
+        h('dt', {}, 'Bodies'), h('dd', {}, String([...result.bodies.values()].filter(b => b.feature === f.id).length))),
+        h('p', { class: 'note' }, 'Imported geometry is fixed. Add features after it to change it.')));
       break;
     }
     case 'remove': {
@@ -415,8 +443,9 @@ function renderPalette() {
     opt('Sketch grid', 'grid'), opt('Snap to 1 mm', 'snap'), opt('Show profiles', 'profiles'), opt('Show dimensions', 'dims')));
   const nameI = h('input', { type: 'text', id: 'sk-name', value: sk.name, autocomplete: 'off' });
   nameI.addEventListener('input', () => { checkpoint('skname'); sk.name = nameI.value; renderBrowser(); });
-  const plSel = h('select', { id: 'sk-plane' }, planeOptions(idx).map(([v, t]) => h('option', { value: v, selected: sk.plane === v }, t)));
-  plSel.addEventListener('change', () => { checkpoint(); sk.plane = plSel.value; sk.offset = 0; sk.flip = false; scheduleRegen(0); setTimeout(() => lookAtMatrix(sketchMatrix(sk)), 60); renderPalette(); });
+  const curPl = sk.plane && typeof sk.plane === 'object' ? '__face' : sk.plane;
+  const plSel = h('select', { id: 'sk-plane' }, planeOptions(idx, sk.plane).map(([v, t]) => h('option', { value: v, selected: curPl === v }, t)));
+  plSel.addEventListener('change', () => { if (plSel.value === '__face') return; checkpoint(); sk.plane = plSel.value; sk.offset = 0; sk.flip = false; scheduleRegen(0); setTimeout(() => lookAtMatrix(sketchMatrix(sk)), 60); renderPalette(); });
   body.append(section_('Sketch', row('Name', nameI, 'sk-name'), row('Plane', plSel, 'sk-plane'), exField('Offset', sk, 'offset', 'mm', { id: 'sk-offset', after: () => setTimeout(refreshOverlays, 0) })));
   const list = h('div', { class: 'picklist' });
   sk.profiles.forEach(p => list.append(h('button', { class: 'mi', style: selProfile === p.id ? 'background:var(--hover)' : '', onclick: () => { selProfile = p.id; setSketchTool('select'); renderPalette(); refreshOverlays(); },

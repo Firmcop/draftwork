@@ -11,13 +11,14 @@ Done
 - [x] Exact B-rep kernel (OpenCascade), mesh fallback
 - [x] Fillet, chamfer, shell with persistent edge/face picks
 - [x] STEP and STL export; measure, section, mass properties, BOM
+- [x] Loft, draft
+- [x] Sketches and holes on angled flat faces
+- [x] STEP import (multi-solid files become separate bodies)
 
 Next
 - [ ] Sketch constraint solver (coincident, parallel, tangent, equal, dimensions as constraints)
 - [ ] Arcs, splines, fillets and trim in sketches
-- [ ] Loft, sweep, draft, press pull
-- [ ] Sketch and holes on angled and curved faces
-- [ ] STEP import
+- [ ] Sweep (needs open sketch paths), press pull
 - [ ] Run the kernel in a Web Worker so long rebuilds don't pause the UI
 - [ ] Desktop packaging (Tauri)
 

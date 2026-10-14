@@ -9,14 +9,14 @@ Parametric CAD in the browser. Sketch on planes or faces, build solids with a fe
 | Area | Features |
 |---|---|
 | Workspace | Workspace switcher, tabbed ribbon (Solid, Surface, Mesh, Sheet Metal, Plastic, Manage, Utilities, contextual Sketch), browser tree, view cube, navigation bar, timeline with history marker, command dialogs with OK/Cancel |
-| Sketch | Line (closed profiles), 2-point and center rectangle, circle, polygon, slot; snapping; editable dimensions; nested profiles become holes |
-| Solid | Extrude, revolve, hole (simple/counterbore, flat/drill point), box, cylinder, sphere, torus, rectangular and circular pattern, mirror |
-| Modify | Fillet, chamfer, shell (pick edges/faces on the model), combine, move/copy, remove, physical material, appearance |
+| Sketch | On origin/offset planes or any flat face (including angled ones). Line (closed profiles), 2-point and center rectangle, circle, polygon, slot; snapping; editable dimensions; nested profiles become holes |
+| Solid | Extrude, revolve, loft, hole (simple/counterbore, flat/drill point), box, cylinder, sphere, torus, rectangular and circular pattern, mirror |
+| Modify | Fillet, chamfer, shell, draft (pick edges/faces on the model), combine, move/copy, remove, physical material, appearance |
 | Bodies | Multiple bodies with New Body / Join / Cut / Intersect |
 | Parameters | User parameters and expressions in any field (`width/2 - edge`, `sqrt(…)`, `sin(…)` …) |
 | Construct | Offset planes |
 | Inspect | Measure, section analysis, center of mass, properties, bill of materials (CSV) |
-| Files | Project save/open (.json), STEP and STL export (.zip) |
+| Files | Project save/open (.json), STEP import, STEP and STL export (.zip) |
 
 Edge and face picks for fillet/chamfer/shell are stored as geometric signatures and re-matched after every rebuild, so they survive moderate upstream changes.
 

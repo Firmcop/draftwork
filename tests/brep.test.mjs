@@ -56,3 +56,52 @@ test('STEP export contains solids', async () => {
   assert.match(text, /^ISO-10303-21;/);
   assert.match(text, /MANIFOLD_SOLID_BREP/);
 });
+
+test('draft tapers picked faces about a neutral plane', () => {
+  const f = [{ id: 'b', type: 'box', plane: 'XY', cx: 0, cy: 0, w: 20, d: 20, h: 20, op: 'new' }];
+  const r0 = K.regenerateBrep(f);
+  const sides = [...K.brepSigMap([...r0.bodies.values()][0], 'face').values()].filter(s => Math.abs(s.n[2]) < 0.1);
+  assert.equal(sides.length, 4);
+  const r = K.regenerateBrep([...f, { id: 'd', type: 'draft', edges: sides, angle: 5, neutral: 'XY' }]);
+  okAll(r);
+  const t = 20 - 2 * 20 * Math.tan(5 * Math.PI / 180);
+  near(vols(r)[0], 20 / 3 * (400 + t * t + 20 * t), 0.1, 'frustum volume');
+});
+
+test('loft between two sketches on different planes', () => {
+  const r = K.regenerateBrep([
+    { id: 's1', type: 'sketch', plane: 'XY', profiles: [{ id: 'a', kind: 'circle', cx: 0, cy: 0, r: 10 }] },
+    { id: 'p', type: 'plane', base: 'XY', offset: 30 },
+    { id: 's2', type: 'sketch', plane: 'p', profiles: [{ id: 'b', kind: 'circle', cx: 0, cy: 0, r: 5 }] },
+    { id: 'l', type: 'loft', sketches: ['s1', 's2'], ruled: true, op: 'new' },
+  ]);
+  okAll(r);
+  near(vols(r)[0], Math.PI * 30 / 3 * (100 + 25 + 50), 0.5, 'ruled loft of two circles is a cone frustum');
+});
+
+test('sketch on an angled face via a picked frame', () => {
+  const n = new K.THREEns.Vector3(0, -1, 1).normalize();
+  const frame = K.frameFromPoint(new K.THREEns.Vector3(0, 0, 0), n);
+  const r = K.regenerateBrep([
+    { id: 's', type: 'sketch', plane: frame, profiles: [{ id: 'a', kind: 'rect', cx: 0, cy: 0, w: 10, h: 10 }] },
+    { id: 'e', type: 'extrude', sketch: 's', distance: 10, op: 'new' },
+  ]);
+  okAll(r);
+  near(vols(r)[0], 1000, 0.01, 'tilted cube');
+  const c = [...r.bodies.values()].map(b => K.brepProps(b).com)[0];
+  near(c.y, 5 * n.y, 0.01, 'center moved along the tilted normal (y)');
+  near(c.z, 5 * n.z, 0.01, 'center moved along the tilted normal (z)');
+});
+
+test('STEP import splits solids into bodies', async () => {
+  const src = K.regenerateBrep([
+    { id: 'a', type: 'box', plane: 'XY', cx: 0, cy: 0, w: 10, d: 10, h: 10, op: 'new' },
+    { id: 'b', type: 'sphere', plane: 'XY', cx: 30, cy: 0, diameter: 10, op: 'new' },
+  ]);
+  const text = await K.brepSTEP([...src.bodies.values()].map(b => ({ shape: b.shape, name: b.name }))).text();
+  assert.equal(await K.brepImportSTEP('f1', text), 2);
+  const r = K.regenerateBrep([{ id: 'i', type: 'import', file: 'f1', name: 'parts.step' }]);
+  okAll(r);
+  const v = vols(r).sort((x, y) => x - y);
+  near(v[0], 4 / 3 * Math.PI * 125, 0.5, 'sphere'); near(v[1], 1000, 0.01, 'cube');
+});

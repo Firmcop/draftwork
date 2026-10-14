@@ -11,14 +11,27 @@ const EPS = { join: 0.004, cut: 0.02 }; // overlap added to tools so faces never
 const CIRCLE_SEG = 72;
 const ARC_SEG = 12;
 
+// A plane is 'XY' | 'XZ' | 'YZ' or a picked frame { o, x, n } (origin, in-plane X direction, normal).
 export function planeBasis(plane) {
+  if (plane && typeof plane === 'object') {
+    const n = new THREE.Vector3(...plane.n).normalize(), u = new THREE.Vector3(...plane.x).normalize();
+    return { u, v: n.clone().cross(u), n, o: new THREE.Vector3(...plane.o) };
+  }
   const p = PLANES[plane] || PLANES.XY;
-  return { u: new THREE.Vector3(...p.u), v: new THREE.Vector3(...p.v), n: new THREE.Vector3(...p.n) };
+  return { u: new THREE.Vector3(...p.u), v: new THREE.Vector3(...p.v), n: new THREE.Vector3(...p.n), o: new THREE.Vector3() };
+}
+export function frameFromPoint(point, normal) {
+  const n = normal.clone().normalize();
+  let x = new THREE.Vector3(1, 0, 0).sub(n.clone().multiplyScalar(n.x));
+  if (x.lengthSq() < 1e-6) x = new THREE.Vector3(0, 1, 0).sub(n.clone().multiplyScalar(n.y));
+  x.normalize();
+  const r = v => Math.round(v * 1e6) / 1e6;
+  return { o: [r(point.x), r(point.y), r(point.z)], x: [r(x.x), r(x.y), r(x.z)], n: [r(n.x), r(n.y), r(n.z)] };
 }
 // flip mirrors the sketch's Y axis and normal, so a plane can face the other way (e.g. a bottom face).
 export function planeMatrix(plane, offset = 0, flip = false) {
-  const { u, v, n } = planeBasis(plane);
-  const pos = n.clone().multiplyScalar(offset || 0);
+  const { u, v, n, o } = planeBasis(plane);
+  const pos = o.clone().add(n.clone().multiplyScalar(offset || 0));
   if (flip) { v.negate(); n.negate(); }
   const m = new THREE.Matrix4().makeBasis(u, v, n);
   m.setPosition(pos);
@@ -347,6 +360,7 @@ const triCount = g => g.attributes.position.count / 3;
 // ---- planes ----
 export function resolvePlane(ref, out) {
   if (PLANES[ref]) return { base: ref, offset: 0, flip: false };
+  if (ref && typeof ref === 'object') return { base: ref, offset: 0, flip: false };
   const p = out.planes.get(ref);
   if (!p) throw new Error('Its plane is missing. Choose another plane.');
   return p;
@@ -482,7 +496,7 @@ function step(f, out) {
     } else if (f.type === 'remove') {
       if (!out.bodies.has(f.body)) throw new Error('Choose a body to remove');
       out.bodies.delete(f.body);
-    } else if (f.type === 'fillet' || f.type === 'chamfer' || f.type === 'shell') {
+    } else if (['fillet', 'chamfer', 'shell', 'draft', 'loft', 'import'].includes(f.type)) {
       throw new Error('This needs the exact geometry engine, which has not loaded in this view');
     }
     out.status.set(f.id, { state: 'ok' });

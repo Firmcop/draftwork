@@ -14,7 +14,9 @@ A design is one JSON document:
 }
 ```
 
-Feature types: `sketch`, `plane`, `extrude`, `revolve`, `box`, `cylinder`, `sphere`, `torus`, `hole`, `pattern`, `mirror`, `move`, `combine`, `remove`, `fillet`, `chamfer`, `shell`.
+Feature types: `sketch`, `plane`, `extrude`, `revolve`, `loft`, `box`, `cylinder`, `sphere`, `torus`, `hole`, `pattern`, `mirror`, `move`, `combine`, `remove`, `fillet`, `chamfer`, `shell`, `draft`, `import`.
+
+A plane reference is `'XY' | 'XZ' | 'YZ'`, the id of an offset-plane feature, or a picked frame `{ o, x, n }` (origin, in-plane X, normal) for angled faces. Imported STEP text lives in `doc.files[fileId]`; the `import` feature only references it, so rebuild cache keys stay small. Files are parsed once per session (async) into `importShapes` before rebuilds use them.
 
 Any numeric field may hold an expression string. Before each rebuild, `resolveFeatures` evaluates expressions against the user parameters; a bad expression marks that feature with an error instead of failing the rebuild.
 

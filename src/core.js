@@ -24,7 +24,7 @@ const MATERIALS = {
 const TYPE = {
   sketch: { label: 'Sketch', icon: 'sketch' }, plane: { label: 'Offset Plane', icon: 'plane' }, extrude: { label: 'Extrude', icon: 'extrude' }, revolve: { label: 'Revolve', icon: 'revolve' },
   box: { label: 'Box', icon: 'box' }, cylinder: { label: 'Cylinder', icon: 'cylinder' }, sphere: { label: 'Sphere', icon: 'sphere' }, torus: { label: 'Torus', icon: 'torus' },
-  hole: { label: 'Hole', icon: 'hole' }, fillet: { label: 'Fillet', icon: 'fillet' }, chamfer: { label: 'Chamfer', icon: 'chamfer' }, shell: { label: 'Shell', icon: 'shell' }, pattern: { label: 'Pattern', icon: 'patrect' }, mirror: { label: 'Mirror', icon: 'mirror' }, move: { label: 'Move/Copy', icon: 'move' },
+  hole: { label: 'Hole', icon: 'hole' }, fillet: { label: 'Fillet', icon: 'fillet' }, draft: { label: 'Draft', icon: 'draft' }, loft: { label: 'Loft', icon: 'loft' }, import: { label: 'Imported file', icon: 'insertmesh' }, chamfer: { label: 'Chamfer', icon: 'chamfer' }, shell: { label: 'Shell', icon: 'shell' }, pattern: { label: 'Pattern', icon: 'patrect' }, mirror: { label: 'Mirror', icon: 'mirror' }, move: { label: 'Move/Copy', icon: 'move' },
   combine: { label: 'Combine', icon: 'combine' }, remove: { label: 'Remove', icon: 'delete' },
 };
 const featIcon = f => f.type === 'pattern' ? (f.kind === 'circular' ? 'patcirc' : 'patrect') : (TYPE[f.type]?.icon || 'generic');
@@ -90,7 +90,7 @@ let sketchOpts = { grid: true, snap: true, profiles: true, dims: true };
 let activeTab = 'SOLID';
 let engine = 'mesh', engineState = 'loading', engineMsg = '';
 const isBrep = () => engine === 'brep';
-const EDGE_FEATS = new Set(['fillet', 'chamfer', 'shell']);
+const EDGE_FEATS = new Set(['fillet', 'chamfer', 'shell', 'draft']);
 const bodyGeomOf = b => b.shape ? brepMeshOf(b).display : b.geom;
 function edgeDialogFeature() { const f = dlg && !dlg.custom && featById(dlg.fid); return f && EDGE_FEATS.has(f.type) ? f : null; }
 function shownSource() { const f = edgeDialogFeature(); return (f && result.beforeBodies?.get(f.id)) || result.bodies; }
@@ -481,9 +481,9 @@ function drawToolsOverlay() {
     const srcB = shownSource();
     for (const [, b] of srcB) {
       if (!b.shape || bodyHidden(b.id)) continue;
-      const m = brepMeshOf(b), sel = brepRefHashes(b, ef.edges || [], ef.type === 'shell' ? 'face' : 'edge');
+      const m = brepMeshOf(b), sel = brepRefHashes(b, ef.edges || [], FACE_PICK.has(ef.type) ? 'face' : 'edge');
       const hov = edgeHover && edgeHover.body === b.id ? edgeHover.hash : null;
-      if (ef.type === 'shell') {
+      if (FACE_PICK.has(ef.type)) {
         for (const [set, col, op] of [[sel, colors.select, 0.55], [new Set(hov != null ? [hov] : []), colors.accent, 0.35]]) {
           if (!set.size) continue;
           const idx = m.display.index.array, pos = [];
@@ -564,6 +564,7 @@ function doRegen() {
   try {
     params = evalParams(doc.params);
     resolved = resolveFeatures(doc.features, params.vars);
+    if (isBrep()) ensureImports();
     result = isBrep() ? regenerateBrep(resolved, doc.rollback, cache) : regenerate(resolved, doc.rollback, cache);
     if (isBrep()) brepCollect(cache, result);
   } catch (e) { console.error(e); toast('Rebuild failed: ' + e.message); }
@@ -576,7 +577,8 @@ function doRegen() {
 // ---------- persistence (per-browser convenience) ----------
 const STORE_KEY = 'draftwork.doc.v2';
 let persistTimer = null;
-function persist() { clearTimeout(persistTimer); persistTimer = setTimeout(() => { try { localStorage.setItem(STORE_KEY, JSON.stringify(doc)); } catch (e) { } }, 500); }
+let persistWarned = false;
+function persist() { clearTimeout(persistTimer); persistTimer = setTimeout(() => { try { localStorage.setItem(STORE_KEY, JSON.stringify(doc)); } catch (e) { if (!persistWarned) { persistWarned = true; toast('This design is too large to keep in the browser. Save the project file to keep your work.'); } } }, 500); }
 function loadStored() { try { return upgradeDoc(JSON.parse(localStorage.getItem(STORE_KEY) || 'null')); } catch (e) { return null; } }
 
 let toastTimer = null;

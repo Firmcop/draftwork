@@ -38,3 +38,10 @@ test('expressions and parameters', () => {
   assert.ok(errors.bad);
   assert.equal(K.evalExpr('sqrt(16) + 2^3 * (1+1) mm'), 20);
 });
+
+test('mesh kernel sketches on a picked frame and rejects exact-only features', () => {
+  const frame = K.frameFromPoint(new K.THREEns.Vector3(5, 5, 5), new K.THREEns.Vector3(1, 1, 0));
+  const r = K.regenerate([sk('s', frame, [{ id: 'a', kind: 'rect', cx: 0, cy: 0, w: 10, h: 10 }]), { id: 'e', type: 'extrude', sketch: 's', distance: 10, op: 'new' }, { id: 'd', type: 'draft', edges: [], angle: 3 }]);
+  near(vol(r), 1000, 0.5, 'tilted cube');
+  assert.equal(r.status.get('d').state, 'error');
+});

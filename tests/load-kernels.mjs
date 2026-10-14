@@ -16,7 +16,8 @@ import * as RCmod from '${nm('replicad/dist/replicad.js')}';
 ${strip(fs.readFileSync(path.join(root, 'src/kernel.js'), 'utf8'))}
 ${strip(fs.readFileSync(path.join(root, 'src/brep.js'), 'utf8'))}
 export function setOC(oc) { RCmod.setOC(oc); RC = RCmod; }
-export { regenerate, regenerateBrep, resolveFeatures, evalParams, evalExpr, signedVolume, brepProps, brepMeshOf, brepSigMap, brepCollect, brepSTEP, toBinarySTL, makeZip };`;
+export { regenerate, regenerateBrep, resolveFeatures, evalParams, evalExpr, signedVolume, brepProps, brepMeshOf, brepSigMap, brepCollect, brepSTEP, brepImportSTEP, frameFromPoint, toBinarySTL, makeZip };
+export const THREEns = THREE;`;
   // three-bvh-csg imports bare 'three' / 'three-mesh-bvh'; Node resolves them from node_modules next to the file.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'draftwork-test-'));
   fs.symlinkSync(path.join(root, 'node_modules'), path.join(dir, 'node_modules'), 'dir');

@@ -10,7 +10,7 @@ planned('form', 'Create Form', 'form', P5);
 planned('derive', 'Derive', 'derive', P2);
 cmd('extrude', 'Extrude', 'extrude', { key: 'E', run: () => newProfileFeature('extrude') });
 cmd('revolve', 'Revolve', 'revolve', { run: () => newProfileFeature('revolve') });
-planned('sweep', 'Sweep', 'sweep'); planned('loft', 'Loft', 'loft'); planned('rib', 'Rib', 'rib'); planned('web', 'Web', 'web'); planned('emboss', 'Emboss', 'emboss');
+planned('sweep', 'Sweep', 'sweep'); cmd('loft', 'Loft', 'loft', { run: () => newLoft() }); planned('rib', 'Rib', 'rib'); planned('web', 'Web', 'web'); planned('emboss', 'Emboss', 'emboss');
 cmd('hole', 'Hole', 'hole', { key: 'H', run: () => startPlaced('hole') });
 planned('thread', 'Thread', 'thread');
 cmd('box', 'Box', 'box', { run: () => startPlaced('box') });
@@ -26,7 +26,7 @@ planned('thicken', 'Thicken', 'thicken'); planned('boundary', 'Boundary Fill', '
 // solid › modify
 planned('presspull', 'Press Pull', 'presspull', P1, { key: 'Q' });
 cmd('fillet', 'Fillet', 'fillet', { key: 'F', run: () => newEdgeFeature('fillet') });
-cmd('chamfer', 'Chamfer', 'chamfer', { run: () => newEdgeFeature('chamfer') }); cmd('shell', 'Shell', 'shell', { run: () => newEdgeFeature('shell') }); planned('draft', 'Draft', 'draft'); planned('scale', 'Scale', 'scale');
+cmd('chamfer', 'Chamfer', 'chamfer', { run: () => newEdgeFeature('chamfer') }); cmd('shell', 'Shell', 'shell', { run: () => newEdgeFeature('shell') }); cmd('draft', 'Draft', 'draft', { run: () => newEdgeFeature('draft') }); planned('scale', 'Scale', 'scale');
 cmd('combine', 'Combine', 'combine', { run: () => newCombine() });
 planned('replaceface', 'Replace Face', 'replaceface'); planned('splitface', 'Split Face', 'splitface'); planned('splitbody', 'Split Body', 'splitbody');
 cmd('move', 'Move/Copy', 'move', { key: 'M', run: () => newMove() });
@@ -49,7 +49,7 @@ cmd('com', 'Center of Mass', 'com', { run: () => toggleCOM() });
 cmd('properties', 'Properties', 'properties', { run: () => openPropertiesModal() });
 // insert
 planned('insderive', 'Insert Derive', 'derive', P2); planned('decal', 'Decal', 'decal', P2); planned('canvas', 'Canvas', 'canvas', P2);
-planned('insmesh', 'Insert Mesh', 'insertmesh', P1); planned('inssvg', 'Insert SVG', 'insertsvg', P1); planned('insdxf', 'Insert DXF', 'insertsvg', P1);
+cmd('insstep', 'Insert STEP', 'insertmesh', { run: () => startImportSTEP() }); planned('insmesh', 'Insert Mesh', 'insertmesh', P1); planned('inssvg', 'Insert SVG', 'insertsvg', P1); planned('insdxf', 'Insert DXF', 'insertsvg', P1);
 // assemble
 planned('newcomp', 'New Component', 'component', P2); planned('joint', 'Joint', 'joint', P2, { key: 'J' }); planned('asbuilt', 'As-built Joint', 'joint', P2);
 planned('rigid', 'Rigid Group', 'component', P2); planned('drive', 'Drive Joints', 'motion', P2); planned('motionlink', 'Motion Link', 'motion', P2); planned('contact', 'Enable Contact Sets', 'interference', P2);
@@ -96,12 +96,12 @@ cmd('k.finish', 'Finish Sketch', 'finish', { run: () => finishSketch() });
 
 const TABS = {
   SOLID: [
-    { name: 'CREATE', bar: ['sketch', 'extrude', 'revolve', 'hole', 'box', 'patrect', 'mirror'], menu: ['sketch', 'form', 'derive', '-', 'extrude', 'revolve', 'sweep', 'loft', 'rib', 'web', 'emboss', '-', 'hole', 'thread', '-', 'box', 'cylinder', 'sphere', 'torus', 'coil', 'pipe', '-', { sub: 'Pattern', icon: 'patrect', items: ['patrect', 'patcirc', 'patpath'] }, 'mirror', '-', 'thicken', 'boundary'] },
-    { name: 'MODIFY', bar: ['presspull', 'fillet', 'chamfer', 'shell', 'combine', 'move', 'params'], menu: ['presspull', 'fillet', 'chamfer', 'shell', 'draft', 'scale', 'combine', '-', 'replaceface', 'splitface', 'splitbody', '-', 'move', 'align', 'delete', '-', 'material', 'appearance', '-', 'params'] },
+    { name: 'CREATE', bar: ['sketch', 'extrude', 'revolve', 'loft', 'hole', 'box', 'patrect', 'mirror'], menu: ['sketch', 'form', 'derive', '-', 'extrude', 'revolve', 'sweep', 'loft', 'rib', 'web', 'emboss', '-', 'hole', 'thread', '-', 'box', 'cylinder', 'sphere', 'torus', 'coil', 'pipe', '-', { sub: 'Pattern', icon: 'patrect', items: ['patrect', 'patcirc', 'patpath'] }, 'mirror', '-', 'thicken', 'boundary'] },
+    { name: 'MODIFY', bar: ['presspull', 'fillet', 'chamfer', 'shell', 'draft', 'combine', 'move', 'params'], menu: ['presspull', 'fillet', 'chamfer', 'shell', 'draft', 'scale', 'combine', '-', 'replaceface', 'splitface', 'splitbody', '-', 'move', 'align', 'delete', '-', 'material', 'appearance', '-', 'params'] },
     { name: 'CONFIGURE', bar: ['cfgtable'], menu: ['cfgtable', 'cfgrules'] },
     { name: 'CONSTRUCT', bar: ['offsetplane'], menu: ['offsetplane', 'planeangle', 'midplane', 'planetangent', '-', 'axiscyl', 'axis2p', '-', 'pointv'] },
     { name: 'INSPECT', bar: ['measure', 'section', 'com'], menu: ['measure', 'interference', '-', 'curvature', 'zebra', '-', 'section', 'com', '-', 'properties'] },
-    { name: 'INSERT', bar: ['insmesh', 'inssvg', 'canvas'], menu: ['insderive', 'decal', 'canvas', '-', 'insmesh', 'inssvg', 'insdxf'] },
+    { name: 'INSERT', bar: ['insstep', 'insmesh', 'inssvg', 'canvas'], menu: ['insstep', '-', 'insderive', 'decal', 'canvas', '-', 'insmesh', 'inssvg', 'insdxf'] },
     { name: 'ASSEMBLE', bar: ['newcomp', 'joint'], menu: ['newcomp', '-', 'joint', 'asbuilt', 'rigid', '-', 'drive', 'motionlink', 'contact'] },
     { name: 'SELECT', bar: ['select'], menu: ['select', 'window', 'filters'] },
   ],
@@ -238,7 +238,8 @@ function openFileMenu() {
     '-',
     { label: 'Open project (.json)…', icon: 'file', action: () => $('#fileInput').click() },
     { label: 'Save project (.json)', icon: 'save', key: 'Ctrl S', action: () => saveProject() },
-    { label: 'Export STL (.zip)…', icon: 'exportstl', action: () => openExportDialog() },
+    { label: 'Import STEP…', icon: 'insertmesh', action: () => startImportSTEP() },
+    { label: 'Export STEP / STL (.zip)…', icon: 'exportstl', action: () => openExportDialog() },
     '-',
     { label: 'Keyboard shortcuts and roadmap', icon: 'help', action: () => openHelpModal() },
   ]);

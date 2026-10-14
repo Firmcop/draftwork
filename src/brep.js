@@ -209,19 +209,24 @@ function matchRefs(items, refs, sigOf, key) {
 }
 function edgeFeature(f, out) {
   const refs = f.edges || [];
-  if (!refs.length) throw new Error(f.type === 'shell' ? 'Click the faces to remove on the model' : 'Click the edges to round on the model');
-  const amount = f.type === 'fillet' ? +f.radius : f.type === 'chamfer' ? +f.distance : +f.thickness;
-  if (!(amount > 0)) throw new Error((f.type === 'shell' ? 'Thickness' : f.type === 'fillet' ? 'Radius' : 'Distance') + ' must be greater than 0 mm');
+  const faces = FACE_PICK.has(f.type);
+  if (!refs.length) throw new Error(f.type === 'shell' ? 'Click the faces to remove on the model' : f.type === 'draft' ? 'Click the faces to taper on the model' : 'Click the edges to round on the model');
+  const amount = f.type === 'fillet' ? +f.radius : f.type === 'chamfer' ? +f.distance : f.type === 'draft' ? +f.angle : +f.thickness;
+  if (f.type === 'draft') { if (!(Math.abs(amount) > 0 && Math.abs(amount) < 60)) throw new Error('Draft angle must be between 0° and 60°'); }
+  else if (!(amount > 0)) throw new Error((f.type === 'shell' ? 'Thickness' : f.type === 'fillet' ? 'Radius' : 'Distance') + ' must be greater than 0 mm');
+  let neutral = null;
+  if (f.type === 'draft') { const pi = resolvePlane(f.neutral || 'XY', out); neutral = brepPlane(pi.base, pi.offset + (+f.neutralOffset || 0), pi.flip).plane; }
   let matched = 0;
   for (const [id, b] of [...out.bodies]) {
     if (f.body && f.body !== id) continue;
-    if (f.type === 'shell') {
-      const faces = b.shape.faces;
-      const hs = matchRefs(faces, refs, faceSig, 'c');
-      faces.forEach(x => x.delete?.());
+    if (faces) {
+      const list = b.shape.faces;
+      const hs = matchRefs(list, refs, faceSig, 'c');
+      list.forEach(x => x.delete?.());
       if (!hs.size) continue;
       matched += hs.size;
-      bReplace(out, id, T(b.shape.clone().shell(amount, fi => fi.when(({ element }) => hs.has(element.hashCode)))));
+      const pickFn = fi => fi.when(({ element }) => hs.has(element.hashCode));
+      bReplace(out, id, T(f.type === 'draft' ? b.shape.clone().draft(amount * (f.flipPull ? -1 : 1), pickFn, neutral) : b.shape.clone().shell(amount, pickFn)));
     } else {
       const edges = b.shape.edges;
       const hs = matchRefs(edges, refs, edgeSig, 'p');
@@ -232,7 +237,7 @@ function edgeFeature(f, out) {
       bReplace(out, id, T(f.type === 'fillet' ? b.shape.clone().fillet(fn) : b.shape.clone().chamfer(fn)));
     }
   }
-  if (!matched) throw new Error('The picked ' + (f.type === 'shell' ? 'faces' : 'edges') + ' no longer exist. Edit this feature and pick them again.');
+  if (!matched) throw new Error('The picked ' + (faces ? 'faces' : 'edges') + ' no longer exist. Edit this feature and pick them again.');
   return matched;
 }
 
@@ -255,7 +260,10 @@ function regenerateBrep(features, upto = null, cache = null) {
   }
   return out;
 }
-const EDGE_TYPES = new Set(['fillet', 'chamfer', 'shell']);
+const EDGE_TYPES = new Set(['fillet', 'chamfer', 'shell', 'draft']);
+const FACE_PICK = new Set(['shell', 'draft']);
+// Imported STEP shapes, parsed once per file (async) and reused by every rebuild: fileId -> Shape3D[]
+const importShapes = new Map();
 function brepStep(f, out) {
   out.before.set(f.id, [...out.bodies.keys()]);
   if (EDGE_TYPES.has(f.type)) out.beforeBodies.set(f.id, new Map(out.bodies));
@@ -273,6 +281,24 @@ function brepStep(f, out) {
       const tool = brepTool(f, out);
       const res = bApply(out, f, tool, op, f.target);
       out.tools.set(f.id, { shape: tool, ...res, op });
+    } else if (f.type === 'loft') {
+      const ids = (f.sketches || []).filter(id => out.sketches.has(id));
+      if (ids.length < 2) throw new Error('Choose at least two sketches to loft between');
+      const parts = ids.map(id => {
+        const sk = out.sketches.get(id), pi = placementInfo(sk.feature, out);
+        const { regions } = buildRegions(sk.feature.profiles || []);
+        if (regions.length !== 1) throw new Error(`${sk.feature.name || 'A sketch'} needs exactly one closed profile for a loft`);
+        const s = profileDrawing(sk.feature.profiles[regions[0].index]).sketchOnPlane(brepPlane(pi.base, pi.offset, pi.flip).plane);
+        return asSketches(s)[0];
+      });
+      const tool = T(parts[0].loftWith(parts.slice(1), { ruled: !!f.ruled }));
+      const res = bApply(out, f, tool, f.op || 'new', f.target);
+      out.tools.set(f.id, { shape: tool, ...res, op: f.op || 'new' });
+    } else if (f.type === 'import') {
+      const shapes = importShapes.get(f.file);
+      if (!shapes) throw new Error(f.file ? 'Reading the imported file…' : 'The imported file is missing');
+      if (!shapes.length) throw new Error('The file has no solid bodies');
+      shapes.forEach((s, k) => bNew(out, f.id + (k ? ':' + k : ''), T(s.clone()), f.id));
     } else if (f.type === 'pattern' || f.type === 'mirror') {
       const src = out.tools.get(f.source);
       if (!src) throw new Error('Choose a feature that comes before this one');
@@ -379,4 +405,14 @@ function brepRefHashes(rec, refs, kind) {
   const m = brepSigMap(rec, kind), hashes = [...m.keys()];
   const fake = hashes.map(hc => ({ hashCode: hc }));
   return matchRefs(fake, refs, x => m.get(x.hashCode), kind === 'face' ? 'c' : 'p');
+}
+
+// Parses STEP text into solids (async, done once per file before rebuilds use it).
+async function brepImportSTEP(fileId, text) {
+  const shape = await RC.importSTEP(new Blob([text]));
+  let solids = [];
+  try { solids = shape.solids || []; } catch (e) { solids = []; }
+  if (!solids.length && shape) solids = [shape];
+  importShapes.set(fileId, solids);
+  return solids.length;
 }
