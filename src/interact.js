@@ -571,6 +571,7 @@ function bodyHit(e) {
 // ---------- viewport pointer handling ----------
 let downAt = null;
 viewport.addEventListener('pointerdown', e => { downAt = { x: e.clientX, y: e.clientY, b: e.button }; });
+viewport.addEventListener('pointerdown', partDragStart, true);   // dragging a jointed part (assembly.js)
 viewport.addEventListener('pointerup', e => {
   if (!downAt || downAt.b !== 0 || Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > 5) { downAt = null; return; }
   downAt = null;

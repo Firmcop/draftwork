@@ -12,6 +12,7 @@ const JOINT_TYPES = {
   planar: { label: 'Planar', dofs: ['x', 'y', 'angle'] },
 };
 const DOF_UNITS = { angle: '°', distance: 'mm', x: 'mm', y: 'mm' };
+const DEFAULT_LIMIT = { angle: { min: -90, max: 90 }, distance: { min: 0, max: 20 }, x: { min: -20, max: 20 }, y: { min: -20, max: 20 } };
 let compXf = new Map();            // component id -> Matrix4 (as-modeled -> assembled)
 let jointStatus = new Map();       // joint id -> { state: 'ok' | 'warn' | 'error', msg }
 let jointPreview = null;           // { id, values } while animating, without touching the document
@@ -26,12 +27,23 @@ const compKey = bid => compOfBody(bid)?.id || 'root';
 function bodyXf(bid) { const c = bid && compOfBody(bid); return (c && compXf.get(c.id)) || IDENT; }
 function compLabel(key) { return key === 'root' ? 'the fixed bodies' : compById(key)?.name || 'a component'; }
 
-function jval(j, k) {
-  const v = jointPreview?.id === j.id && k in jointPreview.values ? jointPreview.values[k] : j[k];
+// Joint values: the solver's working values, then an animation/drag preview, then values a loop solve moved
+// (kept only while the document values they started from are unchanged), then the document. Limits clamp.
+let jointLive = new Map();         // joint id -> { base, values }
+let iterVals = null;               // loop solve in progress: joint id -> values
+const docKey = j => JSON.stringify([j.type, ...JOINT_TYPES[j.type].dofs.map(k => j[k])]);
+function rawVal(j, k) {
+  if (iterVals?.has(j.id) && k in iterVals.get(j.id)) return iterVals.get(j.id)[k];
+  if (jointPreview?.id === j.id && k in jointPreview.values) return jointPreview.values[k];
+  const l = jointLive.get(j.id); if (l && l.base === docKey(j) && k in l.values) return l.values[k];
+  const v = j[k];
   if (v == null || v === '') return 0;
   let n; try { n = typeof v === 'string' ? evalExpr(v, params.vars) : +v; } catch (e) { n = 0; }
   return Number.isFinite(n) ? n : 0;
 }
+const limitOf = (j, k) => { const L = j.limits?.[k]; return L?.on ? [Math.min(+L.min, +L.max), Math.max(+L.min, +L.max)] : null; };
+function clampVal(j, k, v) { const L = limitOf(j, k); return L ? Math.min(L[1], Math.max(L[0], v)) : v; }
+function jval(j, k) { const v = rawVal(j, k); return k === 'offset' ? v : clampVal(j, k, v); }
 // Joint origin frame (as-modeled coordinates) from a face or circular-edge signature: z along the normal / axis.
 function frameFromSig(sig, kind) {
   const o = new THREE.Vector3(...(kind === 'edge' ? sig.cc : sig.c)), z = new THREE.Vector3(...(kind === 'edge' ? sig.ax : sig.n)).normalize();
@@ -71,10 +83,42 @@ function motionOf(j) {
   if (!j.flip) m.multiply(new THREE.Matrix4().makeRotationX(Math.PI));     // origins face each other (faces touch)
   return m;
 }
-// Solve all joints as a tree grown from the fixed parts. Joints that would close a loop are only checked.
-function solveAssembly() {
-  const solved = new Map([['root', IDENT]]);
+// Place components by growing a tree from the fixed parts through the joints. A joint whose two sides are
+// already placed closes a loop; its mismatch is returned so the loop solve can drive it to zero.
+function treePass(todo) {
+  const solved = new Map([['root', IDENT]]), driver = new Map(), loops = [];
   for (const c of comps()) if (c.grounded) solved.set(c.id, IDENT);
+  let left = todo;
+  while (left.length) {
+    const next = []; let progress = false;
+    for (const t of left) {
+      const A = solved.get(t.ka), B = solved.get(t.kb), M = motionOf(t.j);
+      if (B && !A) { solved.set(t.ka, B.clone().multiply(t.Fb).multiply(M).multiply(t.Fa.clone().invert())); driver.set(t.ka, t); progress = true; }
+      else if (A && !B) { solved.set(t.kb, A.clone().multiply(t.Fa).multiply(M.clone().invert()).multiply(t.Fb.clone().invert())); progress = true; }
+      else if (A && B) { loops.push({ t, want: B.clone().multiply(t.Fb).multiply(M), have: A.clone().multiply(t.Fa) }); progress = true; }
+      else next.push(t);
+    }
+    if (!progress && next.length) solved.set(next[0].kb, IDENT);       // a free-floating pair: its base stays put
+    left = next;
+  }
+  return { solved, driver, loops };
+}
+const LOOP_SCALE = 50;             // mm per radian when mixing position and orientation errors
+function loopResidual(loops) {
+  const r = [];
+  for (const { want, have } of loops) {
+    const w = want.elements, hv = have.elements;
+    r.push(w[12] - hv[12], w[13] - hv[13], w[14] - hv[14]);
+    // orientation: skew part of Rhaveᵀ·Rwant (small-angle rotation vector), scaled to millimeters
+    const R = new THREE.Matrix4().extractRotation(have).transpose().multiply(new THREE.Matrix4().extractRotation(want)).elements;
+    r.push((R[6] - R[9]) / 2 * LOOP_SCALE, (R[8] - R[2]) / 2 * LOOP_SCALE, (R[1] - R[4]) / 2 * LOOP_SCALE);
+  }
+  return r;
+}
+// Solve all joints. With closed loops, the joint values become unknowns and a weighted minimum-norm
+// Gauss-Newton closes every loop while moving the values as little as possible; o.hold keeps one joint's values.
+let assemblyDriver = new Map();
+function solveAssembly(o = {}) {
   jointStatus = new Map();
   const todo = [];
   for (const j of joints()) {
@@ -84,28 +128,66 @@ function solveAssembly() {
     if (ka === kb) { jointStatus.set(j.id, { state: 'error', msg: 'Both origins are on ' + compLabel(ka) + '. Make one body a component first.' }); continue; }
     const Fa = endFrame(j.a), Fb = endFrame(j.b);
     if (!Fa || !Fb) { jointStatus.set(j.id, { state: 'error', msg: 'A joint origin no longer exists. Edit the joint and pick it again.' }); continue; }
-    todo.push({ j, ka, kb, Fa, Fb, M: motionOf(j) });
+    todo.push({ j, ka, kb, Fa, Fb });
+    jointStatus.set(j.id, { state: 'ok' });
   }
-  let left = todo;
-  while (left.length) {
-    const next = [];
-    let progress = false;
-    for (const t of left) {
-      const A = solved.get(t.ka), B = solved.get(t.kb);
-      if (B && !A) { solved.set(t.ka, B.clone().multiply(t.Fb).multiply(t.M).multiply(t.Fa.clone().invert())); jointStatus.set(t.j.id, { state: 'ok' }); progress = true; }
-      else if (A && !B) { solved.set(t.kb, A.clone().multiply(t.Fa).multiply(t.M.clone().invert()).multiply(t.Fb.clone().invert())); jointStatus.set(t.j.id, { state: 'ok' }); progress = true; }
-      else if (A && B) {
-        const want = B.clone().multiply(t.Fb).multiply(t.M), have = A.clone().multiply(t.Fa);
-        const err = want.elements.reduce((s, v, i) => s + Math.abs(v - have.elements[i]), 0);
-        jointStatus.set(t.j.id, err < 1e-6 ? { state: 'ok' } : { state: 'warn', msg: 'This joint closes a loop and is not satisfied (loops are not solved yet).' });
-        progress = true;
-      } else next.push(t);
+  let res = treePass(todo);
+  if (res.loops.length) {
+    const vars = [];
+    // held: the joint being edited or dragged, and any joint whose document value changed since the last solve
+    const held = id => id === o.hold || (jointLive.has(id) && jointLive.get(id).base !== docKey(joints().find(j => j.id === id)));
+    for (const t of todo) for (const k of JOINT_TYPES[t.j.type].dofs) vars.push({ id: t.j.id, j: t.j, k, s: k === 'angle' ? Math.PI / 180 : 1, w: held(t.j.id) ? 1e6 : 1 });
+    if (vars.length) {
+      iterVals = new Map(todo.map(t => [t.j.id, {}]));
+      for (const v of vars) iterVals.get(v.id)[v.k] = jval(v.j, v.k);
+      const get = () => vars.map(v => iterVals.get(v.id)[v.k] * v.s), put = x => vars.forEach((v, i) => { iterVals.get(v.id)[v.k] = clampVal(v.j, v.k, x[i] / v.s); });
+      const resid = () => loopResidual(treePass(todo).loops);
+      let x = get(), r = resid();
+      for (let it = 0; it < 60 && r.reduce((a, b) => a + b * b, 0) > 1e-18; it++) {
+        const n = x.length, m = r.length, J = Array.from({ length: m }, () => new Array(n).fill(0));
+        for (let c = 0; c < n; c++) { const h = 1e-6, xs = x.slice(); xs[c] += h; put(xs); const r2 = resid(); for (let q = 0; q < m; q++) J[q][c] = (r2[q] - r[q]) / h; }
+        put(x);
+        // Δ = −W⁻¹Jᵀ (J W⁻¹ Jᵀ + μI)⁻¹ r : minimum change, the held joint barely moves
+        const Wi = vars.map(v => 1 / v.w), A = Array.from({ length: m }, (_, a) => Array.from({ length: m }, (_, b) => { let sum = 0; for (let c = 0; c < n; c++) sum += J[a][c] * Wi[c] * J[b][c]; return sum; }));
+        let tr = 0; for (let a = 0; a < m; a++) tr += A[a][a];
+        for (let a = 0; a < m; a++) A[a][a] += 1e-9 * (tr / m || 1) + 1e-12;
+        const y = solveLinear(A, r.map(v => -v)); if (!y) break;
+        const dx = Wi.map((wi, c) => { let sum = 0; for (let a = 0; a < m; a++) sum += J[a][c] * y[a]; return wi * sum; });
+        let step = 1, e0 = r.reduce((a, b) => a + b * b, 0), xn, rn;
+        for (let ls = 0; ls < 8; ls++) { xn = x.map((v, c) => v + step * dx[c]); put(xn); rn = resid(); if (rn.reduce((a, b) => a + b * b, 0) < e0) break; step /= 2; }
+        x = get(); r = rn;
+      }
+      const err = Math.sqrt(r.reduce((a, b) => a + b * b, 0));
+      jointLive = new Map(todo.map(t => [t.j.id, { base: docKey(t.j), values: { ...iterVals.get(t.j.id) } }]));
+      iterVals = null;
+      res = treePass(todo);
+      for (const L of res.loops) jointStatus.set(L.t.j.id, err < 1e-4 ? { state: 'ok', loop: true } : { state: 'warn', msg: 'The joints in this loop cannot all be satisfied. Check the joint types and origins, or the limits.' });
+    } else for (const L of res.loops) {
+      const e = loopResidual([L]).reduce((a, b) => a + b * b, 0);
+      jointStatus.set(L.t.j.id, e < 1e-10 ? { state: 'ok', loop: true } : { state: 'warn', msg: 'This joint closes a loop of rigid joints that do not line up.' });
     }
-    if (!progress && next.length) { solved.set(next[0].kb, IDENT); }       // a free-floating pair: its base stays put
-    left = next;
-  }
-  compXf = new Map([...solved].filter(([k]) => k !== 'root'));
+  } else jointLive = new Map();
+  assemblyDriver = res.driver;
+  compXf = new Map([...res.solved].filter(([k]) => k !== 'root'));
   mpCache = null;
+}
+function solveLinear(A, b) {
+  const n = b.length, M = A.map((row, i) => [...row, b[i]]);
+  for (let c = 0; c < n; c++) {
+    let p = c; for (let r = c + 1; r < n; r++) if (Math.abs(M[r][c]) > Math.abs(M[p][c])) p = r;
+    if (Math.abs(M[p][c]) < 1e-300) return null;
+    [M[c], M[p]] = [M[p], M[c]];
+    for (let r = 0; r < n; r++) if (r !== c) { const f = M[r][c] / M[c][c]; if (f) for (let k = c; k <= n; k++) M[r][k] -= f * M[c][k]; }
+  }
+  return M.map((row, i) => row[n] / row[i]);
+}
+// Write values a loop solve moved back into the document (after a drag, an edit, or OK).
+function commitLive() {
+  for (const j of joints()) {
+    const l = jointLive.get(j.id); if (!l || l.base !== docKey(j)) continue;
+    for (const k of JOINT_TYPES[j.type].dofs) if (k in l.values) j[k] = Math.round(l.values[k] * 1e4) / 1e4;
+    jointLive.set(j.id, { base: docKey(j), values: l.values });
+  }
 }
 function applyBodyTransforms() {
   for (const [id, s] of shownBodies) {
@@ -113,7 +195,7 @@ function applyBodyTransforms() {
     for (const o of [s.mesh, s.edges, s.cap]) { o.matrixAutoUpdate = false; o.matrix.copy(m); o.matrixWorldNeedsUpdate = true; }
   }
 }
-function assemblyChanged() { solveAssembly(); applyBodyTransforms(); drawToolsOverlay(); refreshOverlays(); renderInfo(); requestRender(); }
+function assemblyChanged(hold) { solveAssembly({ hold }); applyBodyTransforms(); drawToolsOverlay(); refreshOverlays(); renderInfo(); requestRender(); }
 
 // ---------- commands ----------
 function newComponent() {
@@ -162,7 +244,8 @@ function openJointDialog(id, snap, stage) {
   stopJointAnim();
   jointEdit = { id, stage };
   const J = () => joints().find(x => x.id === id);
-  const set = (k, v) => { const j = J(); if (!j) return; checkpoint('joint-' + id + '-' + k); j[k] = v; assemblyChanged(); };
+  const set = (k, v) => { const j = J(); if (!j) return; checkpoint('joint-' + id + '-' + k); j[k] = v; assemblyChanged(id); };
+  const setLimit = (k, f, v) => { const j = J(); if (!j) return; checkpoint('jlim-' + id + '-' + k + f); j.limits ||= {}; j.limits[k] ||= { on: false, ...DEFAULT_LIMIT[k] }; j.limits[k][f] = v; assemblyChanged(id); };
   openPanelDialog({ title: 'Joint', icon: 'joint', okLabel: 'OK',
     help: 'Pick an origin on the part that moves, then an origin on the part it attaches to. Origins sit at the center of a flat face or of a round edge.',
     body: () => {
@@ -179,10 +262,14 @@ function openJointDialog(id, snap, stage) {
         inp.addEventListener('input', () => set(k, /^-?\d*\.?\d+$/.test(inp.value.trim()) ? +inp.value : inp.value));
         const row = h('div', { class: 'row' }, h('label', { class: 'rl', for: 'jv-' + k }, label), h('div', { class: 'exin' }, inp, h('span', { class: 'val' }), h('span', { class: 'u' }, unit)));
         if (!o.slider) return row;
-        const [lo, hi] = k === 'angle' ? [-180, 180] : [-100, 100];
+        const [lo, hi] = limitOf(j, k) || (k === 'angle' ? [-180, 180] : [-100, 100]);
         const sl = h('input', { type: 'range', min: String(lo), max: String(hi), step: k === 'angle' ? '1' : '0.5', value: String(jval(j, k)), 'aria-label': label + ' slider', style: 'width:100%' });
         sl.addEventListener('input', () => { inp.value = sl.value; set(k, +sl.value); });
-        return h('div', {}, row, h('div', { class: 'row' }, h('span', { class: 'rl' }), sl));
+        const L = j.limits?.[k] || { on: false, ...DEFAULT_LIMIT[k] };
+        const on = h('input', { type: 'checkbox', id: 'jl-' + k, checked: !!L.on }); on.addEventListener('change', () => { setLimit(k, 'on', on.checked); rerenderDialog(); });
+        const lim = f => { const i = h('input', { type: 'text', id: 'jl-' + k + '-' + f, value: String(L[f]), inputmode: 'decimal', autocomplete: 'off', disabled: !L.on, 'aria-label': (f === 'min' ? 'Minimum ' : 'Maximum ') + label.toLowerCase(), style: 'width:64px' }); i.addEventListener('input', () => { if (Number.isFinite(+i.value) && i.value.trim() !== '') setLimit(k, f, +i.value); }); return i; };
+        const limRow = h('div', { class: 'row' }, h('span', { class: 'rl' }), h('div', { style: 'display:flex;gap:6px;align-items:center;flex-wrap:wrap' }, h('label', { class: 'chk', for: 'jl-' + k, style: 'margin:0' }, on, 'Limits'), lim('min'), h('span', { class: 'note', style: 'margin:0' }, 'to'), lim('max'), h('span', { class: 'note', style: 'margin:0' }, unit)));
+        return h('div', {}, row, h('div', { class: 'row' }, h('span', { class: 'rl' }), sl), limRow);
       };
       const flip = h('input', { type: 'checkbox', id: 'jt-flip', checked: !!j.flip }); flip.addEventListener('change', () => set('flip', flip.checked));
       const dofs = JOINT_TYPES[j.type].dofs;
@@ -198,7 +285,7 @@ function openJointDialog(id, snap, stage) {
       ];
     },
     onOK: () => {
-      stopJointAnim(); const j = J();
+      stopJointAnim(); commitLive(); const j = J();
       if (j && (!j.a || !j.b)) { doc.joints = joints().filter(x => x.id !== id); toast('The joint needs two origins, so it was not added'); }
       jointEdit = null; persist(); assemblyChanged(); renderBrowser(); defaultHint();
     },
@@ -235,19 +322,23 @@ function startJointAnim(id) {
     if (!jointAnim) return;
     const s = (now - t0) / 1000, values = {};
     for (const k of dofs) {
-      if (k === 'angle') values.angle = base.angle + (s * 90) % 360;                          // a quarter turn per second
-      else { const [lo, hi] = j.range?.distance || [0, 20], ph = (1 - Math.cos(s * Math.PI / 1.5)) / 2; values[k] = k === 'distance' ? lo + (hi - lo) * ph : base[k]; }
+      const L = limitOf(j, k), ph = (1 - Math.cos(s * Math.PI / 1.5)) / 2;      // back and forth inside the limits
+      if (L) values[k] = L[0] + (L[1] - L[0]) * ph;
+      else if (k === 'angle') values.angle = base.angle + (s * 90) % 360;           // a quarter turn per second
+      else if (k === 'distance') values[k] = DEFAULT_LIMIT.distance.min + (DEFAULT_LIMIT.distance.max - DEFAULT_LIMIT.distance.min) * ph;
+      else values[k] = base[k];
     }
     jointPreview = { id, values };
-    solveAssembly(); applyBodyTransforms(); drawToolsOverlay(); requestRender();
+    solveAssembly({ hold: id }); applyBodyTransforms(); drawToolsOverlay(); requestRender();
     jointAnim.raf = requestAnimationFrame(step);
   };
   jointAnim.raf = requestAnimationFrame(step);
 }
 function stopJointAnim() {
   if (!jointAnim) return;
-  cancelAnimationFrame(jointAnim.raf); jointAnim = null; jointPreview = null;
-  solveAssembly(); applyBodyTransforms(); drawToolsOverlay(); requestRender();
+  const id = jointAnim.id;
+  cancelAnimationFrame(jointAnim.raf); jointAnim = null; jointPreview = null; jointLive.delete(id);
+  solveAssembly({ hold: id }); applyBodyTransforms(); drawToolsOverlay(); requestRender();
 }
 
 // ---------- overlay: joint origins ----------
@@ -273,4 +364,63 @@ function xfParts(m) {
   const p = new THREE.Vector3(), q = new THREE.Quaternion(), s = new THREE.Vector3(); m.decompose(p, q, s);
   const w = Math.min(1, Math.max(-1, q.w)), ang = 2 * Math.acos(w), sn = Math.sqrt(1 - w * w);
   return { angle: THREE.MathUtils.radToDeg(ang), axis: sn < 1e-9 ? [0, 0, 1] : [q.x / sn, q.y / sn, q.z / sn], move: [p.x, p.y, p.z] };
+}
+
+// ---------- drag a jointed part to move it along its free motion ----------
+// Turning (revolute, cylindrical; planar with Shift), sliding (slider; cylindrical with Shift), or moving in the
+// plane (planar). The part is driven through the joint that placed it, so loops follow and limits hold.
+let partDrag = null;
+function partDragStart(e) {
+  if (e.button !== 0 || mode !== 'model' || dlg || pick || measure || !isBrep()) return;
+  raycaster.setFromCamera(ndcOf(e), camera); scene.updateMatrixWorld();
+  const meshes = []; for (const [, sb] of shownBodies) if (sb.mesh.visible) meshes.push(sb.mesh);
+  const hit = raycaster.intersectObjects(meshes, false)[0]; if (!hit) return;
+  const c = compOfBody(hit.object.userData.body); if (!c || c.grounded) return;
+  const t = assemblyDriver.get(c.id); if (!t) return;
+  const j = t.j, dofs = JOINT_TYPES[j.type].dofs; if (!dofs.length) return;
+  const base = t.kb === 'root' ? IDENT : (compXf.get(t.kb) || IDENT);
+  const W = base.clone().multiply(t.Fb).multiply(new THREE.Matrix4().makeTranslation(0, 0, jval(j, 'offset')));
+  e.stopPropagation(); e.preventDefault();               // keep the view from orbiting
+  downAt = { x: e.clientX, y: e.clientY, b: 0 };         // a click without movement still selects
+  partDrag = { j, dofs, Wi: W.clone().invert(), start: Object.fromEntries(dofs.map(k => [k, jval(j, k)])), x0: e.clientX, y0: e.clientY, moved: false, turned: 0 };
+  partDrag.ref = dragMeasure(e); partDrag.lastAng = partDrag.ref.ang;
+  window.addEventListener('pointermove', partDragMove);
+  window.addEventListener('pointerup', partDragEnd, { once: true });
+}
+// the pointer ray in the joint's motion frame: where it meets the motion plane, and the nearest point on its axis
+function dragMeasure(e) {
+  raycaster.setFromCamera(ndcOf(e), camera);
+  const o = raycaster.ray.origin.clone().applyMatrix4(partDrag.Wi), d = raycaster.ray.direction.clone().transformDirection(partDrag.Wi), out = {};
+  if (Math.abs(d.z) > 1e-6) { const s = -o.z / d.z; out.px = o.x + d.x * s; out.py = o.y + d.y * s; out.ang = Math.atan2(out.py, out.px); }
+  const a = d.dot(d), b = d.z, den = a - b * b;
+  if (Math.abs(den) > 1e-6) out.t = (a * o.z - b * d.dot(o)) / den;
+  return out;
+}
+function partDragMove(e) {
+  const D = partDrag; if (!D) return;
+  if (!D.moved && Math.hypot(e.clientX - D.x0, e.clientY - D.y0) < 4) return;
+  D.moved = true; viewport.classList.add('moving');
+  const m = dragMeasure(e), type = D.j.type, v = { ...D.start };
+  const slide = type === 'slider' || (type === 'cylindrical' && e.shiftKey);
+  const turn = type === 'revolute' || (type === 'cylindrical' && !e.shiftKey) || (type === 'planar' && e.shiftKey);
+  if (slide) { if (m.t != null && D.ref.t != null) v.distance = D.start.distance + (m.t - D.ref.t); }
+  else if (turn) {
+    if (m.ang != null && D.lastAng != null) { let da = m.ang - D.lastAng; if (da > Math.PI) da -= 2 * Math.PI; if (da < -Math.PI) da += 2 * Math.PI; D.turned += da; D.lastAng = m.ang; }
+    v.angle = D.start.angle + THREE.MathUtils.radToDeg(D.turned);
+  } else if (m.px != null && D.ref.px != null) { v.x = D.start.x + (m.px - D.ref.px); v.y = D.start.y + (m.py - D.ref.py); }
+  for (const k of D.dofs) v[k] = clampVal(D.j, k, v[k]);
+  jointPreview = { id: D.j.id, values: v };
+  solveAssembly({ hold: D.j.id }); applyBodyTransforms(); drawToolsOverlay(); requestRender();
+  setHint(JOINT_TYPES[type].label + ' · ' + D.dofs.map(k => (k === 'angle' ? fmt(v[k]) + '°' : fmt(v[k]) + ' mm')).join(', ') + (type === 'cylindrical' || type === 'planar' ? ' · hold Shift to ' + (type === 'planar' ? 'turn' : 'slide') : ''));
+}
+function partDragEnd() {
+  window.removeEventListener('pointermove', partDragMove);
+  const D = partDrag; partDrag = null; viewport.classList.remove('moving');
+  if (!D || !D.moved) return;
+  const vals = jointPreview?.values || {}; jointPreview = null;
+  checkpoint();
+  for (const k of D.dofs) if (k in vals) D.j[k] = Math.round(clampVal(D.j, k, vals[k]) * 1000) / 1000;
+  jointLive.delete(D.j.id);
+  solveAssembly({ hold: D.j.id }); commitLive(); persist();
+  applyBodyTransforms(); drawToolsOverlay(); renderBrowser(); if (dlg) rerenderDialog(); defaultHint(); requestRender();
 }

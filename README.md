@@ -13,7 +13,7 @@ Parametric CAD in the browser. Sketch on planes or faces, build solids with a fe
 | Solid | Extrude, revolve, sweep, pipe, loft, hole (simple/counterbore, flat/drill point), box, cylinder, sphere, torus, rectangular and circular pattern, mirror |
 | Modify | Press Pull (flat and curved faces), fillet, chamfer, shell, draft (pick edges/faces on the model), combine, move/copy, remove, physical material, appearance |
 | Bodies | Multiple bodies with New Body / Join / Cut / Intersect |
-| Assemble | Components; joints (rigid, revolute, slider, cylindrical, planar) on face centers and round edges; drive and animate joints |
+| Assemble | Components; joints (rigid, revolute, slider, cylindrical, planar) on face centers and round edges; limits; closed loops (linkages); drag parts to move them; drive and animate joints |
 | Parameters | User parameters and expressions in any field (`width/2 - edge`, `sqrt(…)`, `sin(…)` …) |
 | Construct | Offset planes |
 | Inspect | Measure, section analysis, center of mass, properties, bill of materials (CSV) |

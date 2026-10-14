@@ -81,6 +81,60 @@ a = await asm();
 check(a.joints[0] === 'Joint 1:ok' && near(apply(a.xf.Pin, [60, 0, 30]), [0, 0, 14]), 'thicker plate: the pin follows its top face (' + apply(a.xf.Pin, [60, 0, 30]).map(v => v.toFixed(2)) + ')');
 if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/joint-revolute.png' });
 
+// limits: the angle is held inside them
+const jid = await page.evaluate(() => window.__dw.doc().joints[0].id);
+await page.evaluate(() => { document.querySelector('.node .nlab') && 0; });
+await page.click('.rlabel:has-text("ASSEMBLE")'); await W(200); await page.click('.menu .mi:has-text("Drive Joints")'); await W(600);
+await page.click('#jl-angle'); await W(300);
+await page.fill('#jl-angle-min', '0'); await page.fill('#jl-angle-max', '45'); await W(300);
+await page.fill('#jv-angle', '90'); await W(500);
+a = await asm();
+const pl = apply(a.xf.Pin, [65, 0, 30]), angNow = Math.atan2(pl[1], pl[0]) * 180 / Math.PI;
+check(Math.abs(Math.abs(angNow) - 45) < 0.01, `limits 0–45° hold a typed 90° at 45° (${angNow.toFixed(2)}°)`);
+await page.click('.dialog .btn.ok'); await W(600);
+
+// drag the pin: it turns about the joint axis (inside the limits)
+await page.fill('#jv-angle', '0').catch(() => { });
+await page.evaluate(() => { const d = window.__dw.doc(); d.joints[0].angle = 10; window.__dw.setDoc(d); }); await W(2000);
+const before = (await page.evaluate(() => window.__dw.doc())).joints[0].angle;
+const c0 = await scr(4.9, 0, 30), c1 = await scr(0, 4.9, 30), c2 = await scr(-4.9, 0, 30);
+const side = await scr(0, -5, 25);
+await page.mouse.move(side.x, side.y); await page.mouse.down();
+for (const p of [c0, c1, c2]) await page.mouse.move(p.x, p.y, { steps: 6 });
+await page.mouse.up(); await W(800);
+const after = (await page.evaluate(() => window.__dw.doc())).joints[0].angle;
+check(after !== before && after >= 0 && after <= 45, `dragging the pin turns it within its limits (${before}° → ${after}°)`);
+
+// four-bar linkage: crank, coupler and rocker on a fixed base; the last joint closes the loop
+const plate = (id, cx, cy, w, holes) => [{ id, type: 'box', name: id, plane: 'XY', offset: 0, cx, cy, w, d: 8, h: 3, op: 'new' },
+  ...holes.map((x, i) => ({ id: id + 'h' + i, type: 'cylinder', name: id + ' hole', plane: 'XY', offset: 0, cx: x, cy, diameter: 4, h: 10, op: 'cut', target: id }))];
+const rim = (body, x, y) => ({ body, kind: 'edge', sig: { type: 'CIRCLE', cc: [x, y, 3], ax: [0, 0, 1], len: Math.PI * 4, p: [x, y + 2, 3] } });
+const rev = (id, a, b) => ({ id, name: id, type: 'revolute', a, b, angle: 0, distance: 0, x: 0, y: 0, offset: 0, flip: false });
+await page.evaluate(d => window.__dw.setDoc(d), {
+  version: 2, name: 'Four-bar', units: 'mm', params: [], bodyMeta: {}, showOrigin: false, sketchShown: {}, planeHidden: {},
+  features: [...plate('base', 50, 0, 100, [10, 90]), ...plate('crank', 10, 40, 30, [0, 20]), ...plate('coupler', 35, 80, 80, [0, 70]), ...plate('rocker', 30, 120, 70, [0, 60])],
+  components: [{ id: 'kc', name: 'Crank', bodies: ['crank'] }, { id: 'kp', name: 'Coupler', bodies: ['coupler'] }, { id: 'kr', name: 'Rocker', bodies: ['rocker'] }],
+  joints: [rev('J1', rim('crank', 0, 40), rim('base', 10, 0)), rev('J2', rim('coupler', 0, 80), rim('crank', 20, 40)), rev('J3', rim('rocker', 0, 120), rim('base', 90, 0)), rev('J4', rim('coupler', 70, 80), rim('rocker', 60, 120))],
+});
+await W(3000);
+await page.click('#vcHome'); await W(800);
+a = await asm();
+check(a.joints.every(s => s.endsWith(':ok')), 'four-bar: every joint satisfied, including the one closing the loop ' + JSON.stringify(a.joints));
+const world = (name, p) => apply(a.xf[name], p);
+// (the test hook rounds matrix entries to 1e-4, so positions compare to ~0.05 mm)
+const gap = (A, B) => Math.hypot(...A.map((v, i) => v - B[i]));
+check(gap(world('Coupler', [70, 80, 3]), world('Rocker', [60, 120, 3])) < 0.05 && gap(world('Crank', [0, 40, 3]), [10, 0, 3]) < 0.05, 'loop closes: coupler and rocker pins meet, crank on its base pin');
+if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/fourbar.png' });
+// turn the crank: the rocker follows and the loop stays closed
+const r0 = world('Rocker', [60, 120, 3]);
+await page.evaluate(() => { const d = window.__dw.doc(); d.joints[0].angle = 60; window.__dw.setDoc(d); }); await W(2500);
+a = await asm();
+const c1w = world('Crank', [20, 40, 3]), crankAng = Math.atan2(c1w[1], c1w[0] - 10) * 180 / Math.PI;
+check(a.joints.every(s => s.endsWith(':ok')) && gap(world('Coupler', [70, 80, 3]), world('Rocker', [60, 120, 3])) < 0.05, 'after turning the crank 60°, the loop is still closed ' + JSON.stringify(a.joints));
+check(gap(world('Rocker', [60, 120, 3]), r0) > 1, `the rocker followed (moved ${gap(world('Rocker', [60, 120, 3]), r0).toFixed(1)} mm)`);
+check((await page.evaluate(() => window.__dw.doc())).joints[0].angle === 60, 'the crank keeps the angle that was set');
+if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/fourbar-60.png' });
+
 check(errors.length === 0, 'no page errors' + (errors.length ? ': ' + errors.slice(0, 3).join(' | ') : ''));
 await browser.close(); server.close();
 process.exit(failed ? 1 : 0);

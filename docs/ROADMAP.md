@@ -38,9 +38,9 @@ Done
 - [x] Joints: rigid, revolute, slider, cylindrical, planar; origins on flat faces and round edges; offset, flip; live values
 - [x] Joint animation; assembled positions in display, mass properties, STL and STEP export
 - [x] Joint origins re-found after rebuilds; sketches on a component's face move with it
+- [x] Closed loops of joints (four-bar linkages) solved; joint limits; drag parts along their free motion
 
 Next
-- [ ] Closed loops of joints (four-bar linkages); joint limits; drag to move along free axes
 - [ ] As-built joints, rigid groups, motion links; contact sets
 - [ ] Joints and components in the timeline; components as separate designs (external references)
 - [ ] 2D drawings with dimensions; render; add-ins
