@@ -77,6 +77,19 @@ export function profilePolygon(pr) {
       div = 24; rot = (pr.rot || 0) * Math.PI / 180;
       break;
     }
+    case 'loop': {
+      const pts = [];
+      for (const sg of pr.segs || []) {
+        pts.push(new THREE.Vector2(sg.a[0], sg.a[1]));
+        if (sg.t === 'arc') {
+          const { r, a0, a1 } = arcMid(sg), n = Math.max(2, Math.ceil(Math.abs(a1 - a0) / (2 * Math.PI) * CIRCLE_SEG));
+          for (let i = 1; i < n; i++) { const t = a0 + (a1 - a0) * i / n; pts.push(new THREE.Vector2(sg.c[0] + r * Math.cos(t), sg.c[1] + r * Math.sin(t))); }
+        }
+      }
+      if (pts.length < 3) throw new Error('A loop needs at least 3 points');
+      if (THREE.ShapeUtils.isClockWise(pts)) pts.reverse();
+      return pts;
+    }
     case 'poly': {
       const pts = (pr.pts || []).map(q => new THREE.Vector2(+q.x || 0, +q.y || 0));
       if (pts.length < 3) throw new Error('A line profile needs at least 3 points');
@@ -451,7 +464,7 @@ function step(f, out) {
       const p = resolvePlane(f.base || 'XY', out);
       out.planes.set(f.id, { base: p.base, offset: p.offset + (+f.offset || 0), flip: !!p.flip !== !!f.flip });
     } else if (f.type === 'sketch') {
-      out.sketches.set(f.id, { matrix: placement(f, out), feature: f });
+      out.sketches.set(f.id, { matrix: placement(f, out), feature: sketchWithGeo(f) });
     } else if (SOLID_TYPES.has(f.type)) {
       const op = f.type === 'hole' ? 'cut' : (f.op || 'join');
       const ext = out.bodies.size && (op === 'join' || op === 'cut') ? op : null;
@@ -575,7 +588,7 @@ export function resolveFeatures(features, vars) {
   return features.map(f => { const holder = {}; const r = conv(f, holder); if (holder.error) r.error = holder.error; return r; });
 }
 const NUMERIC = new Set(['offset', 'distance', 'angle', 'count', 'count2', 'spacing', 'spacing2', 'cx', 'cy', 'w', 'h', 'd', 'r', 'rot', 'sides', 'length', 'width',
-  'diameter', 'depth', 'cbDiameter', 'cbDepth', 'radius', 'thickness', 'major', 'minor', 'dx', 'dy', 'dz', 'rx', 'ry', 'rz', 'tipAngle', 'x', 'y']);
+  'diameter', 'depth', 'cbDiameter', 'cbDepth', 'radius', 'thickness', 'value', 'neutralOffset', 'major', 'minor', 'dx', 'dy', 'dz', 'rx', 'ry', 'rz', 'tipAngle', 'x', 'y']);
 
 // ---- crease edges that tolerate T-junctions (boolean output) ----
 // Edges are grouped by the infinite line they lie on; two triangles are neighbours when

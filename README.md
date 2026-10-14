@@ -9,7 +9,7 @@ Parametric CAD in the browser. Sketch on planes or faces, build solids with a fe
 | Area | Features |
 |---|---|
 | Workspace | Workspace switcher, tabbed ribbon (Solid, Surface, Mesh, Sheet Metal, Plastic, Manage, Utilities, contextual Sketch), browser tree, view cube, navigation bar, timeline with history marker, command dialogs with OK/Cancel |
-| Sketch | On origin/offset planes or any flat face (including angled ones). Line (closed profiles), 2-point and center rectangle, circle, polygon, slot; snapping; editable dimensions; nested profiles become holes |
+| Sketch | On origin/offset planes or any flat face (including angled ones). Line, 3-point arc, 2-point and center rectangle, circle, polygon, slot, construction geometry. Constraint solver with 11 geometric constraints and driving dimensions (expressions allowed), degrees-of-freedom status, drag to reshape. Closed loops become profiles; nested profiles become holes |
 | Solid | Extrude, revolve, loft, hole (simple/counterbore, flat/drill point), box, cylinder, sphere, torus, rectangular and circular pattern, mirror |
 | Modify | Fillet, chamfer, shell, draft (pick edges/faces on the model), combine, move/copy, remove, physical material, appearance |
 | Bodies | Multiple bodies with New Body / Join / Cut / Intersect |
@@ -47,9 +47,11 @@ src/
   brep.js        exact kernel on OpenCascade (replicad): same feature model + fillet/chamfer/shell, STEP
   icons.js       icon set
   core.js        document model, state, undo/redo, three.js scene, display, mass properties
+  solver.js      sketch geometry, constraint solver (minimum-norm Gauss-Newton), DOF analysis, loop detection
   ribbon.js      command registry, workspace tabs, ribbon, menus
   panels.js      browser tree, timeline, dialogs, sketch palette, modals
-  interact.js    commands, picking, sketch tools, view cube, navigation, keyboard, engine loader, boot
+  interact.js    commands, picking, view cube, navigation, keyboard, engine loader, boot
+  sketchui.js    constrained sketch editing: drawing tools, selection, drag, constraints, dimensions
 scripts/         build and dev server
 tests/           unit (node:test) and end-to-end (Playwright)
 docs/            architecture and roadmap

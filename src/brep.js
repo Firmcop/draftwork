@@ -37,6 +37,16 @@ function profileDrawing(pr) {
       d = a < 1e-4 ? D.drawCircle(r) : D.draw([-a, -r]).lineTo([a, -r]).threePointsArcTo([a, r], [a + r, 0]).lineTo([-a, r]).threePointsArcTo([-a, -r], [-a - r, 0]).close();
       break;
     }
+    case 'loop': {
+      const segs = pr.segs, n = segs.length;
+      let pen = D.draw(segs[0].a);
+      segs.forEach((sg, i) => {
+        const end = i === n - 1 ? segs[0].a : sg.b;
+        if (sg.t === 'arc') pen = pen.threePointsArcTo(end, arcMid(sg).mid);
+        else if (i < n - 1) pen = pen.lineTo(end);
+      });
+      return pen.close();
+    }
     case 'polygon': case 'poly': {
       const pts = profilePolygon(pr);
       let pen = D.draw([pts[0].x, pts[0].y]);
@@ -275,7 +285,7 @@ function brepStep(f, out) {
       out.planes.set(f.id, { base: p.base, offset: p.offset + (+f.offset || 0), flip: !!p.flip !== !!f.flip });
     } else if (f.type === 'sketch') {
       const pi = placementInfo(f, out);
-      out.sketches.set(f.id, { matrix: planeMatrix(pi.base, pi.offset, pi.flip), feature: f });
+      out.sketches.set(f.id, { matrix: planeMatrix(pi.base, pi.offset, pi.flip), feature: sketchWithGeo(f) });
     } else if (['extrude', 'revolve', 'box', 'cylinder', 'sphere', 'torus', 'hole'].includes(f.type)) {
       const op = f.type === 'hole' ? 'cut' : (f.op || 'join');
       const tool = brepTool(f, out);

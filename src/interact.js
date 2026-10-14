@@ -32,8 +32,10 @@ function defaultHint() {
   if (pick) return setHint(pick.prompt + ' · Esc cancels');
   if (measure) return setHint('Click points on the model to measure between them · Esc closes');
   if (mode === 'sketch') {
-    const t = { select: 'Click a profile to select it, drag to move it', line: lineDraft?.pts.length ? 'Click to add points. Click the first point or press Enter to close the profile' : 'Click to place the first point of a closed line profile',
-      rect2: 'Drag from corner to corner', rectc: 'Drag from the center to a corner', circle: 'Drag from the center outward', polygon: 'Drag from the center to a corner (6 sides, editable)', slot: 'Drag from one end center to the other' }[sketchTool];
+    const t = { select: geoSel.size ? geoSel.size + ' selected · apply a constraint, press D to dimension, Delete to remove' : 'Click geometry to select it (Shift adds). Drag points and lines to reshape.',
+      line: lineDraft ? 'Click to add the next point. Click the first point to close; Enter or Esc ends the line.' : 'Click to place the first point. Points snap to existing points.',
+      arc3: !gdraw?.pts?.length ? 'Click the arc start' : gdraw.pts.length === 1 ? 'Click the arc end' : 'Click a point the arc passes through',
+      rect2: 'Drag from corner to corner', rectc: 'Drag from the center to a corner', circle: 'Drag from the center outward', polygon: 'Drag from the center to a corner (6 equal sides)', slot: 'Drag from one end center to the other' }[sketchTool];
     return setHint(t);
   }
   setHint('');
@@ -62,7 +64,7 @@ function editFeature(id) {
 let lastSketchId = null;
 function activeSketch() {
   const end = insertIndex();
-  const ok = s => s && s.type === 'sketch' && s.profiles.length && featIndex(s.id) < end && statusOf(s.id).state === 'ok';
+  const ok = s => s && s.type === 'sketch' && profCount(s) && featIndex(s.id) < end && statusOf(s.id).state === 'ok';
   const sel = selFeature && featById(selFeature);
   if (ok(sel)) return sel;
   if (lastSketchId && ok(featById(lastSketchId))) return featById(lastSketchId);
@@ -189,7 +191,7 @@ function toggleRef(f, hit) {
 function newLoft() {
   if (!isBrep()) { toast(engineState === 'loading' ? 'The exact geometry engine is still loading. Try again in a moment.' : 'Loft needs the exact geometry engine, which could not start here: ' + engineMsg); return; }
   const end = insertIndex();
-  const cands = doc.features.slice(0, end).filter(g => g.type === 'sketch' && g.profiles.length === 1 && statusOf(g.id).state === 'ok');
+  const cands = doc.features.slice(0, end).filter(g => g.type === 'sketch' && profCount(g) === 1 && statusOf(g.id).state === 'ok');
   if (cands.length < 2) { toast('Loft needs two sketches with one closed profile each, on different planes'); return; }
   const snap = JSON.stringify(doc); checkpoint();
   const f = { id: uid(), type: 'loft', name: nextName('loft'), sketches: cands.slice(-2).map(s => s.id), ruled: false, op: bodiesAtInsert().length ? 'join' : 'new', target: null };
@@ -424,14 +426,14 @@ function enterSketch(id) {
   const sk = featById(id); if (!sk) return;
   if (dlg) closeDialog(true);
   cancelPick();
-  mode = 'sketch'; sketchId = id; selFeature = id; selBody = null; selProfile = null; lineDraft = null; drag = null; activeTab = 'SKETCH';
+  mode = 'sketch'; sketchId = id; selFeature = id; selBody = null; selProfile = null; lineDraft = null; drag = null; gdraw = null; geoSel.clear(); geoHover = null; geoCache = null; activeTab = 'SKETCH';
   lastSketchId = id;
   renderRibbon(); renderPalette(); updateScene(); renderTimeline(); renderBrowser();
   lookAtMatrix(sketchMatrix(sk));
   setSketchTool('select');
 }
 function exitSketch(silent) {
-  mode = 'model'; sketchId = null; drag = null; lineDraft = null; selProfile = null; sketchTool = 'select';
+  mode = 'model'; sketchId = null; drag = null; lineDraft = null; gdraw = null; geoSel.clear(); geoHover = null; selProfile = null; sketchTool = 'select';
   viewport.classList.remove('drawing', 'moving'); activeTab = 'SOLID';
   renderRibbon(); renderPalette(); defaultHint();
   if (!silent) { updateScene(); renderTimeline(); renderBrowser(); }
@@ -442,13 +444,14 @@ function finishSketch(silent) {
   exitSketch(false);
   if (!sk) return;
   const used = doc.features.some(f => f.sketch === sk.id);
-  if (!silent && sk.profiles.length && !used) toast('Sketch finished. Press E to extrude it.');
+  if (!silent && profCount(sk) && !used) toast('Sketch finished. Press E to extrude it.');
+  else if (!silent && sk.geo?.curves.length && !profCount(sk)) toast('Sketch finished. It has no closed profile yet, so it cannot be extruded.');
   const n = new THREE.Vector3(0, 0, 1).transformDirection(M), view = camera.position.clone().sub(controls.target).normalize();
   if (!silent && Math.abs(n.dot(view)) > 0.97) setView('iso');
   scheduleRegen(0);
 }
 function setSketchTool(t) {
-  sketchTool = t; lineDraft = null; drag = null;
+  sketchTool = t; lineDraft = null; drag = null; gdraw = null;
   viewport.classList.toggle('drawing', mode === 'sketch' && t !== 'select');
   renderRibbon(); defaultHint(); refreshOverlays();
 }
@@ -582,9 +585,7 @@ viewport.addEventListener('pointermove', e => {
       const ef = edgeDialogFeature(), hit = FACE_PICK.has(ef.type) ? brepFaceHit(e) : brepEdgeHit(e);
       const nh = hit ? { body: hit.body, hash: hit.hash } : null;
       if (JSON.stringify(nh) !== JSON.stringify(edgeHover)) { edgeHover = nh; drawToolsOverlay(); }
-    } else if (mode === 'sketch' && sketchTool === 'line' && lineDraft?.pts.length) {
-      const hit = planeHit(e); if (hit) { lineDraft.hover = { x: snap(hit.x), y: snap(hit.y) }; refreshOverlays(); }
-    }
+    } else if (mode === 'sketch' && !e.buttons) sketchHover(e);
   });
 });
 
@@ -622,79 +623,6 @@ function pickProfile(sk, hit) {
     if (near || polyContains(poly, pt)) { const a = near ? 0 : polyArea(poly); if (a < bestArea) { best = pr; bestArea = a; } }
   });
   return best;
-}
-function draftFrom(a, b) {
-  const dx = b.x - a.x, dy = b.y - a.y, d = Math.hypot(dx, dy), ang = Math.atan2(dy, dx) * 180 / Math.PI;
-  const R = v => sketchOpts.snap ? Math.round(v) : Math.round(v * 100) / 100;
-  switch (sketchTool) {
-    case 'rect2': return { id: uid(), kind: 'rect', cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, w: Math.abs(dx), h: Math.abs(dy), r: 0, rot: 0 };
-    case 'rectc': return { id: uid(), kind: 'rect', cx: a.x, cy: a.y, w: 2 * Math.abs(dx), h: 2 * Math.abs(dy), r: 0, rot: 0 };
-    case 'circle': return { id: uid(), kind: 'circle', cx: a.x, cy: a.y, r: R(d) };
-    case 'polygon': return { id: uid(), kind: 'polygon', cx: a.x, cy: a.y, r: R(d), sides: 6, rot: Math.round(ang - 90) };
-    case 'slot': { const W = 10; return { id: uid(), kind: 'slot', cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, length: R(d + W), width: W, rot: Math.round(ang) }; }
-  }
-  return null;
-}
-const draftSize = p => p.kind === 'rect' ? Math.min(p.w, p.h) : p.kind === 'slot' ? p.length - p.width : p.r;
-function finalizeLine() {
-  const sk = featById(sketchId);
-  if (!sk || !lineDraft || lineDraft.pts.length < 3) { toast('A line profile needs at least 3 points'); return; }
-  checkpoint();
-  const p = { id: uid(), kind: 'poly', pts: lineDraft.pts.map(q => ({ x: q.x, y: q.y })) };
-  sk.profiles.push(p); selProfile = p.id; lineDraft = null;
-  renderPalette(); refreshOverlays(); scheduleRegen(0); defaultHint();
-}
-viewport.addEventListener('pointerdown', e => {
-  if (mode !== 'sketch' || pick || measure || e.button !== 0 || e.target.closest('.dim')) return;
-  const hit = planeHit(e); if (!hit) return;
-  const sk = featById(sketchId);
-  if (sketchTool === 'line') {
-    e.stopImmediatePropagation(); e.preventDefault();
-    const p = { x: snap(hit.x), y: snap(hit.y) };
-    lineDraft ||= { pts: [] };
-    const first = lineDraft.pts[0];
-    if (first && lineDraft.pts.length >= 3 && Math.hypot(p.x - first.x, p.y - first.y) <= Math.max(hit.tol, 0.6)) { finalizeLine(); return; }
-    const last = lineDraft.pts[lineDraft.pts.length - 1];
-    if (!last || last.x !== p.x || last.y !== p.y) lineDraft.pts.push(p);
-    refreshOverlays(); defaultHint();
-    return;
-  }
-  if (sketchTool === 'select') {
-    const pr = pickProfile(sk, hit);
-    if (!pr) { if (selProfile) { selProfile = null; refreshOverlays(); renderPalette(); } return; }
-    selProfile = pr.id;
-    drag = { kind: 'move', start: hit, pr, orig: JSON.parse(JSON.stringify(pr)), moved: false };
-    renderPalette(); refreshOverlays();
-  } else drag = { kind: 'draw', start: { x: snap(hit.x), y: snap(hit.y) }, draft: null };
-  e.stopImmediatePropagation(); e.preventDefault();
-  window.addEventListener('pointermove', onDragMove);
-  window.addEventListener('pointerup', onDragEnd, { once: true });
-}, { capture: true });
-function onDragMove(e) {
-  if (!drag) return;
-  const hit = planeHit(e); if (!hit) return;
-  if (drag.kind === 'draw') drag.draft = draftFrom(drag.start, { x: snap(hit.x), y: snap(hit.y) });
-  else {
-    const dx = snap(hit.x - drag.start.x), dy = snap(hit.y - drag.start.y);
-    if (!drag.moved && (dx || dy)) { checkpoint(); drag.moved = true; viewport.classList.add('moving'); }
-    if (drag.moved) {
-      const live = liveProfiles({ ...featById(sketchId), profiles: [drag.orig] })[0];
-      if (drag.pr.kind === 'poly') drag.pr.pts = live.pts.map(q => ({ x: q.x + dx, y: q.y + dy }));
-      else { drag.pr.cx = Math.round((live.cx + dx) * 100) / 100; drag.pr.cy = Math.round((live.cy + dy) * 100) / 100; }
-    }
-  }
-  refreshOverlays();
-}
-function onDragEnd() {
-  window.removeEventListener('pointermove', onDragMove);
-  const d = drag; drag = null; viewport.classList.remove('moving');
-  if (!d) return;
-  const sk = featById(sketchId);
-  if (d.kind === 'draw' && d.draft && draftSize(d.draft) >= 0.5 && sk) {
-    checkpoint(); sk.profiles.push(d.draft); selProfile = d.draft.id;
-    renderPalette(); scheduleRegen(0);
-  } else if (d.kind === 'move' && d.moved) { renderPalette(); scheduleRegen(0); }
-  refreshOverlays();
 }
 function cancelModes(toSelect) {
   closeMenus(); cancelPick();
@@ -787,16 +715,18 @@ window.addEventListener('keydown', e => {
     if ($('#menus').children.length) return closeMenus();
     if (!$('#modalBack').hidden) return closeModal();
     if (pick) return cancelPick();
+    document.querySelectorAll('.dimedit').forEach(x => x.remove());
     if (lineDraft) { lineDraft = null; refreshOverlays(); defaultHint(); return; }
+    if (gdraw) { gdraw = null; refreshOverlays(); defaultHint(); return; }
     if (drag) { drag = null; refreshOverlays(); return; }
     if (mode === 'sketch' && sketchTool !== 'select') return setSketchTool('select');
     if (dlg) return closeDialog(false);
-    if (mode === 'sketch' && selProfile) { selProfile = null; refreshOverlays(); renderPalette(); return; }
+    if (mode === 'sketch' && (selProfile || geoSel.size)) { selProfile = null; geoSel.clear(); refreshOverlays(); renderPalette(); defaultHint(); return; }
     if (selBody || selFeature) { selBody = null; selFeature = null; updateScene(); renderTimeline(); renderBrowser(); }
     return;
   }
   if (e.key === 'Enter') {
-    if (lineDraft) { e.preventDefault(); finalizeLine(); return; }
+    if (lineDraft) { e.preventDefault(); endLineChain(); return; }
     if (dlg && $('#modalBack').hidden && tag !== 'SELECT' && tag !== 'BUTTON' && tag !== 'TEXTAREA') {
       if (dlg.custom && !dlg.custom.onOK && !dlg.custom.okLabel) return;
       e.preventDefault(); closeDialog(true); return;
@@ -804,9 +734,8 @@ window.addEventListener('keydown', e => {
   }
   if (typing || e.ctrlKey || e.metaKey || e.altKey || !$('#modalBack').hidden) return;
   if (mode === 'sketch') {
-    if (e.key === 'Backspace' && lineDraft?.pts.length) { e.preventDefault(); lineDraft.pts.pop(); if (!lineDraft.pts.length) lineDraft = null; refreshOverlays(); return; }
-    if ((e.key === 'Delete' || e.key === 'Backspace') && selProfile) { e.preventDefault(); deleteProfile(selProfile); return; }
-    const map = { l: 'k.line', r: 'k.rect2', c: 'k.circle', p: 'k.polygon', s: 'k.slot', d: 'k.dimension', v: 'k.select', t: 'k.trim', o: 'k.offset' };
+    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); if (geoSel.size) deleteGeoSelection(); else if (selProfile) deleteProfile(selProfile); return; }
+    const map = { l: 'k.line', r: 'k.rect2', c: 'k.circle', a: 'k.arc', p: 'k.polygon', s: 'k.slot', d: 'k.dimension', v: 'k.select', x: 'k.construction', t: 'k.trim', o: 'k.offset', h: 'k.c.horizontal' };
     if (map[k]) { runCmd(map[k]); return; }
     if (k === 'e') { runCmd('extrude'); return; }
     return;
@@ -879,5 +808,7 @@ if (location.hostname === 'localhost') window.__dw = {
   screen: (x, y, z) => { const v = new THREE.Vector3(x, y, z).project(camera), r = renderer.domElement.getBoundingClientRect(); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; },
   sketchScreen: (x, y) => { const v = new THREE.Vector3(x, y, 0).applyMatrix4(sketchMatrix(featById(sketchId))).project(camera), r = renderer.domElement.getBoundingClientRect(); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; },
   doc: () => JSON.parse(JSON.stringify(doc)),
+  curveScreen: i => { const sk = featById(sketchId), c = sk.geo.curves[i]; const pts = curvePts(sk, c, id => geoPos(sk, id), cc => geoRadius(sk, cc)); const m = pts[Math.floor(pts.length / 2)], m2 = pts.length === 2 ? [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2] : m; return window.__dw.sketchScreen(m2[0], m2[1]); },
+  geo: () => { const sk = featById(sketchId); const st = sk && geoState(sk); return st ? { dof: st.analysis.dof, ok: !!st.solved?.ok, loops: st.loops.profiles.length, sel: [...geoSel] } : null; },
   state: () => ({ mode, sketchTool, features: doc.features.map(f => f.type + ':' + statusOf(f.id).state + (statusOf(f.id).msg ? '(' + statusOf(f.id).msg + ')' : '')), bodies: [...result.bodies.keys()].map(id => bodyName(id) + '=' + fix(massProps().bodies.find(b => b.id === id)?.volume || 0, 0)) }),
 };

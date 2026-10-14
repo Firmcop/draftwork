@@ -12,7 +12,7 @@ const src = f => fs.readFileSync(path.join(root, 'src', f), 'utf8');
 const pkg = name => JSON.parse(fs.readFileSync(path.join(root, 'node_modules', name, 'package.json'), 'utf8')).version;
 
 // Concatenation order matters: later modules use functions from earlier ones.
-const MODULES = ['kernel', 'brep', 'icons', 'core', 'ribbon', 'panels', 'interact'];
+const MODULES = ['solver', 'kernel', 'brep', 'icons', 'core', 'ribbon', 'panels', 'interact', 'sketchui'];
 const strip = s => s.split('\n').filter(l => !/^import /.test(l)).map(l => l.replace(/^export /, '')).join('\n');
 const header = `import * as THREE from 'three';
 import { Brush, Evaluator, ADDITION, SUBTRACTION, INTERSECTION } from 'three-bvh-csg';

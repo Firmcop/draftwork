@@ -1,0 +1,80 @@
+// End-to-end: constrained sketching — line tool, Horizontal/Vertical, dimensions, full constraint, parametric edit.
+import { chromium } from 'playwright';
+import { serve } from '../scripts/serve.mjs';
+
+const PORT = 5198, server = serve(PORT);
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || undefined, args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] });
+const page = await browser.newPage({ viewport: { width: 1500, height: 900 } });
+const errors = [];
+page.on('pageerror', e => errors.push(e.message));
+page.on('console', m => { if (m.type() === 'error' && !/favicon|404/.test(m.text())) errors.push(m.text()); });
+const W = ms => page.waitForTimeout(ms);
+const sk = (x, y) => page.evaluate(([x, y]) => window.__dw.sketchScreen(x, y), [x, y]);
+const curve = i => page.evaluate(i => window.__dw.curveScreen(i), i);
+const geo = () => page.evaluate(() => window.__dw.geo());
+const info = () => page.textContent('#tlInfo');
+let failed = 0;
+const check = (cond, msg) => { console.log((cond ? 'ok   ' : 'FAIL ') + msg); if (!cond) failed++; };
+const clickAt = async p => { await page.mouse.click(p.x, p.y); await W(250); };
+
+await page.goto(`http://localhost:${PORT}/`);
+await page.waitForFunction(() => /Exact engine|Mesh engine/.test(document.querySelector('#engineBadge')?.textContent || ''), null, { timeout: 90000 });
+await page.click('#abFile'); await page.click('text=New design'); await W(1200);
+await page.click('#bMin');                                   // keep the browser panel out of the way
+await page.click('.rbtn[aria-label^="Create Sketch"]'); await W(300);
+await page.click('#bMin'); await page.click('.node:has-text("Origin") .tw'); await page.click('.node .nlab:text-is("XY")'); await page.click('#bMin'); await W(1500);
+
+// rough quadrilateral starting on the origin
+await page.keyboard.press('l');
+for (const [x, y] of [[0, 0], [38, 3], [41, 22], [-2, 18], [0, 0]]) await clickAt(await sk(x, y));
+let g = await geo();
+check(g && g.loops === 1, 'line tool closes a loop into one profile');
+check(g.dof === 6, `rough shape has 6 degrees of freedom (got ${g.dof})`);
+
+// square it up: select each line, Horizontal/Vertical
+await page.keyboard.press('v');
+for (let i = 0; i < 4; i++) { await clickAt(await curve(i)); await page.keyboard.press('h'); await W(300); }
+g = await geo();
+check(g.dof === 2, `H/V on all sides leaves width and height (dof ${g.dof})`);
+
+// dimensions
+await clickAt(await curve(0)); await page.keyboard.press('d'); await W(400);
+await page.fill('.dimedit', '50'); await page.keyboard.press('Enter'); await W(500);
+await clickAt(await curve(1)); await page.keyboard.press('d'); await W(400);
+await page.fill('.dimedit', '30'); await page.keyboard.press('Enter'); await W(600);
+g = await geo();
+check(g.dof === 0 && g.ok, 'two dimensions fully constrain it');
+check((await page.textContent('.palette .cstat')).includes('Fully constrained'), 'palette says Fully constrained');
+if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/constrained.png' });
+
+// a conflicting dimension is refused
+await clickAt(await curve(2)); await page.keyboard.press('d'); await W(500);
+check((await geo()).ok && (await page.evaluate(() => window.__dw.doc().features[0].geo.cons.filter(k => k.type === 'length').length)) === 2, 'redundant dimension on the opposite side is refused');
+await page.keyboard.press('Escape');
+
+await page.click('.palette .btn.go'); await W(800);
+await page.keyboard.press('e'); await W(1200);
+await page.fill('#dx-distance', '10'); await W(1200);
+await page.click('.dialog .btn.ok'); await W(1000);
+check((await info()).includes('15.00'), 'extrudes to 50 × 30 × 10 = 15.00 cm³');
+
+// edit the width dimension from the sketch palette
+await page.locator('.chip').first().dblclick(); await W(1200);
+await page.fill('#gd-' + (await page.evaluate(() => window.__dw.doc().features[0].geo.cons.find(k => k.type === 'length').id)), '60'); await W(1500);
+await page.click('.palette .btn.go'); await W(1500);
+
+check((await info()).includes('18.00'), 'changing the dimension to 60 rebuilds the solid (18.00 cm³)');
+
+// slot tool: tangent arcs make an extrudable profile
+await page.click('.rbtn[aria-label^="Create Sketch"]'); await W(300);
+await page.click('#bMin'); await page.click('.node .nlab:text-is("XY")'); await page.click('#bMin'); await W(1500);
+await page.keyboard.press('s');
+const a = await sk(-30, 40), b = await sk(10, 40);
+await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(b.x, b.y, { steps: 6 }); await page.mouse.up(); await W(600);
+g = await geo();
+check(g.loops === 1 && g.ok && g.dof === 5, `slot tool makes one closed profile with 5 degrees of freedom (got ${g.dof})`);
+if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/slot.png' });
+
+check(errors.length === 0, 'no page errors' + (errors.length ? ': ' + errors.slice(0, 3).join(' | ') : ''));
+await browser.close(); server.close();
+process.exit(failed ? 1 : 0);

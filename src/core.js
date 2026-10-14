@@ -389,13 +389,13 @@ function profileDims(pr) {
   return out;
 }
 function liveProfiles(sk) {
-  try { return resolveFeatures([sk], params.vars)[0].profiles || []; } catch (e) { return []; }
+  let r; try { r = resolveFeatures([sk], params.vars)[0]; } catch (e) { return []; }
+  try { return sketchWithGeo(r).profiles || []; } catch (e) { return r.profiles || []; }
 }
 function drawSketch(sk, active) {
   const g = new THREE.Group();
   g.matrixAutoUpdate = false; g.matrix.copy(sketchMatrix(sk));
   const profiles = liveProfiles(sk);
-  if (active && drag?.draft) profiles.push(drag.draft);
   const col = active ? colors.sketch : colors.muted;
   if (active && sketchOpts.grid) {
     const grid = new THREE.GridHelper(400, 80, colors.grid, colors.grid); grid.rotation.x = Math.PI / 2; grid.position.z = -0.02;
@@ -413,21 +413,13 @@ function drawSketch(sk, active) {
     } catch (e) { /* profile being edited */ }
   }
   for (const pr of profiles) {
+    if (String(pr.id).startsWith('geo-')) continue;   // drawn as geometry below
     let pts; try { pts = profilePolygon(pr); } catch (e) { continue; }
     const isSel = active && (pr.id === selProfile || pr === drag?.draft);
     g.add(line(pts.map(p => [p.x, p.y, 0.06]), isSel ? colors.select : col, { loop: true, depthTest: !active, order: 4 }));
     if (isSel && sketchOpts.dims) for (const d of profileDims(pr)) g.add(d);
   }
-  if (active && lineDraft && lineDraft.pts.length) {
-    const pts = lineDraft.pts.map(p => [p.x, p.y, 0.08]);
-    if (lineDraft.hover) pts.push([lineDraft.hover.x, lineDraft.hover.y, 0.08]);
-    g.add(line(pts, colors.select, { depthTest: false, order: 5 }));
-    for (const p of lineDraft.pts) { const dot = new THREE.Mesh(new THREE.CircleGeometry(0.9, 12), new THREE.MeshBasicMaterial({ color: colors.select, depthTest: false })); dot.position.set(p.x, p.y, 0.1); dot.renderOrder = 6; g.add(dot); }
-    if (lineDraft.hover) {
-      const a = lineDraft.pts[lineDraft.pts.length - 1], b = lineDraft.hover;
-      const o = new CSS2DObject(h('div', { class: 'mlabel' }, fmt(Math.hypot(b.x - a.x, b.y - a.y)) + ' mm')); o.position.set((a.x + b.x) / 2, (a.y + b.y) / 2, 0.1); g.add(o);
-    }
-  }
+  drawGeo(sk, g, active);
   return g;
 }
 function refreshOverlays() {

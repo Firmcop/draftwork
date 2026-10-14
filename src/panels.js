@@ -278,7 +278,7 @@ function featureFields(f, idx) {
   switch (f.type) {
     case 'extrude': {
       const sks = doc.features.slice(0, idx).filter(g => g.type === 'sketch');
-      out.push(section_('Input', selField('Profile', f, 'sketch', sks.length ? sks.map(s => [s.id, s.name + ' (' + s.profiles.length + ')']) : [['', 'No sketch before this step']]),
+      out.push(section_('Input', selField('Profile', f, 'sketch', sks.length ? sks.map(s => [s.id, s.name + ' (' + profCount(s) + ')']) : [['', 'No sketch before this step']]),
         segField('Direction', f, 'direction', [['one', 'One side'], ['symmetric', 'Symmetric'], ['reverse', 'Flipped']]), exField('Distance', f, 'distance', 'mm', { min: 0.001 })));
       out.push(section_('Result', ...opsSection()));
       break;
@@ -368,7 +368,7 @@ function featureFields(f, idx) {
         const cid = 'lf-' + s.id;
         const c = h('input', { type: 'checkbox', id: cid, checked: (f.sketches || []).includes(s.id) });
         c.addEventListener('change', () => { checkpoint(); const set = new Set(f.sketches || []); c.checked ? set.add(s.id) : set.delete(s.id); f.sketches = sks.map(x => x.id).filter(id => set.has(id)); scheduleRegen(0); });
-        list.append(h('label', { class: 'chk', for: cid }, c, s.name, h('span', { class: 'note', style: 'margin:0 0 0 auto' }, s.profiles.length + ' profile' + (s.profiles.length === 1 ? '' : 's'))));
+        list.append(h('label', { class: 'chk', for: cid }, c, s.name, h('span', { class: 'note', style: 'margin:0 0 0 auto' }, profCount(s) + ' profile' + (profCount(s) === 1 ? '' : 's'))));
       }
       out.push(section_('Profiles', h('p', { class: 'note' }, 'Pick two or more sketches, one closed profile each. They are joined in timeline order.'), list, chkField('Straight (ruled) sides', f, 'ruled')));
       out.push(section_('Result', ...opsSection()));
@@ -451,7 +451,9 @@ function renderPalette() {
   sk.profiles.forEach(p => list.append(h('button', { class: 'mi', style: selProfile === p.id ? 'background:var(--hover)' : '', onclick: () => { selProfile = p.id; setSketchTool('select'); renderPalette(); refreshOverlays(); },
     html: icon(p.kind === 'rect' ? 'rect2' : p.kind === 'poly' ? 'line' : p.kind) + `<span class="lab">${({ rect: 'Rectangle', circle: 'Circle', polygon: 'Polygon', slot: 'Slot', poly: 'Line profile' })[p.kind]}</span><span class="key">${profileSummary(p)}</span>` })));
   if (!sk.profiles.length) list.append(h('p', { class: 'note', style: 'padding:4px 6px;margin:0' }, 'No profiles yet. Choose Line, Rectangle, Circle, Polygon or Slot in the Sketch tab.'));
-  body.append(section_('Profiles (' + sk.profiles.length + ')', list));
+  const gst = geoState(sk);
+  if (gst || !sk.profiles.length) body.append(geoPaletteSection(sk, gst));
+  if (sk.profiles.length) body.append(section_('Older profiles (' + sk.profiles.length + ')', list));
   const pr = sk.profiles.find(p => p.id === selProfile);
   if (pr) {
     const F = (label, key, unit = 'mm', o = {}) => exField(label, pr, key, unit, { id: 'pf-' + (o.fid || key), ...o });
@@ -558,4 +560,34 @@ function openHelpModal() {
     h('h4', { style: 'margin:14px 0 6px' }, 'Roadmap'),
     h('table', { class: 'grid' }, h('tbody', {}, road.map(([k, v]) => h('tr', {}, h('td', { style: 'white-space:nowrap;font-weight:600' }, k), h('td', {}, v))))));
   openModal('Help', 'help', body);
+}
+
+// Constraint status, dimensions and selection for constrained sketches.
+function geoPaletteSection(sk, st) {
+  const wrap = h('div', {});
+  if (!st) { wrap.append(section_('Geometry', h('p', { class: 'note' }, 'Draw with Line, Rectangle, Circle, Arc, Polygon or Slot. Closed shapes become profiles you can extrude. Add constraints and dimensions to lock the design.'))); return wrap; }
+  const ok = !!st.solved?.ok, dof = st.analysis.dof;
+  const status = !ok ? h('div', { class: 'cstat bad' }, 'Constraints conflict. Remove the last constraint or dimension.')
+    : dof === 0 ? h('div', { class: 'cstat full' }, 'Fully constrained')
+    : h('div', { class: 'cstat free' }, dof + (dof === 1 ? ' degree' : ' degrees') + ' of freedom left (blue geometry can still move)');
+  const li = st.loops.info, np = st.loops.profiles.length;
+  const prof = h('p', { class: 'note' }, `${np} closed profile${np === 1 ? '' : 's'}` + (li.open ? ` · ${li.open} open chain${li.open > 1 ? 's' : ''}` : '') + (li.branching ? ` · ${li.branching} branching` : '') + (li.open || li.branching ? ' (only closed loops extrude)' : ''));
+  wrap.append(section_('Constraints', status, prof));
+  const dims = sk.geo.cons.filter(k => DIM_TYPES.has(k.type));
+  if (dims.length) {
+    const label = { length: 'Length', distance: 'Distance', hdist: 'Horizontal', vdist: 'Vertical', radius: 'Radius', diameter: 'Diameter', angle: 'Angle' };
+    wrap.append(section_('Dimensions', ...dims.map((k, i) => exField(label[k.type] + ' ' + (i + 1), k, 'value', k.type === 'angle' ? '°' : 'mm', {
+      id: 'gd-' + k.id, min: k.type === 'angle' ? undefined : 0.001, delay: 120, after: () => { geoCache = null; if (!commitGeo(sk, cloneGeo(sk.geo), { noCheckpoint: true, quiet: true, noPalette: true })) setTimeout(() => toast('That value cannot be reached with the other constraints'), 0); },
+    }))));
+  }
+  if (geoSel.size) {
+    const { pts, crv, cons } = selectionParts(sk);
+    const parts = [pts.length && pts.length + ' point' + (pts.length > 1 ? 's' : ''), crv.length && crv.length + ' curve' + (crv.length > 1 ? 's' : ''), cons.length && cons.length + ' constraint' + (cons.length > 1 ? 's' : '')].filter(Boolean).join(', ');
+    wrap.append(section_('Selected', h('p', { class: 'note' }, parts),
+      h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' },
+        h('button', { class: 'btn', onclick: () => addDimension(), html: icon('dimension') + 'Dimension' }),
+        crv.length ? h('button', { class: 'btn', onclick: () => toggleConstruction(), html: icon('construction') + 'Construction' }) : null,
+        h('button', { class: 'btn danger', onclick: () => deleteGeoSelection(), html: icon('delete') + 'Delete' }))));
+  }
+  return wrap;
 }

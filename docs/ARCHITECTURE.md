@@ -22,6 +22,16 @@ Any numeric field may hold an expression string. Before each rebuild, `resolveFe
 
 Body ids derive from the feature that created the body (`featureId` or `featureId:n` for pattern copies), so names, materials and visibility survive rebuilds and engine switches.
 
+## Sketches
+
+A sketch holds `geo = { points, curves, cons }`: points, lines, arcs (counter-clockwise from `a` to `b` around `c`) and circles, plus constraints and dimensions. `'O'` is the fixed origin point.
+
+`solver.js` turns each constraint into residual equations and solves with a minimum-norm Gauss-Newton step (`Δ = −Jᵀ(JJᵀ + μI)⁻¹ r`), so under-constrained geometry moves as little as possible. While dragging, the dragged points are weighted 10⁶ so the rest of the sketch gives way first. `analyzeSketch` row-reduces the Jacobian for the degrees of freedom and marks entities in the null space as free (drawn blue). New constraints must reduce the degrees of freedom; redundant ones are refused, and conflicting ones fail to solve.
+
+Tangency between curves that share an endpoint uses "perpendicular to the radius at that point" instead of a distance condition. The distance form has a zero first derivative at the solution and would hide degrees of freedom.
+
+At rebuild time `sketchWithGeo` re-solves the sketch with dimension expressions evaluated, so parameters drive sketch geometry. Closed chains of non-construction lines and arcs (and circles) become `loop` / `circle` profiles for the kernels. Older sketches with primitive profiles (`rect`, `circle`, `polygon`, `slot`, `poly`) still work.
+
 ## Rebuild
 
 `regenerate(features, rollback, cache)` replays the history in order. Both kernels share this contract and return:

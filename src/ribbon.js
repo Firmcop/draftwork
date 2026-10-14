@@ -83,14 +83,16 @@ cmd('k.rectc', 'Center Rectangle', 'rectc', { run: () => setSketchTool('rectc') 
 cmd('k.circle', 'Center Diameter Circle', 'circle', { key: 'C', run: () => setSketchTool('circle') });
 cmd('k.polygon', 'Circumscribed Polygon', 'polygon', { key: 'P', run: () => setSketchTool('polygon') });
 cmd('k.slot', 'Center to Center Slot', 'slot', { key: 'S', run: () => setSketchTool('slot') });
-planned('k.arc', 'Three-Point Arc', 'arc'); planned('k.spline', 'Fit Point Spline', 'spline'); planned('k.point', 'Point', 'spoint'); planned('k.text', 'Text', 'text');
+cmd('k.arc', 'Three-Point Arc', 'arc', { key: 'A', run: () => setSketchTool('arc3') }); planned('k.spline', 'Fit Point Spline', 'spline'); planned('k.point', 'Point', 'spoint'); planned('k.text', 'Text', 'text');
 planned('k.mirror', 'Sketch Mirror', 'mirror'); planned('k.cpattern', 'Sketch Circular Pattern', 'patcirc'); planned('k.project', 'Project', 'insertmesh');
-cmd('k.dimension', 'Sketch Dimension', 'dimension', { key: 'D', run: () => { setSketchTool('select'); toast('Select a profile, then click its dimension tags or edit the values in the Sketch Palette'); } });
+cmd('k.dimension', 'Sketch Dimension', 'dimension', { key: 'D', run: () => { if (geoSel.size) addDimension(); else { setSketchTool('select'); toast('Select a line, two points, a circle or arc, or two lines, then press D'); } } });
 planned('k.fillet', 'Sketch Fillet', 'fillet2d'); planned('k.trim', 'Trim', 'trim2d', P1, { key: 'T' }); planned('k.extend', 'Extend', 'extend'); planned('k.offset', 'Offset', 'offset2d', P1, { key: 'O' });
 cmd('k.move', 'Move/Copy', 'move', { run: () => setSketchTool('select') });
-cmd('k.delete', 'Delete', 'delete', { run: () => { if (selProfile) deleteProfile(selProfile); else toast('Select a profile to delete'); } });
-for (const [k, l] of [['coincident', 'Coincident'], ['collinear', 'Collinear'], ['tangent', 'Tangent'], ['equal', 'Equal'], ['parallel', 'Parallel'], ['perpendicular', 'Perpendicular'], ['fix', 'Fix/Unfix'], ['horizontal', 'Horizontal/Vertical'], ['concentric', 'Concentric'], ['symmetry', 'Symmetry']])
-  planned('k.c.' + k, l, k, P1, { note: 'Geometric constraints arrive with the sketch solver.' });
+cmd('k.delete', 'Delete', 'delete', { key: 'Del', run: () => { if (geoSel.size) deleteGeoSelection(); else if (selProfile) deleteProfile(selProfile); else toast('Select something to delete'); } });
+for (const [k, l] of [['coincident', 'Coincident'], ['collinear', 'Collinear'], ['tangent', 'Tangent'], ['equal', 'Equal'], ['parallel', 'Parallel'], ['perpendicular', 'Perpendicular'], ['fix', 'Fix/Unfix'], ['horizontal', 'Horizontal/Vertical'], ['concentric', 'Concentric'], ['midpoint', 'Midpoint']])
+  cmd('k.c.' + k, l, k, { key: k === 'horizontal' ? 'H' : undefined, run: () => applyConstraint(k) });
+planned('k.c.symmetry', 'Symmetry', 'symmetry');
+cmd('k.construction', 'Normal/Construction', 'construction', { key: 'X', run: () => toggleConstruction() });
 cmd('k.select', 'Select', 'select', { run: () => setSketchTool('select') });
 cmd('k.finish', 'Finish Sketch', 'finish', { run: () => finishSketch() });
 
@@ -145,9 +147,9 @@ const TABS = {
     { name: 'SELECT', bar: ['select'], menu: ['select'] },
   ],
   SKETCH: [
-    { name: 'CREATE', bar: ['k.line', 'k.rect2', 'k.circle', 'k.polygon', 'k.slot', 'k.dimension'], menu: ['k.line', { sub: 'Rectangle', icon: 'rect2', items: ['k.rect2', 'k.rectc'] }, 'k.circle', 'k.arc', 'k.polygon', 'k.slot', 'k.spline', '-', 'k.point', 'k.text', 'k.mirror', 'k.cpattern', 'k.project', '-', 'k.dimension'] },
-    { name: 'MODIFY', bar: ['k.fillet', 'k.trim', 'k.extend', 'k.offset', 'k.move'], menu: ['k.fillet', 'k.trim', 'k.extend', 'k.offset', '-', 'k.move', 'k.delete'] },
-    { name: 'CONSTRAINTS', bar: ['k.c.horizontal', 'k.c.coincident', 'k.c.tangent', 'k.c.equal', 'k.c.parallel', 'k.c.perpendicular', 'k.c.fix'], menu: ['k.c.coincident', 'k.c.collinear', 'k.c.tangent', 'k.c.equal', 'k.c.parallel', 'k.c.perpendicular', 'k.c.fix', 'k.c.horizontal', 'k.c.concentric', 'k.c.symmetry'] },
+    { name: 'CREATE', bar: ['k.line', 'k.rect2', 'k.circle', 'k.arc', 'k.polygon', 'k.slot', 'k.dimension'], menu: ['k.line', { sub: 'Rectangle', icon: 'rect2', items: ['k.rect2', 'k.rectc'] }, 'k.circle', 'k.arc', 'k.polygon', 'k.slot', 'k.spline', '-', 'k.point', 'k.text', 'k.mirror', 'k.cpattern', 'k.project', '-', 'k.dimension'] },
+    { name: 'MODIFY', bar: ['k.construction', 'k.fillet', 'k.trim', 'k.offset', 'k.delete'], menu: ['k.construction', '-', 'k.fillet', 'k.trim', 'k.extend', 'k.offset', '-', 'k.move', 'k.delete'] },
+    { name: 'CONSTRAINTS', bar: ['k.c.horizontal', 'k.c.coincident', 'k.c.tangent', 'k.c.equal', 'k.c.parallel', 'k.c.perpendicular', 'k.c.fix'], menu: ['k.c.horizontal', 'k.c.coincident', 'k.c.collinear', 'k.c.tangent', 'k.c.equal', 'k.c.parallel', 'k.c.perpendicular', 'k.c.fix', 'k.c.concentric', 'k.c.midpoint', 'k.c.symmetry'] },
     { name: 'INSPECT', bar: ['measure'], menu: ['measure', 'section'] },
     { name: 'SELECT', bar: ['k.select'], menu: ['k.select'] },
     { name: 'FINISH SKETCH', bar: ['k.finish'], menu: ['k.finish'], finish: true },

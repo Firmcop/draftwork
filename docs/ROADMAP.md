@@ -14,10 +14,12 @@ Done
 - [x] Loft, draft
 - [x] Sketches and holes on angled flat faces
 - [x] STEP import (multi-solid files become separate bodies)
+- [x] Sketch constraint solver: coincident, horizontal/vertical, parallel, perpendicular, tangent, equal, collinear, concentric, midpoint, fix, point-on; driving dimensions (length, distance, radius, diameter, angle) with expressions; degrees-of-freedom status; redundant and conflicting constraints refused
+- [x] Three-point arcs, construction geometry
 
 Next
-- [ ] Sketch constraint solver (coincident, parallel, tangent, equal, dimensions as constraints)
-- [ ] Arcs, splines, fillets and trim in sketches
+- [ ] Sketch fillet, trim, extend, offset, splines; symmetry constraint
+- [ ] Regions from crossing curves (auto-trim like Fusion); today only closed chains of lines/arcs become profiles
 - [ ] Sweep (needs open sketch paths), press pull
 - [ ] Run the kernel in a Web Worker so long rebuilds don't pause the UI
 - [ ] Desktop packaging (Tauri)

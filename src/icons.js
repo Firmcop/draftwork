@@ -119,6 +119,8 @@ const IC = {
   fix: '<path d="M8 4h8M12 4v9M7 13h10l-5 7z" class="lock"/>',
   horizontal: '<path d="M3 12h18"/><text x="9" y="9" font-size="7" font-weight="700" fill="currentColor" stroke="none">H</text>',
   concentric: '<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/>',
+  midpoint: '<path d="M3 18L21 6"/><circle cx="12" cy="12" r="2.4" class="a"/>',
+  construction: '<path d="M4 20L20 4" stroke-dasharray="3 2.2" class="c3"/><circle cx="4" cy="20" r="1.6" class="a"/><circle cx="20" cy="4" r="1.6" class="a"/>',
   symmetry: '<path d="M12 3v18" stroke-dasharray="2 2"/><path d="M4 8l4 4-4 4M20 8l-4 4 4 4"/>',
   finish: '<circle cx="12" cy="12" r="10" class="fin"/><path d="M7 12.5l3.3 3.3L17 9" stroke="#fff" stroke-width="2.2"/>',
   // ui
