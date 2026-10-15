@@ -1,5 +1,5 @@
 // ===== Commands, picking, sketching, measuring, view cube, navigation, boot =====
-const NAMES = { sketch: 'Sketch', plane: 'Plane', axis: 'Axis', point: 'Point', splitbody: 'Split Body', scale: 'Scale', thicken: 'Thicken', replaceface: 'Replace Face', align: 'Align', patpath: 'Pattern on Path', boundary: 'Boundary Fill', extrude: 'Extrude', revolve: 'Revolve', box: 'Box', cylinder: 'Cylinder', sphere: 'Sphere', torus: 'Torus', hole: 'Hole', pattern: 'Pattern', mirror: 'Mirror', move: 'Move', combine: 'Combine', remove: 'Remove', fillet: 'Fillet', chamfer: 'Chamfer', shell: 'Shell', draft: 'Draft', loft: 'Loft', import: 'Import', sweep: 'Sweep' };
+const NAMES = { sketch: 'Sketch', plane: 'Plane', axis: 'Axis', point: 'Point', splitbody: 'Split Body', scale: 'Scale', thicken: 'Thicken', replaceface: 'Replace Face', align: 'Align', patpath: 'Pattern on Path', boundary: 'Boundary Fill', coil: 'Coil', thread: 'Thread', rib: 'Rib', web: 'Web', emboss: 'Emboss', extrude: 'Extrude', revolve: 'Revolve', box: 'Box', cylinder: 'Cylinder', sphere: 'Sphere', torus: 'Torus', hole: 'Hole', pattern: 'Pattern', mirror: 'Mirror', move: 'Move', combine: 'Combine', remove: 'Remove', fillet: 'Fillet', chamfer: 'Chamfer', shell: 'Shell', draft: 'Draft', loft: 'Loft', import: 'Import', sweep: 'Sweep' };
 function nextName(type) {
   let n = doc.features.filter(f => f.type === type).length + 1;
   while (doc.features.some(f => f.name === NAMES[type] + ' ' + n)) n++;
@@ -98,6 +98,7 @@ function startCreateSketch() {
 }
 const PLACED_DEFAULTS = {
   hole: { diameter: 6, depth: 10, cbore: false, cbDiameter: 11, cbDepth: 4, tip: true, tipAngle: 118 },
+  coil: { diameter: 30, mode: 'revs-height', revolutions: 5, height: 40, pitch: 8, section: 'circle', position: 'center', section_size: 4, lefthand: false },
   box: { w: 40, d: 30, h: 20 }, cylinder: { diameter: 30, h: 30 }, sphere: { diameter: 30 }, torus: { major: 40, minor: 10 },
 };
 function startPlaced(type) {
@@ -156,9 +157,9 @@ function newEdgeFeature(type) {
   if (!isBrep()) { toast(engineState === 'loading' ? 'The exact geometry engine is still loading. Try again in a moment.' : `${TYPE[type].label} needs the exact geometry engine, which could not start here: ${engineMsg}`); return; }
   if (!bodiesAtInsert().length) { toast('There is no body yet'); return; }
   const snap = JSON.stringify(doc); checkpoint();
-  const f = { id: uid(), type, name: nextName(type), edges: [], ...(type === 'fillet' ? { radius: 2 } : type === 'chamfer' ? { distance: 1 } : type === 'draft' ? { angle: 3, neutral: 'XY', neutralOffset: 0, flipPull: false } : type === 'presspull' ? { distance: 5 } : type === 'thicken' ? { thickness: 2, side: 'out', op: 'new' } : type === 'replaceface' ? { target: 'XY' } : { thickness: 2 }) };
+  const f = { id: uid(), type, name: nextName(type), edges: [], ...(type === 'fillet' ? { radius: 2 } : type === 'chamfer' ? { distance: 1 } : type === 'draft' ? { angle: 3, neutral: 'XY', neutralOffset: 0, flipPull: false } : type === 'presspull' ? { distance: 5 } : type === 'thicken' ? { thickness: 2, side: 'out', op: 'new' } : type === 'thread' ? { modeled: false, pitch: 0, full: true, lefthand: false } : type === 'replaceface' ? { target: 'XY' } : { thickness: 2 }) };
   insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
-  toast(type === 'presspull' ? 'Click a face to push or pull' : type === 'thicken' ? 'Click the faces to thicken' : type === 'replaceface' ? 'Click the flat face to replace' : type === 'shell' ? 'Click the faces to open' : type === 'draft' ? 'Click the faces to taper' : 'Click the edges to ' + (type === 'fillet' ? 'round' : 'bevel'));
+  toast(type === 'presspull' ? 'Click a face to push or pull' : type === 'thread' ? 'Click the cylindrical face of a hole or shaft' : type === 'thicken' ? 'Click the faces to thicken' : type === 'replaceface' ? 'Click the flat face to replace' : type === 'shell' ? 'Click the faces to open' : type === 'draft' ? 'Click the faces to taper' : 'Click the edges to ' + (type === 'fillet' ? 'round' : 'bevel'));
 }
 // ---- edge / face picking for fillet, chamfer, shell ----
 function mmPerPx() { const r = renderer.domElement.getBoundingClientRect(); return camera.position.distanceTo(controls.target) * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / r.height; }

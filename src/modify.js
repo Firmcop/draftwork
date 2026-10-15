@@ -82,3 +82,74 @@ function modifyDialog(f, idx, out) {
   }
   return false;
 }
+
+// ---- coil, thread, rib, web, emboss ----
+const THREAD_SIZES = [[0, 'Automatic (metric coarse)'], [0.35, 'M1.6 × 0.35'], [0.4, 'M2 × 0.4'], [0.45, 'M2.5 × 0.45'], [0.5, 'M3 × 0.5'], [0.7, 'M4 × 0.7'], [0.8, 'M5 × 0.8'], [1, 'M6 × 1'], [1.25, 'M8 × 1.25'], [1.5, 'M10 × 1.5'], [1.75, 'M12 × 1.75'], [2, 'M14/M16 × 2'], [2.5, 'M20 × 2.5'], [3, 'M24 × 3']];
+const openSketches = idx => doc.features.slice(0, idx).filter(g => g.type === 'sketch' && g.geo?.curves?.length).map(g => [g.id, g.name]);
+function startRibWeb(type) {
+  if (!needExact(type === 'rib' ? 'Rib' : 'Web')) return;
+  const sks = doc.features.filter(g => g.type === 'sketch' && g.geo?.curves?.length);
+  if (!sks.length) { toast(`Sketch the ${type} profile first: an open line where the wall goes`); return; }
+  const sk = (featById(selFeature)?.type === 'sketch' && featById(selFeature).geo?.curves?.length) ? featById(selFeature) : sks.at(-1);
+  newModify(type, type === 'rib' ? { sketch: sk.id, thickness: 3, flipSide: false, target: null } : { sketch: sk.id, thickness: 3, depth: 10, direction: 'symmetric', op: 'join', target: null });
+}
+function startEmboss() {
+  if (!needExact('Emboss')) return;
+  const sks = doc.features.filter(g => g.type === 'sketch');
+  if (!sks.length) { toast('Sketch the shape or text to emboss first'); return; }
+  const snap = JSON.stringify(doc); checkpoint();
+  const f = { id: uid(), type: 'emboss', name: nextName('emboss'), sketch: sks.at(-1).id, edges: [], depth: 1, mode: 'emboss' };
+  insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
+  toast('Click the face to emboss onto');
+}
+function createDialog2(f, idx, out, placementFields) {
+  switch (f.type) {
+    case 'coil': {
+      const m = f.mode || 'revs-height';
+      out.push(section_('Placement', ...placementFields(), exField('Center X', f, 'cx'), exField('Center Y', f, 'cy')),
+        section_('Shape', exField('Diameter', f, 'diameter', 'mm', { min: 0.01 }),
+          selField('Size by', f, 'mode', [['revs-height', 'Revolutions and height'], ['revs-pitch', 'Revolutions and pitch'], ['height-pitch', 'Height and pitch']], { rerender: true }),
+          m !== 'height-pitch' ? exField('Revolutions', f, 'revolutions', '', { min: 0.01 }) : null, m !== 'revs-pitch' ? exField('Height', f, 'height', 'mm', { min: 0.01 }) : null, m !== 'revs-height' ? exField('Pitch', f, 'pitch', 'mm', { min: 0.01 }) : null,
+          chkField('Left-handed', f, 'lefthand')),
+        section_('Section', selField('Section', f, 'section', [['circle', 'Circular'], ['square', 'Square'], ['triangle-out', 'Triangular (external)'], ['triangle-in', 'Triangular (internal)']]),
+          selField('Position', f, 'position', [['center', 'On the diameter'], ['inside', 'Inside'], ['outside', 'Outside']]), exField('Section size', f, 'section_size', 'mm', { min: 0.01 })),
+        section_('Result', selField('Operation', f, 'op', [['new', 'New body'], ['join', 'Join'], ['cut', 'Cut'], ['intersect', 'Intersect']])));
+      return true;
+    }
+    case 'thread':
+      out.push(section_('Thread', chkField('Modeled (cut the real thread)', f, 'modeled'), selField('Size', f, 'pitch', THREAD_SIZES, { numeric: true }),
+        chkField('Full length', f, 'full', { rerender: true }), f.full === false ? exField('Length', f, 'length', 'mm', { min: 0.1 }) : null, f.full === false ? exField('Offset from start', f, 'offsetStart', 'mm') : null, chkField('Left-handed', f, 'lefthand'),
+        h('p', { class: 'note' }, 'A cosmetic thread marks the face and shows in drawings; a modeled thread cuts the helical groove (slower). Holes get internal threads, shafts external.')));
+      return true;
+    case 'emboss':
+      out.push(section_('Profile', selField('Sketch', f, 'sketch', doc.features.slice(0, idx).filter(g => g.type === 'sketch').map(g => [g.id, g.name]))),
+        section_('Emboss', segField('Type', f, 'mode', [['emboss', 'Emboss (raise)'], ['deboss', 'Deboss (recess)']]), exField('Depth', f, 'depth', 'mm', { min: 0.01 }),
+          h('p', { class: 'note' }, 'The sketch is projected along its normal onto the picked face, flat or curved.')));
+      return true;
+    case 'rib':
+      out.push(section_('Profile', selField('Sketch', f, 'sketch', openSketches(idx)), h('p', { class: 'note' }, 'An open line on a plane through the part; the rib fills from the line to the part.')),
+        section_('Rib', exField('Thickness', f, 'thickness', 'mm', { min: 0.01 }), chkField('Fill the other side of the line', f, 'flipSide'), selField('Body', f, 'target', [['', 'Last body'], ...bodiesBefore(f.id)])));
+      return true;
+    case 'web':
+      out.push(section_('Profile', selField('Sketch', f, 'sketch', openSketches(idx)), h('p', { class: 'note' }, 'Every line becomes a wall; crossing lines make a grid.')),
+        section_('Web', exField('Thickness', f, 'thickness', 'mm', { min: 0.01 }), exField('Depth', f, 'depth', 'mm', { min: 0.01 }), segField('Direction', f, 'direction', [['one', 'One side'], ['symmetric', 'Symmetric'], ['reverse', 'Flipped']]),
+          selField('Operation', f, 'op', [['join', 'Join'], ['new', 'New body'], ['cut', 'Cut']])));
+      return true;
+  }
+  return false;
+}
+// cosmetic threads: a darker band on the face so it reads as threaded
+function drawCosmeticThreads(group) {
+  for (const f of doc.features) {
+    if (f.type !== 'thread' || f.modeled || f.suppressed || statusOf(f.id).state !== 'ok') continue;
+    for (const [id, b] of result.bodies) {
+      if (!b.shape || bodyHidden(id)) continue;
+      const hs = brepRefHashes(b, f.edges || [], 'face'); if (!hs.size) continue;
+      const m = brepMeshOf(b), idx = m.display.index.array, P = m.display.attributes.position.array, pos = [];
+      for (let t = 0; t < m.triFace.length; t++) if (hs.has(m.triFace[t])) for (let k = 0; k < 3; k++) { const v = idx[t * 3 + k]; pos.push(P[v * 3], P[v * 3 + 1], P[v * 3 + 2]); }
+      const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      const mesh = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0x4a5560, transparent: true, opacity: 0.35, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1, depthWrite: false }));
+      mesh.matrixAutoUpdate = false; mesh.matrix.copy(bodyXf(id)); mesh.renderOrder = 2; group.add(mesh);
+    }
+  }
+}

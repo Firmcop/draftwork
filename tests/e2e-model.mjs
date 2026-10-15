@@ -66,6 +66,20 @@ await menu('MODIFY', 'Scale'); await page.fill('#dx-factor', '0.5'); await W(150
 st = await state();
 check(st.features.at(-1) === 'scale:ok', 'scale applied');
 
+// ---- create tools: coil (from the ribbon on the XY plane), thread on a shaft ----
+await setDoc({ features: [] }); await W(1200);
+await menu('CREATE', 'Coil');
+if (!(await page.locator('.node .nlab:text-is("XY")').isVisible())) await page.click('.node:has-text("Origin") .tw');
+await page.click('.node .nlab:text-is("XY")'); await W(2500); await ok();
+st = await state();
+check(st.features.at(-1) === 'coil:ok' && st.bodies.length === 1, 'coil created from the ribbon ' + JSON.stringify(st));
+await setDoc({ features: [{ id: 'c', type: 'cylinder', name: 'Shaft', plane: 'XY', offset: 0, cx: 0, cy: 0, diameter: 10, h: 20, op: 'new' }] });
+await W(2500); await page.click('#vcHome'); await W(800);
+await menu('CREATE', 'Thread'); await clickAt(await scr(0, -5, 10)); await W(1500); await ok();
+d = await docNow(); st = await state();
+const th = d.features.find(f => f.type === 'thread');
+check(th && th.edges?.length === 1 && st.features.at(-1) === 'thread:ok', 'cosmetic thread on the shaft face ' + JSON.stringify(st.features));
+
 check(errors.length === 0, 'no page errors' + (errors.length ? ': ' + errors.slice(0, 3).join(' | ') : ''));
 await browser.close(); server.close();
 process.exit(failed ? 1 : 0);

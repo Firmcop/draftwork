@@ -512,6 +512,161 @@ function modifyStep(f, out) {
     return;
   }
 }
+// ---- more create tools: coil, thread, rib, web, emboss ----
+const CREATE2_TYPES = new Set(['coil', 'thread', 'rib', 'web', 'emboss']);
+// metric coarse threads: nominal diameter -> pitch
+const METRIC_COARSE = [[1.6, 0.35], [2, 0.4], [2.5, 0.45], [3, 0.5], [4, 0.7], [5, 0.8], [6, 1], [8, 1.25], [10, 1.5], [12, 1.75], [14, 2], [16, 2], [20, 2.5], [24, 3], [30, 3.5], [36, 4]];
+function sweepProfileAlongHelix(spine, center, draw2d) {
+  // profile plane at the helix start: x = radial outward, normal = helix tangent
+  const sp = spine.startPoint, tg = spine.tangentAt(1e-9), c = new THREE.Vector3(...center), s0 = new THREE.Vector3(sp.x, sp.y, sp.z);
+  const radial = s0.clone().sub(c), n = new THREE.Vector3(tg.x, tg.y, tg.z).normalize();
+  radial.sub(n.clone().multiplyScalar(radial.dot(n))).normalize();
+  const pl = new RC.Plane([s0.x, s0.y, s0.z], [radial.x, radial.y, radial.z], [n.x, n.y, n.z]);
+  const sk = draw2d().sketchOnPlane(pl);
+  return T(RC.genericSweep(sk.wire, spine, { frenet: true }, false));
+}
+function sketchChain(ps) {
+  const geo = ps.feature.geo; if (!geo?.curves?.length) throw new Error('The sketch has no lines');
+  const solved = solveSketch(geo); if (!solved.ok) throw new Error('The sketch constraints conflict');
+  const { paths } = geoPaths(geo, solved); if (!paths?.length) throw new Error('Draw an open line or chain of lines for the profile');
+  return paths;
+}
+function createStep2(f, out) {
+  if (f.type === 'coil') {
+    const pi = placementInfo(f, out), P = brepPlane(pi.base, pi.offset, pi.flip);
+    const R = (+f.diameter || 0) / 2, sz = +f.section_size || 0; if (!(R > 0)) throw new Error('Diameter must be greater than 0 mm'); if (!(sz > 0)) throw new Error('Section size must be greater than 0 mm');
+    let revs = +f.revolutions || 0, height = +f.height || 0, pitch = +f.pitch || 0;
+    if (f.mode === 'revs-pitch') height = revs * pitch; else if (f.mode === 'height-pitch') revs = height / (pitch || 1); else pitch = height / (revs || 1);
+    if (!(revs > 0 && height > 0 && pitch > 0)) throw new Error('Revolutions, height and pitch must be greater than 0');
+    if (pitch <= sz && f.section !== 'none') throw new Error('The pitch must be larger than the section size or the turns overlap');
+    const c = P.o.clone().add(P.u.clone().multiplyScalar(+f.cx || 0)).add(P.v.clone().multiplyScalar(+f.cy || 0));
+    const shift = f.position === 'inside' ? -sz / 2 : f.position === 'outside' ? sz / 2 : 0;
+    const spine = T(RC.makeHelix(pitch, height, R + shift, [c.x, c.y, c.z], [P.n.x, P.n.y, P.n.z], !!f.lefthand));
+    const h2 = sz / 2;
+    const prof = f.section === 'square' ? () => RC.drawRoundedRectangle(sz, sz, 0)
+      : f.section === 'triangle-out' ? () => RC.draw([-h2 * 0.866, -h2]).lineTo([h2 * 0.866, 0]).lineTo([-h2 * 0.866, h2]).close()
+      : f.section === 'triangle-in' ? () => RC.draw([h2 * 0.866, -h2]).lineTo([h2 * 0.866, h2]).lineTo([-h2 * 0.866, 0]).close()
+      : () => RC.drawCircle(h2);
+    const tool = sweepProfileAlongHelix(spine, [c.x, c.y, c.z], prof);
+    const res = bApply(out, f, tool, f.op || 'new', f.target);
+    out.tools.set(f.id, { shape: tool, ...res, op: f.op || 'new' });
+    return;
+  }
+  if (f.type === 'thread') {
+    if (!(f.edges || []).length) throw new Error('Click a cylindrical face (a hole or a shaft)');
+    if (!f.modeled) return;   // cosmetic: shown on the page and in drawings, no geometry change
+    let done = false;
+    for (const [id, b] of [...out.bodies]) {
+      const list = b.shape.faces, hs = matchRefs(list, f.edges, faceSig, 'c'), picked = list.filter(x => hs.has(x.hashCode));
+      try {
+        if (!picked.length) continue;
+        // merge split cylinder faces first: a helical cut across the joint between two half-cylinders fails
+        let shape = b.shape.clone(); try { const u = shape.simplify(); if (u && u !== shape) shape = u; } catch (e) { }
+        for (const face of picked) {
+          const sig = faceSig(face); if (sig.type !== 'CYLINDRE' || !sig.ax) throw new Error('Threads go on cylindrical faces');
+          const ax = new THREE.Vector3(...sig.ax).normalize(), ap = new THREE.Vector3(...sig.ap), r = sig.r;
+          // axial extent of the face
+          let lo = Infinity, hi = -Infinity;
+          for (const v of [0, 1]) for (const u of [0, 0.5]) { const p = face.pointOnSurface(u, v), t = new THREE.Vector3(p.x, p.y, p.z).sub(ap).dot(ax); p.delete?.(); lo = Math.min(lo, t); hi = Math.max(hi, t); }
+          // inside (hole) or outside (shaft): the face normal points toward the axis for a hole
+          const pm = face.pointOnSurface(0.3, 0.5), nm = face.normalAt(pm), rad = new THREE.Vector3(pm.x, pm.y, pm.z).sub(ap); rad.sub(ax.clone().multiplyScalar(rad.dot(ax)));
+          const internal = rad.dot(new THREE.Vector3(nm.x, nm.y, nm.z)) < 0; pm.delete?.(); nm.delete?.();
+          const pitch = +f.pitch > 0 ? +f.pitch : (METRIC_COARSE.reduce((a, q) => Math.abs(q[0] - 2 * r) < Math.abs(a[0] - 2 * r) ? q : a)[1]);
+          const avail = hi - lo, len = f.full !== false ? avail : Math.min(avail, Math.max(pitch, +f.length || avail));
+          const start = lo + (f.full !== false ? 0 : Math.max(0, +f.offsetStart || 0)), d = 0.54 * pitch, w = 0.62 * pitch / 2;
+          if (len < pitch * 1.2) throw new Error('The face is too short for one turn of this thread');
+          const c = ap.clone().add(ax.clone().multiplyScalar(start + pitch * 0.25));
+          const spine = T(RC.makeHelix(pitch, len - pitch * 0.5, r, [c.x, c.y, c.z], [ax.x, ax.y, ax.z], !!f.lefthand));
+          // V profile in the (radial, axial) plane: apex into the material, base just beyond the surface
+          const ins = internal ? 1 : -1, eps = 0.05;
+          let vp = [[-ins * eps, -w], [ins * d, 0], [-ins * eps, w]];
+          if ((vp[1][0] - vp[0][0]) * (vp[2][1] - vp[0][1]) - (vp[2][0] - vp[0][0]) * (vp[1][1] - vp[0][1]) < 0) vp = vp.reverse();   // counter-clockwise, or the sweep comes out inside-out
+          const tool = sweepProfileAlongHelix(spine, [c.x, c.y, c.z], () => RC.draw(vp[0]).lineTo(vp[1]).lineTo(vp[2]).close());
+          const next = shape.cut(tool); shape.delete?.(); shape = next; done = true;
+        }
+        bReplace(out, id, T(shape));
+      } finally { list.forEach(x => x.delete?.()); }
+    }
+    if (!done) throw new Error('The picked face no longer exists. Edit this feature and pick it again.');
+    return;
+  }
+  if (f.type === 'web' || f.type === 'rib') {
+    const ps = out.sketches.get(f.sketch); if (!ps) throw new Error('Choose the sketch with the profile');
+    const paths = sketchChain(ps), t = +f.thickness; if (!(t > 0)) throw new Error('Thickness must be greater than 0 mm');
+    const pi = placementInfo(ps.feature, out);
+    if (f.type === 'web') {
+      // every segment becomes a thin wall of the given thickness, extruded normal to the sketch
+      const depth = +f.depth; if (!(depth > 0)) throw new Error('Depth must be greater than 0 mm');
+      let dr = null;
+      for (const path of paths) for (const sg of path.segs) {
+        if (sg.t !== 'line') throw new Error('Web profiles are straight lines');
+        const dx = sg.b[0] - sg.a[0], dy = sg.b[1] - sg.a[1], L = Math.hypot(dx, dy); if (L < 1e-9) continue;
+        const nx = -dy / L * t / 2, ny = dx / L * t / 2, ex = dx / L * t / 2, ey = dy / L * t / 2;   // ends overlap by half a thickness so joints fuse
+        const d1 = RC.draw([sg.a[0] - ex + nx, sg.a[1] - ey + ny]).lineTo([sg.b[0] + ex + nx, sg.b[1] + ey + ny]).lineTo([sg.b[0] + ex - nx, sg.b[1] + ey - ny]).lineTo([sg.a[0] - ex - nx, sg.a[1] - ey - ny]).close();
+        dr = dr ? dr.fuse(d1) : d1;
+      }
+      if (!dr) throw new Error('The profile has no length');
+      const shift = f.direction === 'reverse' ? -depth : f.direction === 'symmetric' ? -depth / 2 : 0;
+      const tool = extrudeDrawing(dr, brepPlane(pi.base, pi.offset, pi.flip, shift).plane, depth);
+      const res = bApply(out, f, tool, f.op || 'join', f.target);
+      out.tools.set(f.id, { shape: tool, ...res, op: f.op || 'join' });
+      return;
+    }
+    // rib: wall symmetric about the sketch plane, filling from the line toward the body until it meets it
+    const b = out.bodies.get(f.target || bTarget(out, null)); if (!b) throw new Error('A rib needs a body to attach to');
+    const seg = paths[0].segs; if (seg.some(sg => sg.t !== 'line')) throw new Error('Rib profiles are straight lines');
+    const A = seg[0].a, B = seg[seg.length - 1].b, dx = B[0] - A[0], dy = B[1] - A[1], L = Math.hypot(dx, dy); if (L < 1e-9) throw new Error('The rib line has no length');
+    const [b0, b1] = b.shape.boundingBox.bounds, big = Math.max(...b1.map((v, i) => v - b0[i])) * 3 + 50;
+    const pts = seg.map(sg => sg.a).concat([B]);
+    // try the two sides of the line; the rib is the closed pocket between the line and the part
+    const attempt = sgn => {
+      const nx = -dy / L * sgn, ny = dx / L * sgn;
+      let pen = RC.draw(pts[0]); for (let i = 1; i < pts.length; i++) pen = pen.lineTo(pts[i]);
+      for (let i = pts.length - 1; i >= 0; i--) pen = pen.lineTo([pts[i][0] + nx * big, pts[i][1] + ny * big]);
+      const slab = extrudeDrawing(pen.close(), brepPlane(pi.base, pi.offset, pi.flip, -t / 2).plane, t);
+      const pieces = T(slab.cut(b.shape));
+      let sol = []; try { sol = pieces.solids || [pieces]; } catch (e) { sol = [pieces]; }
+      const mid = new THREE.Vector3((A[0] + B[0]) / 2 + nx * 0.01, (A[1] + B[1]) / 2 + ny * 0.01, 0).applyMatrix4(ps.matrix);
+      let best = null, bd = Infinity;
+      for (const sd of sol) { const [p0, p1] = sd.boundingBox.bounds, inside = [0, 1, 2].every(k => mid.getComponent(k) >= p0[k] - 1e-3 && mid.getComponent(k) <= p1[k] + 1e-3); const c = [0, 1, 2].map(k => (p0[k] + p1[k]) / 2), dd = Math.hypot(c[0] - mid.x, c[1] - mid.y, c[2] - mid.z) - (inside ? 1e6 : 0); if (dd < bd) { bd = dd; best = sd; } }
+      if (!best) return null;
+      const [q0, q1] = best.boundingBox.bounds;
+      return q1.some((v, k) => v - q0[k] > big * 0.6) ? null : best;     // reached the far end of the slab: not closed on this side
+    };
+    const order = f.flipSide ? [-1, 1] : [1, -1];
+    const best = attempt(order[0]) || attempt(order[1]);
+    if (!best) throw new Error('The rib does not close against the body. Draw the line so both ends touch the part.');
+    const tool = T(best.clone());
+    const res = bApply(out, f, tool, 'join', b.id);
+    out.tools.set(f.id, { shape: tool, ...res, op: 'join' });
+    return;
+  }
+  if (f.type === 'emboss') {
+    const ps = out.sketches.get(f.sketch); if (!ps) throw new Error('Choose the sketch with the profiles');
+    if (!(f.edges || []).length) throw new Error('Click the face to emboss onto');
+    const depth = +f.depth; if (!(depth > 0)) throw new Error('Depth must be greater than 0 mm');
+    const pi = placementInfo(ps.feature, out), dr = sketchDrawing(ps.feature, null);
+    for (const [id, b] of [...out.bodies]) {
+      const list = b.shape.faces, hs = matchRefs(list, f.edges, faceSig, 'c'), picked = list.filter(x => hs.has(x.hashCode));
+      try {
+        if (!picked.length) continue;
+        const [b0, b1] = b.shape.boundingBox.bounds, reach = Math.max(...b1.map((v, i) => v - b0[i])) * 2 + 20;
+        const prism = extrudeDrawing(dr, brepPlane(pi.base, pi.offset, pi.flip, -reach).plane, reach * 2);   // the profiles projected along the sketch normal
+        let shape = b.shape.clone();
+        for (const face of picked) {
+          const deb = f.mode === 'deboss';
+          const slab = face.geomType === 'PLANE' ? (() => { const n = face.normalAt(), v = n.multiply((deb ? -depth : depth) / Math.hypot(n.x, n.y, n.z)); return T(RC.basicFaceExtrusion(face, v)); })() : offsetSlab(face, deb ? -depth : depth);
+          const tool = T(prism.clone().intersect(slab));
+          const next = deb ? shape.cut(tool) : shape.fuse(tool); shape.delete?.(); shape = next;
+        }
+        bReplace(out, id, T(shape));
+        out.tools.set(f.id, { shape: prism, op: f.mode === 'deboss' ? 'cut' : 'join' });
+        return;
+      } finally { list.forEach(x => x.delete?.()); }
+    }
+    throw new Error('The picked face no longer exists. Edit this feature and pick it again.');
+  }
+}
 function brepClone(o) {
   return { bodies: new Map(o.bodies), bodyCount: o.bodyCount, lastBody: o.lastBody, sketches: new Map(o.sketches), planes: new Map(o.planes), axes: new Map(o.axes), points: new Map(o.points),
     status: new Map(o.status), tools: new Map(o.tools), before: new Map(o.before), beforeBodies: new Map(o.beforeBodies) };
@@ -532,7 +687,7 @@ function regenerateBrep(features, upto = null, cache = null) {
   return out;
 }
 const EDGE_TYPES = new Set(['fillet', 'chamfer', 'shell', 'draft', 'presspull']);
-const FACE_PICK = new Set(['shell', 'draft', 'presspull', 'thicken', 'replaceface']);
+const FACE_PICK = new Set(['shell', 'draft', 'presspull', 'thicken', 'replaceface', 'thread', 'emboss']);
 // Imported STEP shapes, parsed once per file (async) and reused by every rebuild: fileId -> Shape3D[]
 const importShapes = new Map();
 function brepStep(f, out) {
@@ -609,6 +764,8 @@ function brepStep(f, out) {
       edgeFeature(f, out);
     } else if (MODIFY_TYPES.has(f.type)) {
       modifyStep(f, out);
+    } else if (CREATE2_TYPES.has(f.type)) {
+      createStep2(f, out);
     }
     out.status.set(f.id, { state: 'ok' });
   } catch (e) {

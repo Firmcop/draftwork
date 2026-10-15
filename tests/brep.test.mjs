@@ -230,3 +230,34 @@ test('split body, scale, thicken, replace face, align, pattern on path, boundary
   r = K.regenerateBrep([...hollow, { id: 'bf', type: 'boundary', bodies: ['o'] }]); okAll(r);
   near(vols(r).find(v => Math.abs(v - 36 * 16 * 6) < 1e-3) || 0, 36 * 16 * 6, 1e-3, 'boundary fill finds the enclosed cavity');
 });
+
+test('coil, modeled thread, web, rib and emboss', () => {
+  // coil: circle section 3 mm, Ø20, 4 turns, pitch 5
+  let r = K.regenerateBrep([{ id: 'co', type: 'coil', plane: 'XY', cx: 0, cy: 0, diameter: 20, mode: 'revs-pitch', revolutions: 4, pitch: 5, section: 'circle', section_size: 3, position: 'center', op: 'new' }]); okAll(r);
+  near(vols(r)[0], Math.PI * 1.5 * 1.5 * Math.hypot(2 * Math.PI * 10, 5) * 4, 2, 'coil volume = section area × helix length');
+  // modeled thread on an M12 shaft removes material in a groove
+  const shaft = { id: 's', type: 'cylinder', plane: 'XY', cx: 0, cy: 0, diameter: 12, h: 20, op: 'new' };
+  const cyl = [...K.brepSigMap([...K.regenerateBrep([shaft]).bodies.values()][0], 'face').values()].find(s => s.type === 'CYLINDRE');
+  r = K.regenerateBrep([shaft, { id: 'th', type: 'thread', edges: [cyl], modeled: true, full: true }]); okAll(r);
+  const v0 = Math.PI * 36 * 20; assert.ok(vols(r)[0] < v0 - 50 && vols(r)[0] > v0 * 0.8, 'thread cut a groove: ' + vols(r)[0]);
+  r = K.regenerateBrep([shaft, { id: 'th', type: 'thread', edges: [cyl], modeled: false }]); okAll(r);
+  near(vols(r)[0], v0, 1e-6, 'cosmetic thread leaves the solid alone');
+  // web: an L of two 20 mm lines, 2 mm thick, 10 deep
+  const sk = { id: 'w', type: 'sketch', plane: 'XY', profiles: [], geo: { points: [{ id: 'a', x: 0, y: 0 }, { id: 'b', x: 20, y: 0 }, { id: 'c', x: 20, y: 20 }], curves: [{ id: 'l1', kind: 'line', a: 'a', b: 'b' }, { id: 'l2', kind: 'line', a: 'b', b: 'c' }], cons: [] } };
+  r = K.regenerateBrep([sk, { id: 'we', type: 'web', sketch: 'w', thickness: 2, depth: 10, direction: 'one', op: 'new' }]); okAll(r);
+  near(vols(r)[0], (22 * 2 + 22 * 2 - 4) * 10, 1, 'web walls (overlapping corner counted once)');
+  // rib: an L bracket (base 40×20×5, wall 5×20×40), a diagonal line on the mid plane fills the corner
+  const bracket = [{ id: 'base', type: 'box', plane: 'XY', cx: 20, cy: 0, w: 40, d: 20, h: 5, op: 'new' }, { id: 'wall', type: 'box', plane: 'XY', cx: 2.5, cy: 0, w: 5, d: 20, h: 40, op: 'join' }];
+  const ribSk = { id: 'rs', type: 'sketch', plane: 'XZ', profiles: [], geo: { points: [{ id: 'p', x: 5, y: 35 }, { id: 'q', x: 35, y: 5 }], curves: [{ id: 'd', kind: 'line', a: 'p', b: 'q' }], cons: [] } };
+  const before = K.regenerateBrep(bracket); const vb = vols(before)[0];
+  r = K.regenerateBrep([...bracket, ribSk, { id: 'ri', type: 'rib', sketch: 'rs', thickness: 4 }]); okAll(r);
+  near(vols(r)[0] - vb, 30 * 30 / 2 * 4, 1, 'rib fills the triangular corner (30×30/2 × 4 mm)');
+  // emboss: a 10×10 square profile 1 mm out of the top face of a plate
+  const plate = { id: 'pl', type: 'box', plane: 'XY', cx: 0, cy: 0, w: 40, d: 40, h: 5, op: 'new' };
+  const topF = [...K.brepSigMap([...K.regenerateBrep([plate]).bodies.values()][0], 'face').values()].find(s => Math.abs(s.c[2] - 5) < 1e-6);
+  const sq = { id: 'es', type: 'sketch', plane: 'XY', offset: 5, profiles: [{ id: 'q', kind: 'rect', cx: 0, cy: 0, w: 10, h: 10, r: 0, rot: 0 }] };
+  r = K.regenerateBrep([plate, sq, { id: 'em', type: 'emboss', sketch: 'es', edges: [topF], depth: 1, mode: 'emboss' }]); okAll(r);
+  near(vols(r)[0], 40 * 40 * 5 + 100, 1e-3, 'emboss adds 10×10×1');
+  r = K.regenerateBrep([plate, sq, { id: 'em', type: 'emboss', sketch: 'es', edges: [topF], depth: 1, mode: 'deboss' }]); okAll(r);
+  near(vols(r)[0], 40 * 40 * 5 - 100, 1e-3, 'deboss removes 10×10×1');
+});

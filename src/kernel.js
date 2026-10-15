@@ -591,7 +591,7 @@ function step(f, out) {
     } else if (f.type === 'remove') {
       if (!out.bodies.has(f.body)) throw new Error('Choose a body to remove');
       out.bodies.delete(f.body);
-    } else if (['fillet', 'chamfer', 'shell', 'draft', 'presspull', 'loft', 'import', 'sweep', 'splitbody', 'scale', 'thicken', 'replaceface', 'align', 'patpath', 'boundary'].includes(f.type)) {
+    } else if (['fillet', 'chamfer', 'shell', 'draft', 'presspull', 'loft', 'import', 'sweep', 'splitbody', 'scale', 'thicken', 'replaceface', 'align', 'patpath', 'boundary', 'coil', 'thread', 'rib', 'web', 'emboss'].includes(f.type)) {
       throw new Error('This needs the exact geometry engine, which has not loaded in this view');
     }
     out.status.set(f.id, { state: 'ok' });
