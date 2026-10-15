@@ -117,6 +117,7 @@ function brepTool(f, out) {
       }
       const ang = Math.min(360, Math.abs(+f.angle)); if (!(ang > 0)) throw new Error('Angle must be greater than 0°');
       const P = brepPlane(pi.base, pi.offset, pi.flip);
+      if (f.axis !== 'u' && f.axis !== 'v' && f.axis) { const A = axisOf(f.axis, out); return revolveDrawing(drawing, P.plane, new THREE.Vector3(...A.d), new THREE.Vector3(...A.o), ang); }   // a construction or origin axis
       return revolveDrawing(drawing, P.plane, f.axis === 'u' ? P.u : P.v, P.o, ang);
     }
     case 'box': case 'cylinder': {
@@ -200,14 +201,19 @@ function bApply(out, f, tool, op, target, suffix = '') {
   throw new Error('Unknown operation');
 }
 const AX = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] };
-function brepCopies(f, shape) {
-  if (f.type === 'mirror') return [T(shape.clone().mirror(f.plane || 'YZ', [0, 0, 0]))];
+function brepCopies(f, shape, res) {
+  if (f.type === 'mirror') {
+    if (['XY', 'XZ', 'YZ'].includes(f.plane || 'YZ')) return [T(shape.clone().mirror(f.plane || 'YZ', [0, 0, 0]))];
+    const p = resolvePlane(f.plane, res), M = planeMatrix(p.base, p.offset, p.flip), e = M.elements;   // a construction plane
+    return [T(shape.clone().mirror([e[8], e[9], e[10]], [e[12], e[13], e[14]]))];
+  }
   const count = Math.max(2, Math.min(50, Math.round(+f.count || 2))), out = [];
+  const axisAt = (k, dflt) => AX[k] ? { o: [0, 0, 0], d: AX[k] } : k ? axisOf(k, res) : { o: [0, 0, 0], d: AX[dflt] };
   if (f.kind === 'circular') {
-    const total = Math.min(360, Math.abs(+f.angle || 360)), step = total >= 359.999 ? 360 / count : total / (count - 1);
-    for (let i = 1; i < count; i++) out.push(T(shape.clone().rotate(step * i, [0, 0, 0], AX[f.axis] || AX.Z)));
+    const total = Math.min(360, Math.abs(+f.angle || 360)), step = total >= 359.999 ? 360 / count : total / (count - 1), A = axisAt(f.axis, 'Z');
+    for (let i = 1; i < count; i++) out.push(T(shape.clone().rotate(step * i, A.o, A.d)));
   } else {
-    const a1 = AX[f.axis] || AX.X, a2 = AX[f.axis2] || AX.Y, n2 = Math.max(1, Math.min(50, Math.round(+f.count2 || 1)));
+    const a1 = axisAt(f.axis, 'X').d, a2 = axisAt(f.axis2, 'Y').d, n2 = Math.max(1, Math.min(50, Math.round(+f.count2 || 1)));
     for (let j = 0; j < n2; j++) for (let i = 0; i < count; i++) {
       if (!i && !j) continue;
       const s1 = (+f.spacing || 0) * i, s2 = (+f.spacing2 || 0) * j;
@@ -221,6 +227,7 @@ function brepCopies(f, shape) {
 function edgeSig(e) {
   const p = e.pointAt(0.5); let len = 0; try { len = RC.measureLength(e); } catch (x) { }
   const sig = { p: [p.x, p.y, p.z], len, type: e.geomType };
+  if (sig.type === 'LINE') { try { const a = e.pointAt(0), b = e.pointAt(1); sig.a = [a.x, a.y, a.z]; sig.b = [b.x, b.y, b.z]; } catch (x) { } }
   if (sig.type === 'CIRCLE') {   // center and axis, for joint origins on round edges
     try {
       const q = [0, 0.25, 0.5].map(t => { const v = e.pointAt(t), r = [v.x, v.y, v.z]; v.delete?.(); return r; });
@@ -235,7 +242,23 @@ function edgeSig(e) {
   }
   return sig;
 }
-function faceSig(fc) { const c = fc.center; let n = [0, 0, 0]; try { const v = fc.normalAt(); n = [v.x, v.y, v.z]; } catch (x) { } return { c: [c.x, c.y, c.z], n, type: fc.geomType }; }
+function faceSig(fc) {
+  const c = fc.center; let n = [0, 0, 0]; try { const v = fc.normalAt(); n = [v.x, v.y, v.z]; } catch (x) { }
+  const sig = { c: [c.x, c.y, c.z], n, type: fc.geomType };
+  if (sig.type === 'CYLINDRE') {   // axis (direction ax, point ap) and radius, for construction axes and tangent planes
+    try {
+      const P = (u, v) => { const p = fc.pointOnSurface(u, v), r = [p.x, p.y, p.z]; p.delete?.(); return r; };
+      const N = (u, v) => { const p = fc.pointOnSurface(u, v), q = fc.normalAt(p), l = Math.hypot(q.x, q.y, q.z) || 1, r = [q.x / l, q.y / l, q.z / l]; p.delete?.(); q.delete?.(); return r; };
+      const a = P(0.5, 0.1), b = P(0.5, 0.9), dv = b.map((x, i) => x - a[i]), dl = Math.hypot(...dv);
+      const p = P(0.5, 0.5), q = P(0.1, 0.5), np = N(0.5, 0.5), nq = N(0.1, 0.5), dn = np.map((x, i) => x - nq[i]), den = dn.reduce((s2, x) => s2 + x * x, 0);
+      if (dl > 1e-9 && den > 1e-12) {
+        const r = p.reduce((s2, x, i) => s2 + (x - q[i]) * dn[i], 0) / den;
+        sig.ax = dv.map(x => x / dl); sig.ap = p.map((x, i) => x - r * np[i]); sig.r = Math.abs(r);
+      }
+    } catch (x) { }
+  }
+  return sig;
+}
 const d3 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
 // For each stored reference, find the closest current edge/face of the same kind (tolerates moderate upstream changes).
 function matchRefs(items, refs, sigOf, key) {
@@ -348,11 +371,11 @@ function pressPull(f, out) {
   return matched;
 }
 function brepClone(o) {
-  return { bodies: new Map(o.bodies), bodyCount: o.bodyCount, lastBody: o.lastBody, sketches: new Map(o.sketches), planes: new Map(o.planes),
+  return { bodies: new Map(o.bodies), bodyCount: o.bodyCount, lastBody: o.lastBody, sketches: new Map(o.sketches), planes: new Map(o.planes), axes: new Map(o.axes), points: new Map(o.points),
     status: new Map(o.status), tools: new Map(o.tools), before: new Map(o.before), beforeBodies: new Map(o.beforeBodies) };
 }
 function regenerateBrep(features, upto = null, cache = null) {
-  let out = { bodies: new Map(), bodyCount: 0, lastBody: null, sketches: new Map(), planes: new Map(), status: new Map(), tools: new Map(), before: new Map(), beforeBodies: new Map() };
+  let out = { bodies: new Map(), bodyCount: 0, lastBody: null, sketches: new Map(), planes: new Map(), axes: new Map(), points: new Map(), status: new Map(), tools: new Map(), before: new Map(), beforeBodies: new Map() };
   const end = upto == null ? features.length : Math.min(upto + 1, features.length);
   let key = '', reuse = !!cache;
   for (let i = 0; i < features.length; i++) {
@@ -376,10 +399,8 @@ function brepStep(f, out) {
   if (f.suppressed) { out.status.set(f.id, { state: 'suppressed' }); return; }
   try {
     if (f.error) throw new Error(f.error);
-    if (f.type === 'plane') {
-      const p = resolvePlane(f.base || 'XY', out);
-      out.planes.set(f.id, { base: p.base, offset: p.offset + (+f.offset || 0), flip: !!p.flip !== !!f.flip });
-    } else if (f.type === 'sketch') {
+    if (constructStep(f, out)) { /* plane, axis or point */ }
+    else if (f.type === 'sketch') {
       const pi = placementInfo(f, out);
       out.sketches.set(f.id, { matrix: planeMatrix(pi.base, pi.offset, pi.flip), feature: sketchWithGeo(f) });
     } else if (['extrude', 'revolve', 'box', 'cylinder', 'sphere', 'torus', 'hole'].includes(f.type)) {
@@ -410,7 +431,7 @@ function brepStep(f, out) {
     } else if (f.type === 'pattern' || f.type === 'mirror') {
       const src = out.tools.get(f.source);
       if (!src) throw new Error('Choose a feature that comes before this one');
-      const copies = brepCopies(f, src.shape);
+      const copies = brepCopies(f, src.shape, out);
       if (src.op === 'new') {
         copies.forEach((s, k) => bApply(out, f, s, 'new', null, ':' + (k + 1)));
         out.tools.set(f.id, { shape: copies.length > 1 ? T(RC.makeCompound(copies.map(c => c.clone()))) : copies[0], op: 'new' });

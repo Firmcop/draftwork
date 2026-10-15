@@ -163,3 +163,39 @@ test('round edges carry their center and axis (joint origins)', () => {
   }
   near(Math.max(...circles.map(s => s.cc[2])), 20, 1e-6, 'top rim at z = 20');
 });
+
+test('cylinder faces report their axis and radius; straight edges their end points', () => {
+  const r = K.regenerateBrep([{ id: 'c', type: 'cylinder', plane: 'XY', cx: 12, cy: -3, diameter: 10, h: 20, op: 'new' }]);
+  const b = [...r.bodies.values()][0];
+  const cyl = [...K.brepSigMap(b, 'face').values()].find(s => s.type === 'CYLINDRE');
+  near(Math.abs(cyl.ax[2]), 1, 1e-9, 'axis along Z'); near(cyl.ap[0], 12, 1e-6, 'axis x'); near(cyl.ap[1], -3, 1e-6, 'axis y'); near(cyl.r, 5, 1e-6, 'radius');
+  const box = K.regenerateBrep([{ id: 'b', type: 'box', plane: 'XY', cx: 0, cy: 0, w: 40, d: 30, h: 20, op: 'new' }]);
+  const line = [...K.brepSigMap([...box.bodies.values()][0], 'edge').values()].find(s => s.type === 'LINE');
+  near(Math.hypot(...line.a.map((v, i) => v - line.b[i])), line.len, 1e-9, 'end points span the edge');
+});
+
+test('construction planes, axes and points drive revolve, pattern and mirror', () => {
+  // plane at 90° about the XY plane's X direction = the XZ plane (normal along ∓Y)
+  let r = K.regenerateBrep([{ id: 'p', type: 'plane', mode: 'angle', base: 'XY', axis: 'u', angle: 90 }]);
+  const pa = r.planes.get('p').base; near(Math.abs(pa.n[1]), 1, 1e-9, 'plane at angle turned onto XZ');
+  // midplane between z=0 and z=20
+  r = K.regenerateBrep([{ id: 'o', type: 'plane', base: 'XY', offset: 20 }, { id: 'm', type: 'plane', mode: 'mid', base: 'XY', base2: 'o' }]);
+  near(r.planes.get('m').base.o[2], 10, 1e-9, 'midplane halfway');
+  // axis where XZ and YZ meet = Z axis
+  r = K.regenerateBrep([{ id: 'a', type: 'axis', mode: 'planes', base: 'XZ', base2: 'YZ' }]);
+  near(Math.abs(r.axes.get('a').d[2]), 1, 1e-9, 'two planes meet along Z');
+  // revolve a 10×10 square at x 20..30 around an axis parallel to Y through x = 10 → ring of radii 10..20, height 10
+  const sq = { id: 's', type: 'sketch', plane: 'XY', profiles: [{ id: 'q', kind: 'rect', cx: 25, cy: 5, w: 10, h: 10, r: 0, rot: 0 }] };
+  r = K.regenerateBrep([{ id: 'ax', type: 'axis', mode: 'two', p1: [10, 0, 0], p2: [10, 1, 0] }, sq, { id: 'rv', type: 'revolve', sketch: 's', axis: 'ax', angle: 360, op: 'new' }]);
+  okAll(r); near(vols(r)[0], Math.PI * (400 - 100) * 10, 0.5, 'revolve around a construction axis');
+  // circular pattern of a small box around an axis through (50,0) along Z: 4 copies, same volume each
+  r = K.regenerateBrep([{ id: 'ax', type: 'axis', mode: 'two', p1: [50, 0, 0], p2: [50, 0, 1] }, { id: 'b', type: 'box', plane: 'XY', cx: 60, cy: 0, w: 4, d: 4, h: 4, op: 'new' },
+    { id: 'pt', type: 'pattern', kind: 'circular', source: 'b', axis: 'ax', count: 4, angle: 360 }]);
+  okAll(r); assert.equal(r.bodies.size, 4, 'four bodies around the axis');
+  const xs = [...r.bodies.values()].map(b => K.brepProps(b).com.x).sort((a, b) => a - b);
+  near(xs[0], 40, 1e-6, 'one copy opposite, at x = 40');
+  // mirror about a construction plane at x = 30
+  r = K.regenerateBrep([{ id: 'pl', type: 'plane', base: 'YZ', offset: 30 }, { id: 'b', type: 'box', plane: 'XY', cx: 10, cy: 0, w: 4, d: 4, h: 4, op: 'new' }, { id: 'mi', type: 'mirror', source: 'b', plane: 'pl' }]);
+  okAll(r); const mx = [...r.bodies.values()].map(b => K.brepProps(b).com.x).sort((a, b) => a - b);
+  near(mx[1], 50, 1e-6, 'mirror copy at x = 50');
+});

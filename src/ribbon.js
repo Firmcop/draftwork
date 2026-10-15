@@ -39,8 +39,11 @@ cmd('params', 'Change Parameters', 'params', { run: () => openParamsModal() });
 planned('cfgtable', 'Configuration Table', 'configure', P2); planned('cfgrules', 'Configuration Rules', 'configure', P2);
 // construct
 cmd('offsetplane', 'Offset Plane', 'plane', { run: () => startOffsetPlane() });
-planned('planeangle', 'Plane at Angle', 'planeangle'); planned('midplane', 'Midplane', 'midplane'); planned('planetangent', 'Tangent Plane', 'plane');
-planned('axiscyl', 'Axis Through Cylinder', 'axis'); planned('axis2p', 'Axis Through Two Points', 'axis'); planned('pointv', 'Point at Vertex', 'point');
+cmd('planeangle', 'Plane at Angle', 'planeangle', { run: () => startPlaneAtAngle() }); cmd('midplane', 'Midplane', 'midplane', { run: () => startMidplane() }); cmd('planetangent', 'Tangent Plane', 'plane', { run: () => startTangentPlane() });
+cmd('plane3p', 'Plane Through Three Points', 'plane', { run: () => startPlane3p() });
+cmd('axiscyl', 'Axis Through Cylinder/Cone/Torus', 'axis', { run: () => startAxisCyl() }); cmd('axis2p', 'Axis Through Two Points', 'axis', { run: () => startAxis2p() });
+cmd('axisedge', 'Axis Through Edge', 'axis', { run: () => startAxisEdge() }); cmd('axis2planes', 'Axis Through Two Planes', 'axis', { run: () => startAxis2planes() });
+cmd('pointv', 'Point at Vertex', 'point', { run: () => startPointVertex() }); cmd('pointc', 'Point at Center of Circle', 'point', { run: () => startPointCenter() }); cmd('pointxyz', 'Point by Coordinates', 'point', { run: () => startPointXYZ() });
 // inspect
 cmd('measure', 'Measure', 'measure', { key: 'I', run: () => startMeasure() });
 planned('interference', 'Interference', 'interference', P2); planned('curvature', 'Curvature Comb Analysis', 'curvature'); planned('zebra', 'Zebra Analysis', 'zebra');
@@ -124,7 +127,7 @@ const TABS = {
     { name: 'CREATE', bar: ['sketch', 'extrude', 'revolve', 'sweep', 'loft', 'hole', 'box', 'patrect', 'mirror'], menu: ['sketch', 'form', 'derive', '-', 'extrude', 'revolve', 'sweep', 'loft', 'rib', 'web', 'emboss', '-', 'hole', 'thread', '-', 'box', 'cylinder', 'sphere', 'torus', 'coil', 'pipe', '-', { sub: 'Pattern', icon: 'patrect', items: ['patrect', 'patcirc', 'patpath'] }, 'mirror', '-', 'thicken', 'boundary'] },
     { name: 'MODIFY', bar: ['presspull', 'fillet', 'chamfer', 'shell', 'draft', 'combine', 'move', 'params'], menu: ['presspull', 'fillet', 'chamfer', 'shell', 'draft', 'scale', 'combine', '-', 'replaceface', 'splitface', 'splitbody', '-', 'move', 'align', 'delete', '-', 'material', 'appearance', '-', 'params'] },
     { name: 'CONFIGURE', bar: ['cfgtable'], menu: ['cfgtable', 'cfgrules'] },
-    { name: 'CONSTRUCT', bar: ['offsetplane'], menu: ['offsetplane', 'planeangle', 'midplane', 'planetangent', '-', 'axiscyl', 'axis2p', '-', 'pointv'] },
+    { name: 'CONSTRUCT', bar: ['offsetplane', 'planeangle', 'axiscyl'], menu: ['offsetplane', 'planeangle', 'midplane', 'planetangent', 'plane3p', '-', 'axiscyl', 'axisedge', 'axis2p', 'axis2planes', '-', 'pointv', 'pointc', 'pointxyz'] },
     { name: 'INSPECT', bar: ['measure', 'section', 'com'], menu: ['measure', 'interference', '-', 'curvature', 'zebra', '-', 'section', 'com', '-', 'properties'] },
     { name: 'INSERT', bar: ['insstep', 'insmesh', 'inssvg', 'canvas'], menu: ['insstep', '-', 'insderive', 'decal', 'canvas', '-', 'insmesh', 'inssvg', 'insdxf'] },
     { name: 'ASSEMBLE', bar: ['newcomp', 'joint'], menu: ['newcomp', '-', 'joint', 'asbuilt', 'rigid', '-', 'drive', 'motionlink', 'contact'] },
@@ -133,7 +136,7 @@ const TABS = {
   SURFACE: [
     { name: 'CREATE', bar: ['sketch', 's.extrude', 's.patch', 's.offset', 's.loft'], menu: ['sketch', '-', 's.extrude', 's.patch', 's.offset', 's.loft', 's.ruled'] },
     { name: 'MODIFY', bar: ['s.trim', 's.untrim', 's.extend', 's.stitch', 's.thicken'], menu: ['s.trim', 's.untrim', 's.extend', 's.stitch', 's.unstitch', 's.thicken', 's.reverse'] },
-    { name: 'CONSTRUCT', bar: ['offsetplane'], menu: ['offsetplane', 'planeangle', 'midplane'] },
+    { name: 'CONSTRUCT', bar: ['offsetplane'], menu: ['offsetplane', 'planeangle', 'midplane', 'planetangent', 'plane3p', '-', 'axiscyl', 'axisedge', 'axis2p', '-', 'pointv', 'pointc'] },
     { name: 'INSPECT', bar: ['measure', 'section'], menu: ['measure', 'section', 'curvature', 'zebra'] },
     { name: 'SELECT', bar: ['select'], menu: ['select', 'window'] },
   ],

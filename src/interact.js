@@ -1,5 +1,5 @@
 // ===== Commands, picking, sketching, measuring, view cube, navigation, boot =====
-const NAMES = { sketch: 'Sketch', plane: 'Plane', extrude: 'Extrude', revolve: 'Revolve', box: 'Box', cylinder: 'Cylinder', sphere: 'Sphere', torus: 'Torus', hole: 'Hole', pattern: 'Pattern', mirror: 'Mirror', move: 'Move', combine: 'Combine', remove: 'Remove', fillet: 'Fillet', chamfer: 'Chamfer', shell: 'Shell', draft: 'Draft', loft: 'Loft', import: 'Import', sweep: 'Sweep' };
+const NAMES = { sketch: 'Sketch', plane: 'Plane', axis: 'Axis', point: 'Point', extrude: 'Extrude', revolve: 'Revolve', box: 'Box', cylinder: 'Cylinder', sphere: 'Sphere', torus: 'Torus', hole: 'Hole', pattern: 'Pattern', mirror: 'Mirror', move: 'Move', combine: 'Combine', remove: 'Remove', fillet: 'Fillet', chamfer: 'Chamfer', shell: 'Shell', draft: 'Draft', loft: 'Loft', import: 'Import', sweep: 'Sweep' };
 function nextName(type) {
   let n = doc.features.filter(f => f.type === type).length + 1;
   while (doc.features.some(f => f.name === NAMES[type] + ' ' + n)) n++;
@@ -32,6 +32,7 @@ function defaultHint() {
   if (workspace === 'drawing') return setHint(drawingHint());
   if (pick) return setHint(pick.prompt + ' · Esc cancels');
   if (jointHint()) return setHint(jointHint());
+  if (constructHint()) return setHint(constructHint());
   if (measure) return setHint('Click points on the model to measure between them · Esc closes');
   if (mode === 'sketch') {
     const t = { select: geoSel.size ? geoSel.size + ' selected · apply a constraint, press D to dimension, Delete to remove' : 'Click geometry to select it (Shift adds). Drag points and lines to reshape.',
@@ -584,6 +585,7 @@ viewport.addEventListener('pointerup', e => {
     completePick(c); return;
   }
   if (jointEdit?.stage && jointPickAt(e)) return;
+  if (cpick && constructPickAt(e)) return;
   const rf = regionDialogFeature();
   if (rf && toggleRegion(rf, regionAt(e, rf))) return;
   const ef = edgeDialogFeature();
@@ -742,6 +744,7 @@ window.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     if ($('#menus').children.length) return closeMenus();
     if (!$('#modalBack').hidden) return closeModal();
+    if (cancelConstructPick()) return;
     if (pick) return cancelPick();
     document.querySelectorAll('.dimedit').forEach(x => x.remove());
     if (lineDraft) { lineDraft = null; refreshOverlays(); defaultHint(); return; }

@@ -280,6 +280,7 @@ export function revolveTool(sk, f, M) {
   if (!(ang > 0)) throw new Error('Angle must be greater than 0°');
   let tool = null;
   for (const r of regions) {
+    if (f.axis && f.axis !== 'u' && f.axis !== 'v') throw new Error('Revolving around a construction axis needs the exact engine');
     let g = revolveContour(r.outer, f.axis, ang);
     for (const h of r.holes) g = csg(g, revolveContour(h, f.axis, ang), 'cut');
     tool = tool ? csg(tool, g, 'join') : g;
@@ -342,17 +343,18 @@ export function primitiveTool(f, M, extend) {
 }
 
 const AXES = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] };
-function patternMatrices(f) {
+function patternMatrices(f, res) {
   const count = Math.max(2, Math.min(50, Math.round(+f.count || 2)));
-  const axis = new THREE.Vector3(...(AXES[f.axis] || AXES.Z));
+  const axisAt = (k, dflt) => AXES[k] ? { o: [0, 0, 0], d: AXES[k] } : k ? axisOf(k, res) : { o: [0, 0, 0], d: AXES[dflt] };
+  const A1 = axisAt(f.axis, f.kind === 'circular' ? 'Z' : 'X'), axis = new THREE.Vector3(...A1.d), at = new THREE.Vector3(...A1.o);
   const ms = [];
   if (f.kind === 'circular') {
     const total = Math.min(360, Math.abs(+f.angle || 360));
     const step = total >= 359.999 ? (2 * Math.PI) / count : (total * Math.PI / 180) / (count - 1);
-    for (let i = 1; i < count; i++) ms.push(new THREE.Matrix4().makeRotationAxis(axis, step * i));
+    for (let i = 1; i < count; i++) ms.push(new THREE.Matrix4().makeTranslation(at.x, at.y, at.z).multiply(new THREE.Matrix4().makeRotationAxis(axis, step * i)).multiply(new THREE.Matrix4().makeTranslation(-at.x, -at.y, -at.z)));
   } else {
     const count2 = Math.max(1, Math.min(50, Math.round(+f.count2 || 1)));
-    const axis2 = new THREE.Vector3(...(AXES[f.axis2] || AXES.Y));
+    const axis2 = new THREE.Vector3(...axisAt(f.axis2, 'Y').d);
     for (let j = 0; j < count2; j++) for (let i = 0; i < count; i++) {
       if (!i && !j) continue;
       ms.push(new THREE.Matrix4().makeTranslation(axis.clone().multiplyScalar((+f.spacing || 0) * i).add(axis2.clone().multiplyScalar((+f.spacing2 || 0) * j))));
@@ -360,10 +362,14 @@ function patternMatrices(f) {
   }
   return ms;
 }
-function mirrorGeom(g, plane) {
-  const s = plane === 'XY' ? [1, 1, -1] : plane === 'XZ' ? [1, -1, 1] : [-1, 1, 1];
+function mirrorGeom(g, plane, res) {
   const m = g.clone();
-  m.applyMatrix4(new THREE.Matrix4().makeScale(...s));
+  if (['XY', 'XZ', 'YZ', undefined, null, ''].includes(plane)) { const s = plane === 'XY' ? [1, 1, -1] : plane === 'XZ' ? [1, -1, 1] : [-1, 1, 1]; m.applyMatrix4(new THREE.Matrix4().makeScale(...s)); }
+  else {   // reflect through a construction plane: I - 2 n nᵀ about its origin
+    const p = resolvePlane(plane, res), M = planeMatrix(p.base, p.offset, p.flip), e = M.elements, n = new THREE.Vector3(e[8], e[9], e[10]).normalize(), o = new THREE.Vector3(e[12], e[13], e[14]);
+    const R = new THREE.Matrix4().set(1 - 2 * n.x * n.x, -2 * n.x * n.y, -2 * n.x * n.z, 0, -2 * n.y * n.x, 1 - 2 * n.y * n.y, -2 * n.y * n.z, 0, -2 * n.z * n.x, -2 * n.z * n.y, 1 - 2 * n.z * n.z, 0, 0, 0, 0, 1);
+    m.applyMatrix4(new THREE.Matrix4().makeTranslation(o.x, o.y, o.z).multiply(R).multiply(new THREE.Matrix4().makeTranslation(-o.x, -o.y, -o.z)));
+  }
   flip(m); m.computeVertexNormals();
   return m;
 }
@@ -386,6 +392,75 @@ export function resolvePlane(ref, out) {
   const p = out.planes.get(ref);
   if (!p) throw new Error('Its plane is missing. Choose another plane.');
   return p;
+}
+// ---- construction geometry: planes (offset, at angle, midplane, tangent, three points), axes, points ----
+const ORIGIN_AXES = { X: { o: [0, 0, 0], d: [1, 0, 0] }, Y: { o: [0, 0, 0], d: [0, 1, 0] }, Z: { o: [0, 0, 0], d: [0, 0, 1] } };
+export function axisOf(ref, out) {
+  if (ORIGIN_AXES[ref]) return ORIGIN_AXES[ref];
+  const a = out.axes?.get(ref); if (!a) throw new Error('Its axis is missing. Choose another axis.');
+  return a;
+}
+function frameOfMatrix(M) {
+  const e = M.elements, r = v => Math.round(v * 1e9) / 1e9;
+  return { o: [r(e[12]), r(e[13]), r(e[14])], x: [r(e[0]), r(e[1]), r(e[2])], n: [r(e[8]), r(e[9]), r(e[10])] };
+}
+const V3 = a => new THREE.Vector3(...a);
+function planeOfRef(ref, out) { const p = resolvePlane(ref, out); return planeMatrix(p.base, p.offset, p.flip); }
+function constructStep(f, out) {
+  if (f.type === 'axis') {
+    let o, d;
+    if (f.mode === 'edge' || f.mode === 'cyl') { if (!f.o || !f.d) throw new Error(f.mode === 'cyl' ? 'Click a cylindrical face' : 'Click a straight edge'); o = f.o; d = f.d; }
+    else if (f.mode === 'planes') {
+      const A = planeOfRef(f.base || 'XY', out), B = planeOfRef(f.base2 || 'XZ', out), fa = frameOfMatrix(A), fb = frameOfMatrix(B);
+      const n1 = V3(fa.n), n2 = V3(fb.n), dir = n1.clone().cross(n2); if (dir.lengthSq() < 1e-12) throw new Error('The two planes are parallel, so they do not meet in a line');
+      const d1 = n1.dot(V3(fa.o)), d2 = n2.dot(V3(fb.o)), pt = n2.clone().cross(dir).multiplyScalar(d1).add(dir.clone().cross(n1).multiplyScalar(d2)).divideScalar(dir.lengthSq());
+      o = pt.toArray(); d = dir.normalize().toArray();
+    } else {
+      const p1 = f.p1 || [0, 0, 0], p2 = f.p2 || [0, 0, 10], dv = V3(p2).sub(V3(p1));
+      if (dv.lengthSq() < 1e-12) throw new Error('The two points are the same');
+      o = p1; d = dv.normalize().toArray();
+    }
+    const l = Math.hypot(...d); out.axes.set(f.id, { o, d: d.map(v => v / l) }); return true;
+  }
+  if (f.type === 'point') {
+    let p;
+    if (f.mode === 'vertex') { if (!f.p) throw new Error('Click a corner on the model'); p = f.p; }
+    else if (f.mode === 'center') { if (!f.p) throw new Error('Click a round edge on the model'); p = f.p; }
+    else p = [+f.x || 0, +f.y || 0, +f.z || 0];
+    out.points.set(f.id, { p }); return true;
+  }
+  if (f.type !== 'plane') return false;
+  const mode = f.mode || 'offset';
+  if (mode === 'offset') {
+    const p = resolvePlane(f.base || 'XY', out);
+    out.planes.set(f.id, { base: p.base, offset: p.offset + (+f.offset || 0), flip: !!p.flip !== !!f.flip });
+    return true;
+  }
+  let frame;
+  if (mode === 'angle') {
+    const M = planeOfRef(f.base || 'XY', out), fr = frameOfMatrix(M);
+    let ax;
+    if (f.axis === 'u' || f.axis === 'v' || !f.axis) { const e = M.elements, dir = f.axis === 'v' ? [e[4], e[5], e[6]] : [e[0], e[1], e[2]]; ax = { o: fr.o, d: dir }; }
+    else ax = axisOf(f.axis, out);
+    const R = new THREE.Matrix4().makeTranslation(...ax.o).multiply(new THREE.Matrix4().makeRotationAxis(V3(ax.d).normalize(), THREE.MathUtils.degToRad(+f.angle || 0))).multiply(new THREE.Matrix4().makeTranslation(...ax.o.map(v => -v)));
+    frame = frameOfMatrix(M.clone().premultiply(R));
+  } else if (mode === 'mid') {
+    const A = frameOfMatrix(planeOfRef(f.base || 'XY', out)), B = frameOfMatrix(planeOfRef(f.base2 || f.base || 'XY', out));
+    const n1 = V3(A.n), n2 = V3(B.n); if (n1.dot(n2) < 0) n2.negate();
+    const d1 = n1.dot(V3(A.o)), d2 = n2.dot(V3(B.o));
+    if (n1.clone().cross(n2).lengthSq() < 1e-10) { const o = V3(A.o).add(n1.clone().multiplyScalar((d2 - d1) / 2)); frame = { o: o.toArray(), x: A.x, n: A.n }; }
+    else { const nb = n1.clone().sub(n2), db = d1 - d2, o = nb.clone().multiplyScalar(db / nb.lengthSq()); frame = frameFromPoint(o, nb.normalize()); }
+  } else if (mode === 'tangent') {
+    if (!f.frame) throw new Error('Click a curved face where the plane should touch');
+    frame = f.frame;
+  } else if (mode === '3pt') {
+    const [a, b, c] = [f.p1, f.p2, f.p3]; if (!a || !b || !c) throw new Error('Pick three points');
+    const u = V3(b).sub(V3(a)), w = V3(c).sub(V3(a)), n = u.clone().cross(w);
+    if (n.lengthSq() < 1e-12) throw new Error('The three points are in a line');
+    frame = { o: a, x: u.normalize().toArray(), n: n.normalize().toArray() };
+  } else throw new Error('Unknown plane type');
+  out.planes.set(f.id, { base: frame, offset: +f.offset || 0, flip: !!f.flip });
+  return true;
 }
 function placement(f, out) {
   const p = resolvePlane(f.plane || 'XY', out);
@@ -443,13 +518,13 @@ const SOLID_TYPES = new Set(['extrude', 'revolve', 'box', 'cylinder', 'sphere', 
 export const FEATURE_TYPES = ['sketch', 'plane', 'extrude', 'revolve', 'box', 'cylinder', 'sphere', 'torus', 'hole', 'pattern', 'mirror', 'move', 'combine', 'remove'];
 
 function cloneOut(o) {
-  return { bodies: new Map(o.bodies), bodyCount: o.bodyCount, lastBody: o.lastBody, sketches: new Map(o.sketches), planes: new Map(o.planes),
+  return { bodies: new Map(o.bodies), bodyCount: o.bodyCount, lastBody: o.lastBody, sketches: new Map(o.sketches), planes: new Map(o.planes), axes: new Map(o.axes), points: new Map(o.points),
     status: new Map(o.status), tools: new Map(o.tools), before: new Map(o.before) };
 }
 // Replays the feature history up to and including index `upto` (null = all).
 // `cache` (optional array) keeps the state after each feature so edits replay only from the changed feature on.
 export function regenerate(features, upto = null, cache = null) {
-  let out = { bodies: new Map(), bodyCount: 0, lastBody: null, sketches: new Map(), planes: new Map(), status: new Map(), tools: new Map(), before: new Map() };
+  let out = { bodies: new Map(), bodyCount: 0, lastBody: null, sketches: new Map(), planes: new Map(), axes: new Map(), points: new Map(), status: new Map(), tools: new Map(), before: new Map() };
   const end = upto == null ? features.length : Math.min(upto + 1, features.length);
   let key = '', reuse = !!cache;
   for (let i = 0; i < features.length; i++) {
@@ -469,10 +544,8 @@ function step(f, out) {
   if (f.suppressed) { out.status.set(f.id, { state: 'suppressed' }); return; }
   try {
     if (f.error) throw new Error(f.error);
-    if (f.type === 'plane') {
-      const p = resolvePlane(f.base || 'XY', out);
-      out.planes.set(f.id, { base: p.base, offset: p.offset + (+f.offset || 0), flip: !!p.flip !== !!f.flip });
-    } else if (f.type === 'sketch') {
+    if (constructStep(f, out)) { /* plane, axis or point */ }
+    else if (f.type === 'sketch') {
       out.sketches.set(f.id, { matrix: placement(f, out), feature: sketchWithGeo(f) });
     } else if (SOLID_TYPES.has(f.type)) {
       const op = f.type === 'hole' ? 'cut' : (f.op || 'join');
@@ -488,7 +561,7 @@ function step(f, out) {
     } else if (f.type === 'pattern' || f.type === 'mirror') {
       const src = out.tools.get(f.source);
       if (!src) throw new Error('Choose a feature that comes before this one');
-      const copies = f.type === 'mirror' ? [mirrorGeom(src.geom, f.plane)] : patternMatrices(f).map(m => src.geom.clone().applyMatrix4(m));
+      const copies = f.type === 'mirror' ? [mirrorGeom(src.geom, f.plane, out)] : patternMatrices(f, out).map(m => src.geom.clone().applyMatrix4(m));
       if (src.op === 'new') {
         copies.forEach((g, k) => applyTool(out, f, g, 'new', null, ':' + (k + 1)));
         out.tools.set(f.id, { geom: copies.reduce((a, b) => mergeSimple(a, b)), op: 'new' });

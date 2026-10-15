@@ -22,7 +22,7 @@ const MATERIALS = {
   'ABS plastic': { density: 1.04, color: '#E7E3D8' }, 'PLA plastic': { density: 1.24, color: '#E5823B' }, 'Nylon PA12': { density: 1.01, color: '#EEEBE1' }, 'Oak wood': { density: 0.75, color: '#B88A56' },
 };
 const TYPE = {
-  sketch: { label: 'Sketch', icon: 'sketch' }, plane: { label: 'Offset Plane', icon: 'plane' }, extrude: { label: 'Extrude', icon: 'extrude' }, revolve: { label: 'Revolve', icon: 'revolve' },
+  sketch: { label: 'Sketch', icon: 'sketch' }, plane: { label: 'Construction Plane', icon: 'plane' }, axis: { label: 'Construction Axis', icon: 'axis' }, point: { label: 'Construction Point', icon: 'point' }, extrude: { label: 'Extrude', icon: 'extrude' }, revolve: { label: 'Revolve', icon: 'revolve' },
   box: { label: 'Box', icon: 'box' }, cylinder: { label: 'Cylinder', icon: 'cylinder' }, sphere: { label: 'Sphere', icon: 'sphere' }, torus: { label: 'Torus', icon: 'torus' },
   hole: { label: 'Hole', icon: 'hole' }, fillet: { label: 'Fillet', icon: 'fillet' }, presspull: { label: 'Press Pull', icon: 'presspull' }, draft: { label: 'Draft', icon: 'draft' }, loft: { label: 'Loft', icon: 'loft' }, sweep: { label: 'Sweep', icon: 'sweep' }, import: { label: 'Imported file', icon: 'insertmesh' }, chamfer: { label: 'Chamfer', icon: 'chamfer' }, shell: { label: 'Shell', icon: 'shell' }, pattern: { label: 'Pattern', icon: 'patrect' }, mirror: { label: 'Mirror', icon: 'mirror' }, move: { label: 'Move/Copy', icon: 'move' },
   combine: { label: 'Combine', icon: 'combine' }, remove: { label: 'Remove', icon: 'delete' },
@@ -360,6 +360,7 @@ function drawPlanes() {
     const M = planeMatrix(p.base, p.offset, p.flip);
     planesGroup.add(planeQuad(M, size * 0.75, colors['ico-c'], selFeature === id || dlg?.fid === id ? 0.28 : 0.13, { plane: id, pickable: true }, f.name));
   }
+  drawConstructGeometry(planesGroup, size);
 }
 function drawOrigin() {
   clearGroup(originGroup);

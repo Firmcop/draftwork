@@ -74,7 +74,7 @@ function engineHost(RCmod) {
       status: [...res.status], before: [...res.before],
       beforeBodies: [...res.beforeBodies].map(([fid, m]) => [fid, [...m].map(([id, b]) => [id, pr(b)])]),
       tools: [...res.tools].map(([fid, t]) => [fid, { ...t, shape: tok(t.shape) }]),
-      planes: [...res.planes],
+      planes: [...res.planes], axes: [...res.axes], points: [...res.points],
       sketches: [...res.sketches].map(([id, s]) => [id, { matrix: Array.from(s.matrix.elements), feature: s.feature }]),
       freed,
     };

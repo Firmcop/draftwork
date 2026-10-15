@@ -13,7 +13,7 @@ const pkg = name => JSON.parse(fs.readFileSync(path.join(root, 'node_modules', n
 
 const strip = s => s.split('\n').filter(l => !/^import /.test(l)).map(l => l.replace(/^export /, '')).join('\n');
 // Concatenation order matters: later modules use functions from earlier ones.
-const MODULES = ['solver', 'kernel', 'engineclient', 'icons', 'assembly', 'drawing', 'core', 'ribbon', 'panels', 'interact', 'sketchui'];
+const MODULES = ['solver', 'kernel', 'engineclient', 'icons', 'assembly', 'drawing', 'construct', 'core', 'ribbon', 'panels', 'interact', 'sketchui'];
 // The exact kernel runs in a Web Worker: solver + kernel + brep + host wrapped in one self-contained async function.
 // The page sends engineFactory.toString() to the worker, or calls it directly when workers are blocked.
 const ENGINE = ['solver', 'kernel', 'brep', 'enginehost'];

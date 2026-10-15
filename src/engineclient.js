@@ -79,7 +79,7 @@ async function engineRegen(features, rollback) {
     bodyCount: r.bodyCount, lastBody: r.lastBody,
     status: new Map(r.status), before: new Map(r.before),
     beforeBodies: new Map(r.beforeBodies.map(([fid, list]) => [fid, new Map(list.map(([id, b]) => [id, keep(b)]))])),
-    tools: new Map(r.tools), planes: new Map(r.planes),
+    tools: new Map(r.tools), planes: new Map(r.planes), axes: new Map(r.axes || []), points: new Map(r.points || []),
     sketches: new Map(r.sketches.map(([id, s]) => [id, { matrix: new THREE.Matrix4().fromArray(s.matrix), feature: s.feature }])),
   };
   proxyPool = pool;

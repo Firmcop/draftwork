@@ -87,9 +87,9 @@ function renderBrowser() {
       vis: !!doc.sketchShown[s.id], onVis: () => { doc.sketchShown[s.id] = !doc.sketchShown[s.id]; persist(); refreshOverlays(); renderBrowser(); },
       onClick: () => selectFeature(s.id), onDbl: () => editFeature(s.id), renameKey: 'f:' + s.id, onRename: v => { checkpoint(); s.name = v; renderTimeline(); }, menu: () => featureMenu(s.id) });
   }
-  const planes = doc.features.filter(f => f.type === 'plane');
+  const planes = doc.features.filter(f => f.type === 'plane' || f.type === 'axis' || f.type === 'point');
   if (planes.length && add(1, { key: 'construction', icon: 'folder', label: 'Construction' })) {
-    for (const p of planes) add(2, { icon: 'plane', label: p.name, sel: selFeature === p.id, err: statusOf(p.id).state === 'error', dim: statusOf(p.id).state === 'rolled',
+    for (const p of planes) add(2, { icon: p.type, label: p.name, sel: selFeature === p.id, err: statusOf(p.id).state === 'error', dim: statusOf(p.id).state === 'rolled',
       vis: !doc.planeHidden[p.id], onVis: () => { doc.planeHidden[p.id] = !doc.planeHidden[p.id]; persist(); updateScene(); renderBrowser(); },
       onClick: () => { if (pick?.planes && result.planes.has(p.id)) completePick({ plane: p.id, offset: 0, flip: false, local: null }); else selectFeature(p.id); },
       onDbl: () => editFeature(p.id), renameKey: 'f:' + p.id, onRename: v => { checkpoint(); p.name = v; renderTimeline(); updateScene(); }, menu: () => featureMenu(p.id) });
@@ -321,7 +321,7 @@ function featureFields(f, idx) {
     case 'revolve': {
       const sks = doc.features.slice(0, idx).filter(g => g.type === 'sketch');
       out.push(section_('Input', selField('Profile', f, 'sketch', sks.length ? sks.map(s => [s.id, s.name]) : [['', 'No sketch before this step']]),
-        profileRow(), segField('Axis', f, 'axis', [['v', 'Sketch Y axis'], ['u', 'Sketch X axis']]), exField('Angle', f, 'angle', '°', { min: 0.01, max: 360 })));
+        profileRow(), selField('Axis', f, 'axis', [['v', 'Sketch Y axis'], ['u', 'Sketch X axis'], ...axisOptions(idx)]), exField('Angle', f, 'angle', '°', { min: 0.01, max: 360 })));
       out.push(section_('Result', ...opsSection()));
       break;
     }
@@ -341,24 +341,24 @@ function featureFields(f, idx) {
       out.push(section_('Result', ...opsSection()));
       break;
     }
-    case 'plane':
-      out.push(section_('Reference', selField('Plane', f, 'base', planeOptions(idx)), exField('Distance', f, 'offset'), chkField('Flip normal', f, 'flip')));
+    case 'plane': case 'axis': case 'point':
+      constructDialog(f, idx, out);
       break;
     case 'pattern': {
       const srcs = doc.features.slice(0, idx).filter(g => SOLIDS.has(g.type));
       out.push(section_('Input', segField('Type', f, 'kind', [['linear', 'Rectangular'], ['circular', 'Circular']], { rerender: true }),
         selField('Feature', f, 'source', srcs.length ? srcs.map(s => [s.id, s.name]) : [['', 'No solid feature before this step']])));
-      if (f.kind === 'circular') out.push(section_('Axis', segField('Axis', f, 'axis', [['X', 'X'], ['Y', 'Y'], ['Z', 'Z']]), exField('Quantity', f, 'count', '', { min: 2, max: 50 }), exField('Total angle', f, 'angle', '°', { min: 1, max: 360 })));
+      if (f.kind === 'circular') out.push(section_('Axis', selField('Axis', f, 'axis', axisOptions(idx)), exField('Quantity', f, 'count', '', { min: 2, max: 50 }), exField('Total angle', f, 'angle', '°', { min: 1, max: 360 })));
       else {
-        out.push(section_('Direction 1', segField('Axis', f, 'axis', [['X', 'X'], ['Y', 'Y'], ['Z', 'Z']]), exField('Quantity', f, 'count', '', { min: 2, max: 50, id: 'dx-count' }), exField('Distance', f, 'spacing', 'mm', { id: 'dx-spacing' })));
-        out.push(section_('Direction 2', segField('Axis', f, 'axis2', [['X', 'X'], ['Y', 'Y'], ['Z', 'Z']]), exField('Quantity', f, 'count2', '', { min: 1, max: 50, id: 'dx-count2' }), exField('Distance', f, 'spacing2', 'mm', { id: 'dx-spacing2' })));
+        out.push(section_('Direction 1', selField('Axis', f, 'axis', axisOptions(idx)), exField('Quantity', f, 'count', '', { min: 2, max: 50, id: 'dx-count' }), exField('Distance', f, 'spacing', 'mm', { id: 'dx-spacing' })));
+        out.push(section_('Direction 2', selField('Axis', f, 'axis2', axisOptions(idx)), exField('Quantity', f, 'count2', '', { min: 1, max: 50, id: 'dx-count2' }), exField('Distance', f, 'spacing2', 'mm', { id: 'dx-spacing2' })));
       }
       break;
     }
     case 'mirror': {
       const srcs = doc.features.slice(0, idx).filter(g => SOLIDS.has(g.type));
       out.push(section_('Input', selField('Feature', f, 'source', srcs.length ? srcs.map(s => [s.id, s.name]) : [['', 'No solid feature before this step']]),
-        segField('Mirror plane', f, 'plane', [['YZ', 'YZ'], ['XZ', 'XZ'], ['XY', 'XY']])));
+        selField('Mirror plane', f, 'plane', [['YZ', 'YZ plane'], ['XZ', 'XZ plane'], ['XY', 'XY plane'], ...doc.features.slice(0, idx).filter(g => g.type === 'plane').map(g => [g.id, g.name])])));
       break;
     }
     case 'move': {
