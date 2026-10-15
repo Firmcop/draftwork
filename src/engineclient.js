@@ -1,7 +1,7 @@
 // Page side of the exact engine. The kernel runs in a Web Worker (engineFactory, see enginehost.js) so long
 // rebuilds don't freeze the interface; when the page may not start workers it runs the same code here.
 // Bodies arrive as records whose `shape` is a token; their meshes, signatures and properties come with them.
-const FACE_PICK = new Set(['shell', 'draft', 'presspull', 'thicken', 'replaceface', 'thread', 'emboss', 'splitface']);
+const FACE_PICK = new Set(['shell', 'draft', 'presspull', 'thicken', 'replaceface', 'thread', 'emboss', 'splitface', 'soffset', 'untrim', 'deleteface']);
 let engineMode = null;                 // 'worker' | 'inline'
 let engineWorker = null, engineInline = null;
 const engineCalls = new Map(); let engineCallId = 0;
@@ -118,7 +118,7 @@ function brepSigMap(rec, kind) {
 function brepProps(rec) {
   const d = shapeData.get(rec.shape), pr = d?.p.props;
   if (!pr) return { volume: 0, area: 0, com: new THREE.Vector3() };
-  return d.props || (d.props = { volume: pr.volume, area: pr.area, com: new THREE.Vector3(...pr.com) });
+  return d.props || (d.props = { volume: pr.volume, area: pr.area, com: new THREE.Vector3(...pr.com), surface: !!pr.surface });
 }
 // same matching rule as the kernel (brep.js matchRefs), on the signatures shipped with the body
 function brepRefHashes(rec, refs, kind) {

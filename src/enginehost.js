@@ -48,7 +48,7 @@ function engineHost(RCmod) {
       p.fsig = [...brepSigMap(rec, 'face')];
       p.esig = [...brepSigMap(rec, 'edge')];
       const pr = brepProps(rec);
-      p.props = { volume: pr.volume, area: pr.area, com: [pr.com.x, pr.com.y, pr.com.z] };
+      p.props = { volume: pr.volume, area: pr.area, com: [pr.com.x, pr.com.y, pr.com.z], surface: pr.surface };
     }
     m.display.dispose?.(); m.edgeGeom.dispose?.();
     return p;
@@ -67,7 +67,7 @@ function engineHost(RCmod) {
     brepCollect(cacheArr, res);
     const alive = aliveShapes(res), freed = [];
     for (const [t, s] of shapeOf) if (!alive.has(s)) { shapeOf.delete(t); tokOf.delete(s); shipped.delete(t); freed.push(t); }
-    const pr = b => ({ id: b.id, name: b.name, feature: b.feature, shape: tok(b.shape) });
+    const pr = b => ({ id: b.id, name: b.name, feature: b.feature, shape: tok(b.shape), surface: !!b.surface });
     const out = {
       bodies: [...res.bodies].map(([id, b]) => [id, pr(b)]),
       bodyCount: res.bodyCount, lastBody: res.lastBody,

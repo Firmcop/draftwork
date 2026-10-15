@@ -48,7 +48,7 @@ function renderBrowser() {
     add(2, { icon: 'section', label: 'Section ' + section.axis, vis: !section.hidden, onVis: () => { section.hidden = !section.hidden; applySectionVisibility(); }, onDbl: () => openSectionDialog(),
       menu: () => [{ label: 'Edit Section', icon: 'section', action: () => openSectionDialog() }, { label: 'Delete', icon: 'delete', action: () => { section = null; updateScene(); renderBrowser(); renderRibbon(); } }] });
   }
-  const bodyNode = (lvl, b) => add(lvl, { icon: 'bodyi', label: bodyName(b.id), swatch: bodyColor(b.id), sel: selBody === b.id, vis: !doc.bodyMeta[b.id]?.hidden, title: bodyName(b.id) + ' · ' + bodyMaterial(b.id),
+  const bodyNode = (lvl, b) => add(lvl, { icon: isSurfBody(b.id) ? 'patch' : 'bodyi', label: bodyName(b.id), swatch: bodyColor(b.id), sel: selBody === b.id, vis: !doc.bodyMeta[b.id]?.hidden, title: bodyName(b.id) + ' · ' + bodyMaterial(b.id),
     onVis: () => { meta(b.id).hidden = !meta(b.id).hidden; persist(); mpCache = null; updateScene(); renderBrowser(); renderInfo(); },
     onClick: () => selectBody(b.id), onDbl: () => { renaming = 'b:' + b.id; renderBrowser(); }, renameKey: 'b:' + b.id, onRename: v => { meta(b.id).name = v; persist(); mpCache = null; renderInfo(); },
     menu: () => bodyMenu(b.id) });
@@ -384,6 +384,9 @@ function featureFields(f, idx) {
     }
     case 'splitbody': case 'scale': case 'align': case 'patpath': case 'boundary':
       modifyDialog(f, idx, out);
+      break;
+    case 'sextrude': case 'srevolve': case 'patch': case 'soffset': case 'sloft': case 'ssweep': case 'ruled': case 'trim': case 'untrim': case 'sextend': case 'stitch': case 'unstitch': case 'reverse': case 'deleteface':
+      surfaceDialog(f, idx, out);
       break;
     case 'coil': case 'rib': case 'web':
       createDialog2(f, idx, out, placement);

@@ -60,9 +60,10 @@ cmd('rigid', 'Rigid Group', 'component', { run: () => newRigidGroup() }); cmd('d
 cmd('select', 'Select', 'select', { run: () => cancelModes(true) });
 planned('window', 'Window Selection', 'window'); planned('filters', 'Selection Filters', 'filter');
 // surface
-planned('s.extrude', 'Extrude Surface', 'patch'); planned('s.patch', 'Patch', 'patch'); planned('s.offset', 'Offset Surface', 'offsetsurf'); planned('s.loft', 'Loft Surface', 'loft');
-planned('s.ruled', 'Ruled Surface', 'offsetsurf'); planned('s.trim', 'Trim', 'trim'); planned('s.untrim', 'Untrim', 'trim'); planned('s.extend', 'Extend', 'extend');
-planned('s.stitch', 'Stitch', 'stitch'); planned('s.unstitch', 'Unstitch', 'stitch'); planned('s.thicken', 'Thicken', 'thicken'); planned('s.reverse', 'Reverse Normal', 'patch');
+for (const [k, t, l, ic] of [['s.extrude', 'sextrude', 'Extrude Surface', 'patch'], ['s.revolve', 'srevolve', 'Revolve Surface', 'revolve'], ['s.sweep', 'ssweep', 'Sweep Surface', 'sweep'], ['s.loft', 'sloft', 'Loft Surface', 'loft'], ['s.patch', 'patch', 'Patch', 'patch'], ['s.offset', 'soffset', 'Offset Surface', 'offsetsurf'], ['s.ruled', 'ruled', 'Ruled Surface', 'offsetsurf'],
+  ['s.trim', 'trim', 'Trim', 'trim'], ['s.untrim', 'untrim', 'Untrim', 'trim'], ['s.extend', 'sextend', 'Extend', 'extend'], ['s.stitch', 'stitch', 'Stitch', 'stitch'], ['s.unstitch', 'unstitch', 'Unstitch', 'stitch'], ['s.reverse', 'reverse', 'Reverse Normal', 'patch'], ['s.delete', 'deleteface', 'Delete Face', 'delete']])
+  cmd(k, l, ic, { run: () => newSurface(t) });
+cmd('s.thicken', 'Thicken', 'thicken', { run: () => newEdgeFeature('thicken') });
 // mesh
 planned('m.insert', 'Insert Mesh', 'insertmesh', P1); planned('m.tessellate', 'Tessellate', 'remesh', P1); planned('m.facegroups', 'Generate Face Groups', 'remesh', P1);
 planned('m.repair', 'Repair', 'remesh', P1); planned('m.remesh', 'Remesh', 'remesh', P1); planned('m.reduce', 'Reduce', 'reduce', P1); planned('m.smooth', 'Smooth', 'smooth', P1);
@@ -134,8 +135,8 @@ const TABS = {
     { name: 'SELECT', bar: ['select'], menu: ['select', 'window', 'filters'] },
   ],
   SURFACE: [
-    { name: 'CREATE', bar: ['sketch', 's.extrude', 's.patch', 's.offset', 's.loft'], menu: ['sketch', '-', 's.extrude', 's.patch', 's.offset', 's.loft', 's.ruled'] },
-    { name: 'MODIFY', bar: ['s.trim', 's.untrim', 's.extend', 's.stitch', 's.thicken'], menu: ['s.trim', 's.untrim', 's.extend', 's.stitch', 's.unstitch', 's.thicken', 's.reverse'] },
+    { name: 'CREATE', bar: ['sketch', 's.extrude', 's.patch', 's.offset', 's.loft'], menu: ['sketch', '-', 's.extrude', 's.revolve', 's.sweep', 's.loft', 's.patch', 's.offset', 's.ruled', '-', 's.thicken'] },
+    { name: 'MODIFY', bar: ['s.trim', 's.untrim', 's.extend', 's.stitch', 's.thicken'], menu: ['s.trim', 's.untrim', 's.extend', '-', 's.stitch', 's.unstitch', 's.reverse', 's.delete', '-', 'presspull', 'fillet', 'chamfer', 'splitface', 'splitbody', 'move', 'scale'] },
     { name: 'CONSTRUCT', bar: ['offsetplane'], menu: ['offsetplane', 'planeangle', 'midplane', 'planetangent', 'plane3p', '-', 'axiscyl', 'axisedge', 'axis2p', '-', 'pointv', 'pointc'] },
     { name: 'INSPECT', bar: ['measure', 'section'], menu: ['measure', 'section', 'curvature', 'zebra'] },
     { name: 'SELECT', bar: ['select'], menu: ['select', 'window'] },

@@ -29,6 +29,7 @@ Done
 - [x] Modify: split body, split face, scale, align, replace face, thicken, boundary fill, pattern on path
 - [x] Create: coil, thread (cosmetic/modeled), rib, web, emboss/deboss
 - [x] Sketch point, text (embedded outline font), mirror, circular pattern, project model edges
+- [x] Surface bodies and tools: extrude/revolve/sweep/loft surface, patch, offset, ruled, trim, untrim, extend, delete face, stitch to solid, unstitch, reverse normal, thicken
 
 Next
 - [ ] Spline handles (tangent direction and weight); extend for splines

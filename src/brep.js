@@ -168,17 +168,19 @@ function brepTool(f, out) {
 }
 
 // ---- bodies ----
-function bNew(out, id, shape, fid) { out.bodyCount++; out.bodies.set(id, { id, name: 'Body ' + out.bodyCount, shape, feature: fid }); out.lastBody = id; }
+function bNew(out, id, shape, fid) { out.bodyCount++; out.bodies.set(id, { id, name: 'Body ' + out.bodyCount, shape, feature: fid, surface: isSurfaceShape(shape) }); out.lastBody = id; }
 function bReplace(out, id, shape) {
   const b = out.bodies.get(id);
-  let empty = false; try { empty = !shape || RC.measureVolume(shape) < 1e-9; } catch (e) { empty = false; }
+  const surface = !!shape && isSurfaceShape(shape);
+  let empty = false; try { empty = !shape || (surface ? RC.measureArea(shape) < 1e-9 : RC.measureVolume(shape) < 1e-9); } catch (e) { empty = false; }
   if (empty) { out.bodies.delete(id); if (out.lastBody === id) out.lastBody = [...out.bodies.keys()].pop() || null; return; }
-  out.bodies.set(id, { id, name: b.name, shape, feature: b.feature });
+  out.bodies.set(id, { id, name: b.name, shape, feature: b.feature, surface });
 }
 function bTarget(out, target) {
   if (target && out.bodies.has(target)) return target;
-  if (out.lastBody && out.bodies.has(out.lastBody)) return out.lastBody;
-  return [...out.bodies.keys()].pop() || null;
+  if (out.lastBody && out.bodies.has(out.lastBody) && !out.bodies.get(out.lastBody).surface) return out.lastBody;
+  const solids = [...out.bodies.values()].filter(b => !b.surface);
+  return (solids.length ? solids.pop().id : [...out.bodies.keys()].pop()) || null;
 }
 function bboxOverlap(a, b) {
   try { const A = a.boundingBox, B = b.boundingBox; const [a0, a1] = A.bounds, [b0, b1] = B.bounds; return a0[0] <= b1[0] && a1[0] >= b0[0] && a0[1] <= b1[1] && a1[1] >= b0[1] && a0[2] <= b1[2] && a1[2] >= b0[2]; }
@@ -725,7 +727,7 @@ const FACE_PICK = new Set(['shell', 'draft', 'presspull', 'thicken', 'replacefac
 const importShapes = new Map();
 function brepStep(f, out) {
   out.before.set(f.id, [...out.bodies.keys()]);
-  if (EDGE_TYPES.has(f.type) || FACE_PICK.has(f.type)) out.beforeBodies.set(f.id, new Map(out.bodies));
+  if (EDGE_TYPES.has(f.type) || FACE_PICK.has(f.type) || SURF_FACE_PICK.has(f.type) || SURF_EDGE_PICK.has(f.type) || f.type === 'patch') out.beforeBodies.set(f.id, new Map(out.bodies));
   if (f.suppressed) { out.status.set(f.id, { state: 'suppressed' }); return; }
   try {
     if (f.error) throw new Error(f.error);
@@ -799,6 +801,8 @@ function brepStep(f, out) {
       modifyStep(f, out);
     } else if (CREATE2_TYPES.has(f.type)) {
       createStep2(f, out);
+    } else if (SURF_TYPES.has(f.type)) {
+      surfaceStep(f, out);
     }
     out.status.set(f.id, { state: 'ok' });
   } catch (e) {
@@ -848,7 +852,9 @@ function brepProps(rec) {
   let volume = 0, area = 0, com = new THREE.Vector3();
   try { const vp = RC.measureShapeVolumeProperties(rec.shape); volume = vp.volume; const c = vp.centerOfMass; com.set(c[0], c[1], c[2]); vp.delete?.(); } catch (e) { }
   try { area = RC.measureArea(rec.shape); } catch (e) { }
-  return (rec._props = { volume: Math.abs(volume), area, com });
+  let surface = false; try { surface = isSurfaceShape(rec.shape); } catch (e) { }
+  if (surface) { volume = 0; try { const sp = RC.measureShapeSurfaceProperties(rec.shape); const c = sp.centerOfMass; com.set(c[0], c[1], c[2]); sp.delete?.(); } catch (e) { } }
+  return (rec._props = { volume: Math.abs(volume), area, com, surface });
 }
 // Look up an edge or face of a body by the hash used in its mesh groups and return its signature.
 function brepEdgeRef(rec, hash) { const es = rec.shape.edges; const e = es.find(x => x.hashCode === hash); const s = e ? edgeSig(e) : null; es.forEach(x => x.delete?.()); return s; }
