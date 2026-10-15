@@ -55,12 +55,37 @@ d = await info();
 check(d.dims.includes('d:8') && d.texts.includes('Ø8'), 'diameter dimension reads Ø8 ' + JSON.stringify(d.dims));
 await page.keyboard.press('Escape'); await W(200);
 
+// radius of the hole, angle between two edges of the front view, centre marks
+await page.click('.rbtn[aria-label^="Radius Dimension"]'); await W(200);
+await click(await at('top', 15, 4)); await click(await at('top', 5, 14));
+await page.keyboard.press('Escape'); await W(150);
+await page.click('.rbtn[aria-label^="Angle Dimension"]'); await W(200);
+await click(await at('front', -10, 0)); await click(await at('front', 30, -5)); await click(await at('front', 22, -3));
+await page.keyboard.press('Escape'); await W(150);
+d = await info();
+check(d.dims.includes('r:4') && d.texts.includes('R4'), 'radius dimension reads R4 ' + JSON.stringify(d.dims));
+check(d.dims.includes('ang:90') && d.texts.includes('90°'), 'angle dimension reads 90° ' + JSON.stringify(d.dims));
+check(d.centerMarks >= 1, 'the hole gets a centre mark in the top view (' + d.centerMarks + ')');
+// section A-A through the hole, taken from the top view, placed in empty space
+await page.click('.rbtn[aria-label^="Section View"]'); await W(200);
+await click(await at('top', -22, 0)); await click(await at('top', 10, 0));
+await click(await page.evaluate(() => window.__dw.sheetPt(150, 230))); await W(3000);
+d = await info();
+const sec = d.views.find(v => v.startsWith('section:'));
+check(sec && /\/cut2$/.test(sec) && d.hatches === 2 && d.texts.includes('SECTION A-A'), 'section A-A shows two hatched cut faces either side of the hole (' + sec + ', hatches ' + d.hatches + ')');
+check(d.texts.filter(t => t === 'A').length === 2, 'the cutting line carries the letter A at both ends');
+// parts list
+await page.click('.rbtn[aria-label^="Parts List"]'); await W(300);
+d = await info();
+check(d.texts.includes('ITEM') && d.texts.includes('QTY') && d.texts.includes('1'), 'parts list table appears above the title block');
+if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/drawing-section.png' });
+
 // the drawing follows the model: make the plate 80 long, the 60 becomes 80
 await page.evaluate(() => { const x = window.__dw.doc(); x.features[0].w = 80; window.__dw.setDoc(x); }); await W(3500);
 d = await info();
-check(d.dims.includes('h:80'), 'after the plate grows to 80 mm, the dimension follows ' + JSON.stringify(d.dims));
+check(d.dims.includes('h:80') && d.dims.includes('ang:90') && d.dims.includes('r:4'), 'after the plate grows to 80 mm, the dimensions follow ' + JSON.stringify(d.dims));
 const tidy = x => { const [W, H] = x.size, b = x.boxes; const inside = b.every(r => r[0] >= 10 && r[1] >= 10 && r[2] <= W - 10 && r[3] <= H - 10); let overlap = false; for (let i = 0; i < b.length; i++) for (let j = i + 1; j < b.length; j++) if (b[i][0] < b[j][2] && b[j][0] < b[i][2] && b[i][1] < b[j][3] && b[j][1] < b[i][3]) overlap = true; return inside && !overlap; };
-check(tidy(d), 'views re-flow to fit: inside the border and not overlapping (scale ' + d.scale + ')');
+check(tidy(d), 'views re-flow to fit around the section: inside the border, nothing overlapping (scale ' + d.scale + ')');
 if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/drawing-dims.png' });
 
 // title block

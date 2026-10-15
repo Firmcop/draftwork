@@ -45,7 +45,8 @@ Next
 - [ ] Motion links; contact sets; joint origins at arbitrary points (between two faces, on a vertex)
 - [ ] Components as separate designs (external references); assembly steps placed between features in the timeline
 - [x] 2D drawings: standard views with exact hidden lines, associative dimensions (linear, diameter), title block, PDF/SVG export
-- [ ] Drawings: section and detail views, centerlines, radius/angle dimensions, more sheets, parts lists for assemblies
+- [x] Drawings: section views with hatching, centre marks, radius and angle dimensions, parts list
+- [ ] Drawings: detail views, centerlines on side views of holes, more sheets, balloons, tolerances and notes
 - [ ] Render; add-ins
 
 ## Phase 3 — Manufacturing

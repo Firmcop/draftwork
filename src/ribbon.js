@@ -103,13 +103,19 @@ cmd('dw.hidden', 'Hidden Lines On/Off', 'eyeoff', { run: () => dwToggleHidden() 
 cmd('dw.dim', 'Dimension', 'dimension', { key: 'D', run: () => dwSetTool('dim') });
 cmd('dw.dia', 'Diameter Dimension', 'circle', { run: () => dwSetTool('dia') });
 cmd('dw.sheet', 'Sheet & Title Block', 'properties', { run: () => dwSheetDialog() });
+cmd('dw.rad', 'Radius Dimension', 'arc', { run: () => dwSetTool('rad') });
+cmd('dw.ang', 'Angle Dimension', 'planeangle', { run: () => dwSetTool('ang') });
+cmd('dw.section', 'Section View', 'section', { run: () => dwSetTool('section') });
+cmd('dw.centers', 'Center Marks On/Off', 'point', { run: () => dwToggleCenters() });
+cmd('dw.parts', 'Parts List', 'bom', { run: () => dwToggleParts() });
 cmd('dw.fit', 'Fit Sheet', 'fit', { key: 'F', run: () => { dwFit(); renderSheet(); } });
 cmd('dw.export', 'Export PDF (.zip)', 'exportstl', { run: () => exportDrawing() });
 cmd('dw.finish', 'Finish Drawing', 'finish', { run: () => exitDrawing() });
 const TABS = {
   DRAWING: [
-    { name: 'VIEWS', bar: ['dw.std', 'dw.view.front', 'dw.view.iso', 'dw.hidden'], menu: ['dw.std', '-', ...Object.keys(VIEW_KINDS).map(k => 'dw.view.' + k), '-', 'dw.hidden'] },
-    { name: 'ANNOTATE', bar: ['dw.dim', 'dw.dia'], menu: ['dw.dim', 'dw.dia'] },
+    { name: 'VIEWS', bar: ['dw.std', 'dw.view.front', 'dw.view.iso', 'dw.section'], menu: ['dw.std', '-', ...Object.keys(VIEW_KINDS).map(k => 'dw.view.' + k), 'dw.section', '-', 'dw.hidden', 'dw.centers'] },
+    { name: 'ANNOTATE', bar: ['dw.dim', 'dw.dia', 'dw.rad', 'dw.ang'], menu: ['dw.dim', 'dw.dia', 'dw.rad', 'dw.ang', '-', 'dw.centers', 'dw.hidden'] },
+    { name: 'TABLES', bar: ['dw.parts'], menu: ['dw.parts'] },
     { name: 'SHEET', bar: ['dw.sheet', 'dw.fit'], menu: ['dw.sheet', 'dw.fit'] },
     { name: 'EXPORT', bar: ['dw.export'], menu: ['dw.export'] },
     { name: 'FINISH DRAWING', finish: true, bar: ['dw.finish'], menu: [] },
@@ -197,7 +203,7 @@ function renderRibbon() {
     const bar = h('div', { class: 'rbar' });
     for (const id of g.bar) {
       const c = CMD[id];
-      const pressed = (workspace === 'drawing' && ((id === 'dw.dim' && dwTool === 'dim') || (id === 'dw.dia' && dwTool === 'dia') || (id.startsWith('dw.view.') && dwTool === 'place:' + id.slice(8)))) || (mode === 'sketch' && id === 'k.' + sketchTool) || (id === 'k.select' && sketchTool === 'select' && mode === 'sketch') || (id === 'measure' && measure) || (id === 'section' && section) || (id === 'com' && showCOM);
+      const pressed = (workspace === 'drawing' && ((id === 'dw.dim' && dwTool === 'dim') || (id === 'dw.dia' && dwTool === 'dia') || (id === 'dw.rad' && dwTool === 'rad') || (id === 'dw.ang' && dwTool === 'ang') || (id === 'dw.section' && dwTool === 'section') || (id.startsWith('dw.view.') && dwTool === 'place:' + id.slice(8)))) || (mode === 'sketch' && id === 'k.' + sketchTool) || (id === 'k.select' && sketchTool === 'select' && mode === 'sketch') || (id === 'measure' && measure) || (id === 'section' && section) || (id === 'com' && showCOM);
       if (g.finish) bar.append(h('button', { class: 'rbtn finish', title: tip(c), 'aria-label': c.label, onclick: () => runCmd(id), html: icon(c.icon) + '<span>' + c.label.toUpperCase() + '</span>' }));
       else bar.append(h('button', { class: 'rbtn' + (c.phase ? ' planned' : ''), title: tip(c), 'aria-label': tip(c), 'aria-pressed': pressed ? 'true' : null, onclick: () => runCmd(id), html: icon(c.icon) }));
     }

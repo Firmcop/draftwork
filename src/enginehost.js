@@ -1,6 +1,29 @@
 // Engine host: the exact kernel behind a message interface. The build wraps solver + kernel + brep + this file
 // in one function (engineFactory) that runs inside a Web Worker, or on the page when workers are blocked.
 // Everything that crosses the boundary is plain data: OCC shapes stay here and are named by integer tokens.
+// Outline of a planar face seen square-on in a standard view, as one SVG path (one closed loop per wire), in the
+// same page coordinates the projections use: front (X, −Z), top (X, −Y), right (Y, −Z).
+const VIEW_MAP = { front: p => [p[0], -p[2]], top: p => [p[0], -p[1]], right: p => [p[1], -p[2]], left: p => [-p[1], -p[2]], back: p => [-p[0], -p[2]], bottom: p => [p[0], p[1]] };
+function faceOutline(face, kind) {
+  const map = VIEW_MAP[kind], wires = [face.clone().outerWire(), ...face.clone().innerWires()];   // both consume the face they are called on
+  let d = '';
+  for (const w of wires) {
+    const segs = w.edges.map(e => { const n = e.geomType === 'LINE' ? 1 : 32, seg = []; for (let i = 0; i <= n; i++) { const v = e.pointAt(i / n); seg.push(map([v.x, v.y, v.z])); } return seg; });
+    // chain edges by matching end points (wires do not promise order or direction)
+    const close = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-5;
+    let pts = segs.shift() || [];
+    while (segs.length) {
+      const end = pts[pts.length - 1];
+      let k = segs.findIndex(sg => close(sg[0], end) || close(sg[sg.length - 1], end));
+      if (k < 0) { pts.reverse(); k = segs.findIndex(sg => close(sg[0], pts[pts.length - 1]) || close(sg[sg.length - 1], pts[pts.length - 1])); if (k < 0) break; }
+      let sg = segs.splice(k, 1)[0]; if (!close(sg[0], pts[pts.length - 1])) sg = sg.reverse();
+      pts.push(...sg.slice(1));
+    }
+    if (pts.length > 2) d += 'M ' + pts.map(p => p[0].toFixed(4) + ' ' + p[1].toFixed(4)).join(' L ') + ' Z ';
+  }
+  return d.trim();
+}
+const TRUE_VIEW = { front: 'front', back: 'back', top: 'bottom', bottom: 'top', right: 'left', left: 'right' };
 function engineHost(RCmod) {
   let cacheArr = [];
   const tokOf = new Map(), shapeOf = new Map(), shipped = new Set();
@@ -112,13 +135,50 @@ function engineHost(RCmod) {
         const out = {};
         try {
           for (const kind of a.kinds) {
-            const cam = kind === 'iso' ? new RC.ProjectionCamera([1, -1, 1], [-1, 1, -1], [1, 1, 0]) : kind;
+            // replicad names views by the direction it looks along and its camera direction points toward the viewer,
+            // so the true top view (X right, Y up) is its 'bottom', the true right view (Y right, Z up) its 'left'
+            const cam = kind === 'iso' ? new RC.ProjectionCamera([0, 0, 0], [1, -1, 1], [1, 1, 0]) : (TRUE_VIEW[kind] || kind);
             const { visible, hidden } = RC.drawProjection(all, cam);
             let bb = null; try { bb = visible.boundingBox.bounds; } catch (e) { }
             out[kind] = { vis: flat(visible.toSVGPaths()), hid: flat(hidden.toSVGPaths()), bbox: bb };
           }
         } finally { temp.forEach(t => t.delete?.()); }
         return out;
+      }
+      if (op === 'section') {
+        // Section view: remove the material between the viewer and the cutting plane, project the rest, and return
+        // the outlines of the faces lying on the plane (to be hatched).
+        const temp = [], ax = { X: 0, Y: 1, Z: 2 }[a.axis];
+        const shapes = a.items.map(x => {
+          let sh = shapeOf.get(x.tok); if (!sh) return null;
+          sh = sh.clone();
+          if (x.place) { if (x.place.angle > 1e-9) sh = sh.rotate(x.place.angle, [0, 0, 0], x.place.axis); sh = sh.translate(x.place.move); }
+          temp.push(sh); return sh;
+        }).filter(Boolean);
+        if (!shapes.length) return null;
+        try {
+          let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+          for (const sh of shapes) { const [b0, b1] = sh.boundingBox.bounds; for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], b0[i]); hi[i] = Math.max(hi[i], b1[i]); } }
+          lo = lo.map(v => v - 10); hi = hi.map(v => v + 10);
+          const c0 = [...lo], c1 = [...hi];
+          if (a.removeAbove) c0[ax] = a.value; else c1[ax] = a.value;
+          const cuts = [];
+          for (const sh of shapes) { const box = RC.makeBox(c0, c1); temp.push(box); let r; try { r = sh.cut(box); } catch (e) { continue; } temp.push(r); if (RC.measureVolume(r) > 1e-9) cuts.push(r); }
+          if (!cuts.length) return { vis: [], hid: [], bbox: null, cut: [] };
+          const all = cuts.length === 1 ? cuts[0] : RC.makeCompound(cuts.map(x => x.clone())); if (cuts.length > 1) temp.push(all);
+          const cam = TRUE_VIEW[a.kind] || a.kind, flat = p => (Array.isArray(p) ? p.flat(2) : []).filter(x => typeof x === 'string' && x.trim());
+          const { visible, hidden } = RC.drawProjection(all, cam);
+          let bb = null; try { bb = visible.boundingBox.bounds; } catch (e) { }
+          const cut = [];
+          for (const r of cuts) for (const f of r.faces) {
+            try {
+              if (f.geomType !== 'PLANE') continue;
+              const c = f.center, n = f.normalAt(), cv = [c.x, c.y, c.z][ax], nv = [n.x, n.y, n.z], l = Math.hypot(...nv);
+              if (Math.abs(cv - a.value) < 1e-5 && Math.abs(Math.abs(nv[ax]) / (l || 1) - 1) < 1e-6) cut.push(faceOutline(f, a.kind));
+            } catch (e) { }
+          }
+          return { vis: flat(visible.toSVGPaths()), hid: flat(hidden.toSVGPaths()), bbox: bb, cut };
+        } finally { temp.forEach(t => t.delete?.()); }
       }
       throw new Error('Unknown engine request ' + op);
     } catch (e) { throw new Error(occMsg(e)); }

@@ -16,7 +16,7 @@ Parametric CAD in the browser. Sketch on planes or faces, build solids with a fe
 | Assemble | Components; rigid groups; joints and as-built joints (rigid, revolute, slider, cylindrical, planar) on face centers and round edges; limits; closed loops (linkages); drag parts to move them; drive and animate joints |
 | Parameters | User parameters and expressions in any field (`width/2 - edge`, `sqrt(…)`, `sin(…)` …) |
 | Construct | Offset planes |
-| Drawing | Drawing workspace: front/top/right/isometric views with exact hidden lines, views placed anywhere, linear and diameter dimensions that follow model changes, title block, PDF + SVG export |
+| Drawing | Drawing workspace: front/top/right/isometric views with exact hidden lines, views placed anywhere, section views with hatching, centre marks, linear/diameter/radius/angle dimensions that follow model changes, parts list, title block, PDF + SVG export |
 | Inspect | Measure, section analysis, center of mass, properties, bill of materials (CSV) |
 | Files | Project save/open (.json), STEP import, STEP and STL export (.zip) |
 
