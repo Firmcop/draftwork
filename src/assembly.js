@@ -39,6 +39,7 @@ let jointLive = new Map();         // joint id -> { base, values }
 let iterVals = null;               // loop solve in progress: joint id -> values
 const docKey = j => JSON.stringify([j.type, ...JOINT_TYPES[j.type].dofs.map(k => j[k])]);
 function rawVal(j, k) {
+  if (doc.motionLinks?.length && isFollower(j.id, k)) { const lv = linkedVal(j, k); if (lv != null) return lv; }
   if (iterVals?.has(j.id) && k in iterVals.get(j.id)) return iterVals.get(j.id)[k];
   if (jointPreview?.id === j.id && k in jointPreview.values) return jointPreview.values[k];
   const l = jointLive.get(j.id); if (l && l.base === docKey(j) && k in l.values) return l.values[k];
@@ -143,7 +144,7 @@ function solveAssembly(o = {}) {
     const vars = [];
     // held: the joint being edited or dragged, and any joint whose document value changed since the last solve
     const held = id => id === o.hold || (jointLive.has(id) && jointLive.get(id).base !== docKey(joints().find(j => j.id === id)));
-    for (const t of todo) for (const k of JOINT_TYPES[t.j.type].dofs) vars.push({ id: t.j.id, j: t.j, k, s: k === 'angle' ? Math.PI / 180 : 1, w: held(t.j.id) ? 1e6 : 1 });
+    for (const t of todo) for (const k of JOINT_TYPES[t.j.type].dofs) if (!isFollower(t.j.id, k)) vars.push({ id: t.j.id, j: t.j, k, s: k === 'angle' ? Math.PI / 180 : 1, w: held(t.j.id) ? 1e6 : 1 });
     if (vars.length) {
       iterVals = new Map(todo.map(t => [t.j.id, {}]));
       for (const v of vars) iterVals.get(v.id)[v.k] = jval(v.j, v.k);
@@ -440,8 +441,23 @@ function partDragMove(e) {
     v.angle = D.start.angle + THREE.MathUtils.radToDeg(D.turned);
   } else if (m.px != null && D.ref.px != null) { v.x = D.start.x + (m.px - D.ref.px); v.y = D.start.y + (m.py - D.ref.py); }
   for (const k of D.dofs) v[k] = clampVal(D.j, k, v[k]);
-  jointPreview = { id: D.j.id, values: v };
-  solveAssembly({ hold: D.j.id }); applyBodyTransforms(); drawToolsOverlay(); requestRender();
+  if (doc.contact?.on) {
+    // walk from the last good pose toward the new one in small steps and stop just before the first contact
+    const from = D.lastGood || D.start, n = Math.max(1, Math.ceil(Math.max(...D.dofs.map(k => Math.abs(v[k] - from[k]) / (k === 'angle' ? 2 : 0.5)))));
+    let good = from, hit = null;
+    for (let s = 1; s <= Math.min(n, 90); s++) {
+      const vs = Object.fromEntries(D.dofs.map(k => [k, from[k] + (v[k] - from[k]) * s / n]));
+      jointPreview = { id: D.j.id, values: vs }; solveAssembly({ hold: D.j.id });
+      const moving = new Set([...keyXf.keys()].filter(k => !fixedKey(k)));
+      hit = moving.size ? contactHit(moving) : null;
+      if (hit) break;
+      good = vs;
+    }
+    D.lastGood = good;
+    jointPreview = { id: D.j.id, values: good }; solveAssembly({ hold: D.j.id }); applyBodyTransforms(); drawToolsOverlay(); requestRender();
+    if (hit) { setHint('Contact: ' + bodyName(hit[0]) + ' touches ' + bodyName(hit[1])); return; }
+  } else { jointPreview = { id: D.j.id, values: v }; solveAssembly({ hold: D.j.id }); }
+  applyBodyTransforms(); drawToolsOverlay(); requestRender();
   setHint(JOINT_TYPES[type].label + ' · ' + D.dofs.map(k => (k === 'angle' ? fmt(v[k]) + '°' : fmt(v[k]) + ' mm')).join(', ') + (type === 'cylindrical' || type === 'planar' ? ' · hold Shift to ' + (type === 'planar' ? 'turn' : 'slide') : ''));
 }
 function partDragEnd() {

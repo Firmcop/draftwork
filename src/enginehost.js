@@ -157,6 +157,27 @@ function engineHost(RCmod) {
         } finally { temp.forEach(t => t.delete?.()); }
         return out;
       }
+      if (op === 'interfere') {
+        // pairwise overlap volumes between solids (in their assembled positions), with a display mesh of each overlap
+        const temp = [], items = a.items.map(x => {
+          let sh = shapeOf.get(x.tok); if (!sh) return null;
+          if (x.place) { sh = sh.clone(); if (x.place.angle > 1e-9) sh = sh.rotate(x.place.angle, [0, 0, 0], x.place.axis); sh = sh.translate(x.place.move); temp.push(sh); }
+          return { id: x.id, sh };
+        }).filter(Boolean);
+        const res = [];
+        try {
+          for (let i = 0; i < items.length; i++) for (let j = i + 1; j < items.length; j++) {
+            if (!bboxOverlap(items[i].sh, items[j].sh)) continue;
+            let inter; try { inter = items[i].sh.clone().intersect(items[j].sh.clone()); } catch (e) { continue; }
+            temp.push(inter);
+            let v = 0; try { v = RC.measureVolume(inter); } catch (e) { }
+            if (!(v > 1e-6)) continue;
+            const m = brepMeshOf({ shape: inter }), ni = m.display.toNonIndexed();
+            res.push({ a: items[i].id, b: items[j].id, volume: v, pos: Float32Array.from(ni.attributes.position.array) });
+          }
+        } finally { temp.forEach(t => t.delete?.()); }
+        return res;
+      }
       if (op === 'section') {
         // Section view: remove the material between the viewer and the cutting plane, project the rest, and return
         // the outlines of the faces lying on the plane (to be hatched).

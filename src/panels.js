@@ -77,6 +77,15 @@ function renderBrowser() {
           '-', { label: 'Delete', icon: 'delete', action: () => deleteJoint(j.id) }] });
     }
   }
+  if (doc.motionLinks?.length && add(1, { key: 'mlinks', icon: 'folder', label: 'Motion Links', sub: String(doc.motionLinks.length) })) {
+    for (const L of doc.motionLinks) add(2, { icon: 'motion', label: L.name, sub: (joints().find(j => j.id === L.a)?.name || '?') + ' → ' + (joints().find(j => j.id === L.b)?.name || '?'), onDbl: () => openMotionLink(L.id), onClick: () => openMotionLink(L.id),
+      menu: () => [{ label: 'Edit', icon: 'motion', action: () => openMotionLink(L.id) }, '-', { label: 'Delete', icon: 'delete', action: () => { checkpoint(); doc.motionLinks = doc.motionLinks.filter(x => x !== L); persist(); assemblyChanged(); renderBrowser(); } }] });
+  }
+  if (doc.configs?.rows?.length) add(1, { icon: 'configure', label: 'Configuration', sub: doc.configs.rows.find(r => r.id === doc.configs.active)?.name || '—', onClick: () => openConfigTable() });
+  const canv = doc.features.filter(f => f.type === 'canvas' || f.type === 'decal');
+  if (canv.length && add(1, { key: 'canvases', icon: 'folder', label: 'Canvases' })) {
+    for (const c of canv) add(2, { icon: c.type, label: c.name, vis: !c.hidden, onVis: () => { c.hidden = !c.hidden; persist(); drawToolsOverlay(); renderBrowser(); requestRender(); }, onClick: () => selectFeature(c.id), onDbl: () => editFeature(c.id), menu: () => featureMenu(c.id) });
+  }
   const bodies = [...result.bodies.values()].filter(b => !compOfBody(b.id));
   if (bodies.length && add(1, { key: 'bodies', icon: 'folder', label: 'Bodies', sub: String(bodies.length), vis: !doc.hideAllBodies, onVis: () => { doc.hideAllBodies = !doc.hideAllBodies; persist(); updateScene(); renderBrowser(); renderInfo(); } })) {
     for (const b of bodies) bodyNode(2, b);
@@ -390,6 +399,9 @@ function featureFields(f, idx) {
       break;
     case 'meshinsert': case 'tessellate': case 'facegroups': case 'meshrepair': case 'remesh': case 'reduce': case 'smooth': case 'meshplane': case 'meshconvert':
       meshDialog(f, idx, out);
+      break;
+    case 'canvas': case 'decal': case 'derive':
+      insertDialog(f, idx, out, placement);
       break;
     case 'boss': case 'snapfit': case 'rest':
       plasticDialog(f, idx, out, placement);

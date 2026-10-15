@@ -1,5 +1,5 @@
 // ===== Commands, picking, sketching, measuring, view cube, navigation, boot =====
-const NAMES = { sketch: 'Sketch', plane: 'Plane', axis: 'Axis', point: 'Point', splitbody: 'Split Body', scale: 'Scale', thicken: 'Thicken', replaceface: 'Replace Face', align: 'Align', patpath: 'Pattern on Path', boundary: 'Boundary Fill', coil: 'Coil', splitface: 'Split Face', sextrude: 'Extrude Surface', srevolve: 'Revolve Surface', patch: 'Patch', soffset: 'Offset Surface', sloft: 'Loft Surface', ssweep: 'Sweep Surface', ruled: 'Ruled Surface', trim: 'Trim', untrim: 'Untrim', sextend: 'Extend', stitch: 'Stitch', unstitch: 'Unstitch', reverse: 'Reverse Normal', deleteface: 'Delete Face', flange: 'Flange', contourflange: 'Contour Flange', unfold: 'Unfold', refold: 'Refold', boss: 'Boss', snapfit: 'Snap Fit', lip: 'Lip', rest: 'Rest', meshinsert: 'Mesh', tessellate: 'Tessellate', facegroups: 'Face Groups', meshrepair: 'Repair', remesh: 'Remesh', reduce: 'Reduce', smooth: 'Smooth', meshplane: 'Plane Cut', meshconvert: 'Convert Mesh', thread: 'Thread', rib: 'Rib', web: 'Web', emboss: 'Emboss', extrude: 'Extrude', revolve: 'Revolve', box: 'Box', cylinder: 'Cylinder', sphere: 'Sphere', torus: 'Torus', hole: 'Hole', pattern: 'Pattern', mirror: 'Mirror', move: 'Move', combine: 'Combine', remove: 'Remove', fillet: 'Fillet', chamfer: 'Chamfer', shell: 'Shell', draft: 'Draft', loft: 'Loft', import: 'Import', sweep: 'Sweep' };
+const NAMES = { sketch: 'Sketch', plane: 'Plane', axis: 'Axis', point: 'Point', splitbody: 'Split Body', scale: 'Scale', thicken: 'Thicken', replaceface: 'Replace Face', align: 'Align', patpath: 'Pattern on Path', boundary: 'Boundary Fill', coil: 'Coil', splitface: 'Split Face', sextrude: 'Extrude Surface', srevolve: 'Revolve Surface', patch: 'Patch', soffset: 'Offset Surface', sloft: 'Loft Surface', ssweep: 'Sweep Surface', ruled: 'Ruled Surface', trim: 'Trim', untrim: 'Untrim', sextend: 'Extend', stitch: 'Stitch', unstitch: 'Unstitch', reverse: 'Reverse Normal', deleteface: 'Delete Face', flange: 'Flange', contourflange: 'Contour Flange', unfold: 'Unfold', refold: 'Refold', boss: 'Boss', snapfit: 'Snap Fit', lip: 'Lip', rest: 'Rest', meshinsert: 'Mesh', tessellate: 'Tessellate', facegroups: 'Face Groups', meshrepair: 'Repair', remesh: 'Remesh', reduce: 'Reduce', smooth: 'Smooth', meshplane: 'Plane Cut', meshconvert: 'Convert Mesh', canvas: 'Canvas', decal: 'Decal', derive: 'Derive', thread: 'Thread', rib: 'Rib', web: 'Web', emboss: 'Emboss', extrude: 'Extrude', revolve: 'Revolve', box: 'Box', cylinder: 'Cylinder', sphere: 'Sphere', torus: 'Torus', hole: 'Hole', pattern: 'Pattern', mirror: 'Mirror', move: 'Move', combine: 'Combine', remove: 'Remove', fillet: 'Fillet', chamfer: 'Chamfer', shell: 'Shell', draft: 'Draft', loft: 'Loft', import: 'Import', sweep: 'Sweep' };
 function nextName(type) {
   let n = doc.features.filter(f => f.type === type).length + 1;
   while (doc.features.some(f => f.name === NAMES[type] + ' ' + n)) n++;
@@ -32,6 +32,7 @@ function defaultHint() {
   if (workspace === 'drawing') return setHint(drawingHint());
   if (pick) return setHint(pick.prompt + ' · Esc cancels');
   if (jointHint()) return setHint(jointHint());
+  if (combMode) return setHint('Click curved edges to show or hide their curvature comb · Esc ends');
   if (constructHint()) return setHint(constructHint());
   if (measure) return setHint('Click points on the model to measure between them · Esc closes');
   if (mode === 'sketch') {
@@ -562,7 +563,7 @@ function pickAt(e) {
 }
 function bodyHit(e) {
   raycaster.setFromCamera(ndcOf(e), camera);
-  const meshes = []; for (const [, s] of shownBodies) if (s.mesh.visible) meshes.push(s.mesh);
+  const meshes = []; for (const [, s] of shownBodies) if (s.mesh.visible && (measure || passesFilter(s.rec))) meshes.push(s.mesh);
   const hit = raycaster.intersectObjects(meshes, false)[0];
   if (!hit) return null;
   // snap to the nearest corner of the triangle when close on screen
@@ -593,6 +594,7 @@ viewport.addEventListener('pointerup', e => {
   }
   if (jointEdit?.stage && jointPickAt(e)) return;
   if (cpick && constructPickAt(e)) return;
+  if (combPickAt(e)) return;
   const rf = regionDialogFeature();
   if (rf && toggleRegion(rf, regionAt(e, rf))) return;
   const ef = edgeDialogFeature();
@@ -604,7 +606,7 @@ viewport.addEventListener('pointerup', e => {
   }
   if (mode === 'model') {
     const hit = bodyHit(e);
-    if (hit) selectBody(hit.body);
+    if (hit) { if (e.shiftKey || e.ctrlKey || e.metaKey) { multiSel.has(hit.body) ? multiSel.delete(hit.body) : multiSel.add(hit.body); if (selBody) multiSel.add(selBody); selBody = null; updateScene(); renderSelectionBar(); } else { multiSel.clear(); renderSelectionBar(); selectBody(hit.body); } }
     else if (selBody || selFeature) { selBody = null; selFeature = null; updateScene(); renderTimeline(); renderBrowser(); }
   }
 });
@@ -752,6 +754,9 @@ window.addEventListener('keydown', e => {
     if ($('#menus').children.length) return closeMenus();
     if (!$('#modalBack').hidden) return closeModal();
     if (cancelConstructPick()) return;
+    if (combMode) { toggleCombMode(); return; }
+    if (winSel) { winSel = null; viewport.classList.remove('picking'); defaultHint(); return; }
+    if (multiSel.size) { multiSel.clear(); updateScene(); renderSelectionBar(); return; }
     if (pick) return cancelPick();
     document.querySelectorAll('.dimedit').forEach(x => x.remove());
     if (lineDraft) { lineDraft = null; refreshOverlays(); defaultHint(); return; }
@@ -845,6 +850,7 @@ if (location.hostname === 'localhost') window.__dw = {
   assembly: () => ({ comps: comps().map(c => ({ name: c.name, bodies: c.bodies.length, moved: compXf.has(c.id) && !compXf.get(c.id).equals(IDENT) })), joints: joints().map(j => j.name + ':' + (jointStatus.get(j.id)?.state || '?')), xf: Object.fromEntries([...compXf].map(([k, m]) => [compById(k)?.name, m.elements.map(v => Math.round(v * 1e4) / 1e4)])) }),
   props: () => [...result.bodies].map(([id, b]) => { const pr = b.shape ? brepProps(b) : {}; return { id, surface: !!pr.surface, area: Math.round(pr.area * 1e4) / 1e4, volume: Math.round(pr.volume * 1e4) / 1e4 }; }),
   meshes: () => [...result.bodies].filter(([, b]) => b.mesh).map(([id, b]) => ({ id, tris: b.stats.tris, closed: b.stats.closed, volume: Math.round(Math.abs(b.stats.volume) * 1e4) / 1e4, groups: b.groupCount })),
+  inspect: () => ({ combMode, combEdges: combEdges.length, multi: multiSel.size, winSel: !!winSel }),
   regen: () => doRegen(),
   rebuild: async () => { if (isBrep()) await engineReset(); else cache = []; await doRegen(); },
   curveScreen: i => { const sk = featById(sketchId), c = sk.geo.curves[i]; const pts = curvePts(sk, c, id => geoPos(sk, id), cc => geoRadius(sk, cc)); const m = pts[Math.floor(pts.length / 2)], m2 = pts.length === 2 ? [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2] : m; return window.__dw.sketchScreen(m2[0], m2[1]); },

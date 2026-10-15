@@ -332,3 +332,9 @@ table.grid tfoot td { font-weight: 600; border-bottom: 0; }
 #sheetSvg .snap { fill: #e8590c; stroke: none; }
 #sheetSvg .snap.on { fill: #1b64d8; }
 #sheetSvg .snap.ring { fill: none; stroke: #e8590c; stroke-width: 0.5; }
+.winsel { position: absolute; z-index: 14; border: 1.5px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); pointer-events: none; }
+.winsel.cross { border-style: dashed; background: color-mix(in srgb, #3faa5b 12%, transparent); border-color: #3faa5b; }
+.selbar { position: absolute; z-index: 13; left: 50%; top: 10px; transform: translateX(-50%); display: flex; gap: 6px; align-items: center; background: var(--raised); border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; box-shadow: var(--shadow); font-size: 12px; }
+.selbar .btn { height: 26px; padding: 0 10px; }
+.combtag { font: 11px var(--font-data); background: var(--raised); color: var(--fg); border: 1px solid var(--line); border-radius: 3px; padding: 1px 5px; pointer-events: none; }
+.flatview { border: 1px solid var(--line); border-radius: 4px; background: var(--bg); margin-bottom: 10px; }

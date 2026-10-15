@@ -13,7 +13,7 @@ const pkg = name => JSON.parse(fs.readFileSync(path.join(root, 'node_modules', n
 
 const strip = s => s.split('\n').filter(l => !/^import /.test(l)).map(l => l.replace(/^export /, '')).join('\n');
 // Concatenation order matters: later modules use functions from earlier ones.
-const MODULES = ['font', 'solver', 'kernel', 'engineclient', 'icons', 'assembly', 'drawing', 'construct', 'modify', 'surfaceui', 'sheetui', 'plasticui', 'meshui', 'core', 'ribbon', 'panels', 'interact', 'sketchui', 'sketchtools'];
+const MODULES = ['font', 'solver', 'kernel', 'engineclient', 'icons', 'assembly', 'drawing', 'construct', 'modify', 'surfaceui', 'sheetui', 'plasticui', 'meshui', 'insert', 'assembly2', 'configure', 'core', 'ribbon', 'panels', 'interact', 'sketchui', 'sketchtools', 'inspect'];
 // The exact kernel runs in a Web Worker: solver + kernel + brep + host wrapped in one self-contained async function.
 // The page sends engineFactory.toString() to the worker, or calls it directly when workers are blocked.
 const ENGINE = ['font', 'solver', 'kernel', 'brep', 'brepsurf', 'brepsheet', 'brepplastic', 'meshops', 'enginehost'];
@@ -29,6 +29,7 @@ import { Brush, Evaluator, ADDITION, SUBTRACTION, INTERSECTION } from 'three-bvh
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
+import { MeshBVH } from 'three-mesh-bvh';
 `;
 const js = header + MODULES.map(m => `// ---- ${m} ----\n` + strip(src(m + '.js'))).join('\n') + '\n// ---- engine (runs in a worker) ----\n' + engineFactory;
 

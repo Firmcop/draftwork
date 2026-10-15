@@ -177,9 +177,11 @@ function projectClick(sk, e) {
   }
   if (commitGeo(sk, g, { force: true })) toast('Edge projected (fixed in place)');
 }
-function chainSegs(segs) {
+function chainSegs(raw) {
+  const k = p => p[0].toFixed(5) + ',' + p[1].toFixed(5), seen = new Set();
+  const segs = raw.filter(([a, b]) => { const key = [k(a), k(b)].sort().join('|'); if (k(a) === k(b) || seen.has(key)) return false; seen.add(key); return true; });   // the display lists some segments twice
   if (!segs.length) return [];
-  const k = p => p[0].toFixed(5) + ',' + p[1].toFixed(5), left = segs.slice(1), out = [...segs[0]];
+  const left = segs.slice(1), out = [...segs[0]];
   let grew = true;
   while (left.length && grew) {
     grew = false;

@@ -29,6 +29,7 @@ Done
 - [x] Modify: split body, split face, scale, align, replace face, thicken, boundary fill, pattern on path
 - [x] Create: coil, thread (cosmetic/modeled), rib, web, emboss/deboss
 - [x] Sketch point, text (embedded outline font), mirror, circular pattern, project model edges
+- [x] Inspect (interference, zebra, curvature comb), select (window, filters), insert (SVG, DXF, canvas, decal, derive), configurations (table, rules), motion links, contact sets
 - [x] Mesh: insert STL/OBJ, tessellate, face groups, repair, remesh, reduce, smooth, plane cut, convert to B-rep
 - [x] Plastic: rules, boss, snap fit, lip/groove, rest, rib/web
 - [x] Sheet metal: rules, base/edge/contour flanges, unfold/refold, flat pattern + DXF (bend allowance from K-factor)

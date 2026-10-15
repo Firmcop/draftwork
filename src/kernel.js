@@ -591,7 +591,7 @@ function step(f, out) {
     } else if (f.type === 'remove') {
       if (!out.bodies.has(f.body)) throw new Error('Choose a body to remove');
       out.bodies.delete(f.body);
-    } else if (['fillet', 'chamfer', 'shell', 'draft', 'presspull', 'loft', 'import', 'sweep', 'splitbody', 'scale', 'thicken', 'replaceface', 'align', 'patpath', 'boundary', 'coil', 'thread', 'rib', 'web', 'emboss', 'splitface', 'boss', 'snapfit', 'lip', 'rest', 'meshinsert', 'tessellate', 'facegroups', 'meshrepair', 'remesh', 'reduce', 'smooth', 'meshconvert', 'meshplane', 'flange', 'contourflange', 'unfold', 'refold', 'sextrude', 'srevolve', 'patch', 'soffset', 'sloft', 'ssweep', 'ruled', 'trim', 'untrim', 'sextend', 'stitch', 'unstitch', 'reverse', 'deleteface'].includes(f.type)) {
+    } else if (['fillet', 'chamfer', 'shell', 'draft', 'presspull', 'loft', 'import', 'sweep', 'splitbody', 'scale', 'thicken', 'replaceface', 'align', 'patpath', 'boundary', 'coil', 'thread', 'rib', 'web', 'emboss', 'splitface', 'boss', 'snapfit', 'lip', 'rest', 'meshinsert', 'tessellate', 'facegroups', 'meshrepair', 'remesh', 'reduce', 'smooth', 'meshconvert', 'meshplane', 'flange', 'contourflange', 'unfold', 'refold', 'sextrude', 'srevolve', 'patch', 'soffset', 'sloft', 'ssweep', 'ruled', 'trim', 'untrim', 'sextend', 'stitch', 'unstitch', 'reverse', 'deleteface', 'derive'].includes(f.type)) {
       throw new Error('This needs the exact geometry engine, which has not loaded in this view');
     }
     out.status.set(f.id, { state: 'ok' });
@@ -607,7 +607,7 @@ export function mergeBodies(geoms) {
 
 // ---- expressions: numbers, units-free arithmetic, parameters, functions ----
 const FUNCS = { sqrt: Math.sqrt, abs: Math.abs, sin: x => Math.sin(x * Math.PI / 180), cos: x => Math.cos(x * Math.PI / 180), tan: x => Math.tan(x * Math.PI / 180),
-  min: Math.min, max: Math.max, round: Math.round, floor: Math.floor, ceil: Math.ceil };
+  min: Math.min, max: Math.max, round: Math.round, floor: Math.floor, ceil: Math.ceil, if: (c, a, b) => (c ? a : b) };
 export function evalExpr(src, vars = {}) {
   const s = String(src).replace(/\s*(mm|deg|°)\b/g, '').trim();
   let i = 0;
@@ -616,7 +616,7 @@ export function evalExpr(src, vars = {}) {
   const err = m => { throw new Error(m); };
   function primary() {
     ws();
-    if (eat('(')) { const v = expr(); ws(); if (!eat(')')) err('Missing )'); return v; }
+    if (eat('(')) { const v = cmp(); ws(); if (!eat(')')) err('Missing )'); return v; }
     if (eat('-')) return -primary();
     if (eat('+')) return primary();
     const num = /^\d*\.?\d+(e[+-]?\d+)?/i.exec(s.slice(i));
@@ -626,8 +626,8 @@ export function evalExpr(src, vars = {}) {
       i += id[0].length; ws();
       const name = id[0];
       if (FUNCS[name] && eat('(')) {
-        const args = [expr()]; ws();
-        while (eat(',')) { args.push(expr()); ws(); }
+        const args = [cmp()]; ws();
+        while (eat(',')) { args.push(cmp()); ws(); }
         if (!eat(')')) err('Missing )');
         return FUNCS[name](...args);
       }
@@ -640,8 +640,14 @@ export function evalExpr(src, vars = {}) {
   function power() { let v = primary(); ws(); if (eat('^')) v = Math.pow(v, power()); return v; }
   function term() { let v = power(); for (;;) { ws(); if (eat('*')) v *= power(); else if (eat('/')) v /= power(); else return v; } }
   function expr() { let v = term(); for (;;) { ws(); if (eat('+')) v += term(); else if (eat('-')) v -= term(); else return v; } }
+  // comparisons give 1 or 0 (for configuration rules and if(cond, a, b))
+  function cmp() {
+    const v = expr(); ws();
+    for (const op of ['<=', '>=', '==', '!=', '<', '>']) if (s.startsWith(op, i)) { i += op.length; const w = expr(); return +({ '<=': v <= w, '>=': v >= w, '==': Math.abs(v - w) < 1e-9, '!=': Math.abs(v - w) >= 1e-9, '<': v < w, '>': v > w })[op]; }
+    return v;
+  }
   if (!s) err('Enter a value');
-  const v = expr(); ws();
+  const v = cmp(); ws();
   if (i < s.length) err('Unexpected "' + s[i] + '"');
   if (!isFinite(v)) err('The result is not a number');
   return v;

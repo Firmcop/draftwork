@@ -795,6 +795,14 @@ function brepStep(f, out) {
     } else if (f.type === 'remove') {
       if (!out.bodies.has(f.body)) throw new Error('Choose a body to remove');
       out.bodies.delete(f.body);
+    } else if (f.type === 'canvas' || f.type === 'decal') {
+      /* display only */
+    } else if (f.type === 'derive') {
+      if (!Array.isArray(f.sub)) throw new Error('The derived design is missing');
+      const sub = regenerateBrep(f.sub), errs = [...sub.status.values()].filter(s => s.state === 'error').length;
+      if (!sub.bodies.size) throw new Error('The derived design has no bodies' + (errs ? ` (${errs} of its features fail)` : ''));
+      let k = 0;
+      for (const [, b] of sub.bodies) { let s = b.shape.clone(); if (+f.dx || +f.dy || +f.dz) s = s.translate([+f.dx || 0, +f.dy || 0, +f.dz || 0]); bNew(out, f.id + (k ? ':' + k : ''), T(s), f.id); k++; }
     } else if (EDGE_TYPES.has(f.type)) {
       edgeFeature(f, out);
     } else if (MODIFY_TYPES.has(f.type)) {

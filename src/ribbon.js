@@ -7,7 +7,7 @@ const planned = (id, label, iconKey, phase = P1, o = {}) => cmd(id, label, iconK
 // solid › create
 cmd('sketch', 'Create Sketch', 'sketch', { run: () => startCreateSketch() });
 planned('form', 'Create Form', 'form', P5);
-planned('derive', 'Derive', 'derive', P2);
+cmd('derive', 'Derive', 'derive', { run: () => startDerive() });
 cmd('extrude', 'Extrude', 'extrude', { key: 'E', run: () => newProfileFeature('extrude') });
 cmd('revolve', 'Revolve', 'revolve', { run: () => newProfileFeature('revolve') });
 cmd('sweep', 'Sweep', 'sweep', { run: () => newSweep(false) }); cmd('loft', 'Loft', 'loft', { run: () => newLoft() }); cmd('rib', 'Rib', 'rib', { run: () => startRibWeb('rib') }); cmd('web', 'Web', 'web', { run: () => startRibWeb('web') }); cmd('emboss', 'Emboss', 'emboss', { run: () => startEmboss() });
@@ -36,7 +36,7 @@ cmd('material', 'Physical Material', 'material', { run: () => openMaterialDialog
 cmd('appearance', 'Appearance', 'appearance', { key: 'A', run: () => openAppearanceDialog() });
 cmd('params', 'Change Parameters', 'params', { run: () => openParamsModal() });
 // configure
-planned('cfgtable', 'Configuration Table', 'configure', P2); planned('cfgrules', 'Configuration Rules', 'configure', P2);
+cmd('cfgtable', 'Configuration Table', 'configure', { run: () => openConfigTable() }); cmd('cfgrules', 'Configuration Rules', 'configure', { run: () => openConfigRules() });
 // construct
 cmd('offsetplane', 'Offset Plane', 'plane', { run: () => startOffsetPlane() });
 cmd('planeangle', 'Plane at Angle', 'planeangle', { run: () => startPlaneAtAngle() }); cmd('midplane', 'Midplane', 'midplane', { run: () => startMidplane() }); cmd('planetangent', 'Tangent Plane', 'plane', { run: () => startTangentPlane() });
@@ -46,19 +46,19 @@ cmd('axisedge', 'Axis Through Edge', 'axis', { run: () => startAxisEdge() }); cm
 cmd('pointv', 'Point at Vertex', 'point', { run: () => startPointVertex() }); cmd('pointc', 'Point at Center of Circle', 'point', { run: () => startPointCenter() }); cmd('pointxyz', 'Point by Coordinates', 'point', { run: () => startPointXYZ() });
 // inspect
 cmd('measure', 'Measure', 'measure', { key: 'I', run: () => startMeasure() });
-planned('interference', 'Interference', 'interference', P2); planned('curvature', 'Curvature Comb Analysis', 'curvature'); planned('zebra', 'Zebra Analysis', 'zebra');
+cmd('interference', 'Interference', 'interference', { run: () => openInterference() }); cmd('curvature', 'Curvature Comb Analysis', 'curvature', { run: () => toggleCombMode() }); cmd('zebra', 'Zebra Analysis', 'zebra', { run: () => toggleZebra() });
 cmd('section', 'Section Analysis', 'section', { run: () => openSectionDialog() });
 cmd('com', 'Center of Mass', 'com', { run: () => toggleCOM() });
 cmd('properties', 'Properties', 'properties', { run: () => openPropertiesModal() });
 // insert
-planned('insderive', 'Insert Derive', 'derive', P2); planned('decal', 'Decal', 'decal', P2); planned('canvas', 'Canvas', 'canvas', P2);
-cmd('insstep', 'Insert STEP', 'insertmesh', { run: () => startImportSTEP() }); cmd('insmesh', 'Insert Mesh', 'insertmesh', { run: () => startInsertMesh() }); planned('inssvg', 'Insert SVG', 'insertsvg', P1); planned('insdxf', 'Insert DXF', 'insertsvg', P1);
+cmd('insderive', 'Insert Derive', 'derive', { run: () => startDerive() }); cmd('decal', 'Decal', 'decal', { run: () => startCanvas('decal') }); cmd('canvas', 'Canvas', 'canvas', { run: () => startCanvas('canvas') });
+cmd('insstep', 'Insert STEP', 'insertmesh', { run: () => startImportSTEP() }); cmd('insmesh', 'Insert Mesh', 'insertmesh', { run: () => startInsertMesh() }); cmd('inssvg', 'Insert SVG', 'insertsvg', { run: () => startInsert2D('svg') }); cmd('insdxf', 'Insert DXF', 'insertsvg', { run: () => startInsert2D('dxf') });
 // assemble
 cmd('newcomp', 'New Component', 'component', { run: () => newComponent() }); cmd('joint', 'Joint', 'joint', { key: 'J', run: () => newJoint() }); cmd('asbuilt', 'As-built Joint', 'joint', { run: () => newJoint(true) });
-cmd('rigid', 'Rigid Group', 'component', { run: () => newRigidGroup() }); cmd('drive', 'Drive Joints', 'motion', { run: () => { const j = (selJoint && joints().find(x => x.id === selJoint)) || joints().at(-1); j ? editJoint(j.id) : toast('There are no joints yet'); } }); planned('motionlink', 'Motion Link', 'motion', P2); planned('contact', 'Enable Contact Sets', 'interference', P2);
+cmd('rigid', 'Rigid Group', 'component', { run: () => newRigidGroup() }); cmd('drive', 'Drive Joints', 'motion', { run: () => { const j = (selJoint && joints().find(x => x.id === selJoint)) || joints().at(-1); j ? editJoint(j.id) : toast('There are no joints yet'); } }); cmd('motionlink', 'Motion Link', 'motion', { run: () => openMotionLink() }); cmd('contact', 'Enable Contact Sets', 'motion', { run: () => toggleContact() });
 // select
 cmd('select', 'Select', 'select', { run: () => cancelModes(true) });
-planned('window', 'Window Selection', 'window'); planned('filters', 'Selection Filters', 'filter');
+cmd('window', 'Window Selection', 'window', { run: () => startWindowSelect() }); cmd('filters', 'Selection Filters', 'filter', { run: () => openSelectionFilters() });
 // surface
 for (const [k, t, l, ic] of [['s.extrude', 'sextrude', 'Extrude Surface', 'patch'], ['s.revolve', 'srevolve', 'Revolve Surface', 'revolve'], ['s.sweep', 'ssweep', 'Sweep Surface', 'sweep'], ['s.loft', 'sloft', 'Loft Surface', 'loft'], ['s.patch', 'patch', 'Patch', 'patch'], ['s.offset', 'soffset', 'Offset Surface', 'offsetsurf'], ['s.ruled', 'ruled', 'Ruled Surface', 'offsetsurf'],
   ['s.trim', 'trim', 'Trim', 'trim'], ['s.untrim', 'untrim', 'Untrim', 'trim'], ['s.extend', 'sextend', 'Extend', 'extend'], ['s.stitch', 'stitch', 'Stitch', 'stitch'], ['s.unstitch', 'unstitch', 'Unstitch', 'stitch'], ['s.reverse', 'reverse', 'Reverse Normal', 'patch'], ['s.delete', 'deleteface', 'Delete Face', 'delete']])
@@ -207,7 +207,7 @@ function renderRibbon() {
     const bar = h('div', { class: 'rbar' });
     for (const id of g.bar) {
       const c = CMD[id];
-      const pressed = (workspace === 'drawing' && ((id === 'dw.dim' && dwTool === 'dim') || (id === 'dw.dia' && dwTool === 'dia') || (id === 'dw.rad' && dwTool === 'rad') || (id === 'dw.ang' && dwTool === 'ang') || (id === 'dw.section' && dwTool === 'section') || (id.startsWith('dw.view.') && dwTool === 'place:' + id.slice(8)))) || (mode === 'sketch' && id === 'k.' + sketchTool) || (id === 'k.select' && sketchTool === 'select' && mode === 'sketch') || (id === 'measure' && measure) || (id === 'section' && section) || (id === 'com' && showCOM);
+      const pressed = (workspace === 'drawing' && ((id === 'dw.dim' && dwTool === 'dim') || (id === 'dw.dia' && dwTool === 'dia') || (id === 'dw.rad' && dwTool === 'rad') || (id === 'dw.ang' && dwTool === 'ang') || (id === 'dw.section' && dwTool === 'section') || (id.startsWith('dw.view.') && dwTool === 'place:' + id.slice(8)))) || (mode === 'sketch' && id === 'k.' + sketchTool) || (id === 'k.select' && sketchTool === 'select' && mode === 'sketch') || (id === 'measure' && measure) || (id === 'section' && section) || (id === 'com' && showCOM) || (id === 'zebra' && zebraOn) || (id === 'curvature' && combMode) || (id === 'contact' && !!doc.contact?.on);
       if (g.finish) bar.append(h('button', { class: 'rbtn finish', title: tip(c), 'aria-label': c.label, onclick: () => runCmd(id), html: icon(c.icon) + '<span>' + c.label.toUpperCase() + '</span>' }));
       else bar.append(h('button', { class: 'rbtn' + (c.phase ? ' planned' : ''), title: tip(c), 'aria-label': tip(c), 'aria-pressed': pressed ? 'true' : null, onclick: () => runCmd(id), html: icon(c.icon) }));
     }
