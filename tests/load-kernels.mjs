@@ -22,7 +22,7 @@ ${strip(fs.readFileSync(path.join(root, 'src/brepsheet.js'), 'utf8'))}
 ${strip(fs.readFileSync(path.join(root, 'src/brepplastic.js'), 'utf8'))}
 ${strip(fs.readFileSync(path.join(root, 'src/meshops.js'), 'utf8'))}
 export function setOC(oc) { RCmod.setOC(oc); RC = RCmod; }
-export { sheetFlatData, importMeshes, parseSTL, parseOBJ, meshStats, meshVolume, weldTriangles, regenerate, regenerateBrep, resolveFeatures, evalParams, evalExpr, signedVolume, brepProps, brepMeshOf, brepSigMap, brepCollect, brepSTEP, brepImportSTEP, frameFromPoint, toBinarySTL, makeZip, solveSketch, analyzeSketch, applySolved, geoProfiles, geoPaths, geoRegions, pickRegions, curveSplits, arrCurves, extendTarget, splineBeziers, bezPoint, splineFull, splineSpans, splineClosest, splineAt };
+export { formMesh, formCage, catmullClark, sheetFlatData, importMeshes, parseSTL, parseOBJ, meshStats, meshVolume, weldTriangles, regenerate, regenerateBrep, resolveFeatures, evalParams, evalExpr, signedVolume, brepProps, brepMeshOf, brepSigMap, brepCollect, brepSTEP, brepImportSTEP, frameFromPoint, toBinarySTL, makeZip, solveSketch, analyzeSketch, applySolved, geoProfiles, geoPaths, geoRegions, pickRegions, curveSplits, arrCurves, extendTarget, splineBeziers, bezPoint, splineFull, splineSpans, splineClosest, splineAt };
 export const THREEns = THREE;`;
   // three-bvh-csg imports bare 'three' / 'three-mesh-bvh'; Node resolves them from node_modules next to the file.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'draftwork-test-'));

@@ -1,6 +1,6 @@
 // ===== Mesh bodies and mesh operations (pure JS, runs in the engine) =====
 // A mesh is { pos: Float32Array (xyz per vertex), idx: Uint32Array (3 per triangle), groups?: Uint32Array (per triangle) }.
-const MESH_TYPES = new Set(['meshinsert', 'tessellate', 'facegroups', 'meshrepair', 'remesh', 'reduce', 'smooth', 'meshconvert', 'meshplane']);
+const MESH_TYPES = new Set(['form', 'meshinsert', 'tessellate', 'facegroups', 'meshrepair', 'remesh', 'reduce', 'smooth', 'meshconvert', 'meshplane']);
 const importMeshes = new Map();   // fileId -> mesh (parsed once)
 
 // ---- parsing ----
@@ -327,6 +327,12 @@ function meshStep(f, out) {
       const mesh = meshFromShape(b.shape, Math.max(0.001, +f.tolerance || 0.05), Math.max(0.01, (+f.angle || 10) * Math.PI / 180));
       if (!f.keep) out.bodies.delete(b.id);
       return mNew(out, f.id, mesh, f.id);
+    }
+    case 'form': {
+      const pi = placementInfo(f, out), M = planeMatrix(pi.base, pi.offset, pi.flip).multiply(new THREE.Matrix4().makeTranslation(+f.cx || 0, +f.cy || 0, 0));
+      const m = transformMesh(formMesh(f), M);
+      if (f.output === 'solid') { const s = T(meshToBrep(cleanMesh(m), false)); return bNew(out, f.id, s, f.id); }
+      return mNew(out, f.id, cleanMesh(m), f.id);
     }
     case 'facegroups': { const b = getM(); return mReplace(out, b.id, faceGroups(b, +f.angle || 20)); }
     case 'meshrepair': {

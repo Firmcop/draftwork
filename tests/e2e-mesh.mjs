@@ -55,6 +55,19 @@ await menu('CREATE', 'Tessellate'); await W(2000); await ok();
 m = await meshInfo();
 check(m.length === 1 && m[0].closed && Math.abs(m[0].volume - Math.PI * 100 * 10) < 20, 'tessellate turns the cylinder into a closed mesh (' + m[0]?.tris + ' tris, ' + m[0]?.volume + ')');
 
+// ---- Create Form: pull the top of a subdivision box up ----
+await page.evaluate(() => window.__dw.setDoc({ version: 2, name: 'F', units: 'mm', params: [], bodyMeta: {}, showOrigin: false, sketchShown: {}, planeHidden: {}, features: [] })); await W(800);
+await page.click('.rtab:text-is("SOLID")'); await W(150); await page.click('.rlabel:has-text("CREATE")'); await W(200); await page.locator('.menu .mi', { has: page.locator('text="Create Form"') }).first().click(); await W(400);
+if (!(await page.locator('.node .nlab:text-is("XY")').isVisible())) await page.click('.node:has-text("Origin") .tw');
+await page.click('.node .nlab:text-is("XY")'); await W(2500); await page.click('#vcHome'); await W(800);
+m = await meshInfo(); const fv0 = m[0]?.volume;
+const top = await page.evaluate(() => window.__dw.screen(0, 0, 40)); await page.mouse.click(top.x, top.y); await W(400);
+await page.click('#fm-move'); await W(2500);
+m = await meshInfo();
+check(fv0 > 20000 && m[0].closed && m[0].volume > fv0 + 1000, 'create form: smooth box, pulling the top cage point up 5 mm adds volume (' + Math.round(fv0) + ' → ' + Math.round(m[0].volume) + ')');
+if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/form.png' });
+await page.click('.dialog .btn.ok'); await W(500);
+
 check(errors.length === 0, 'no page errors' + (errors.length ? ': ' + errors.slice(0, 3).join(' | ') : ''));
 await browser.close(); server.close();
 process.exit(failed ? 1 : 0);

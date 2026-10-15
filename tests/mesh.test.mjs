@@ -42,3 +42,16 @@ test('plane cut + cap, repair fills holes, convert to a solid', () => {
   r = build([{ id: 'bx', type: 'box', name: 'B', plane: 'XY', offset: 0, cx: 0, cy: 0, w: 10, d: 10, h: 10, op: 'new' }, { id: 't', type: 'tessellate', name: 'T', body: 'bx' }]); okAll(r);
   assert.equal(r.bodies.size, 0); near(K.meshVolume(mesh(r)), 1000, 1e-6, 'tessellated box'); assert.ok(K.meshStats(mesh(r)).closed, 'welded closed');
 });
+test('form: subdivided box is a closed smooth body; edits move the cage', () => {
+  const f = { id: 'fm', type: 'form', name: 'Form', plane: 'XY', offset: 0, cx: 0, cy: 0, prim: 'box', w: 20, d: 20, h: 20, nx: 2, ny: 2, nz: 2, level: 2, edits: {} };
+  let r = build([f]); okAll(r);
+  const m = mesh(r), s = K.meshStats(m), v = K.meshVolume(m);
+  assert.ok(s.closed, 'closed'); assert.ok(v > 3000 && v < 8000, 'rounded cube volume ' + v);
+  const cage = K.formCage(f), top = cage.pos.findIndex(p => Math.abs(p[0]) < 1e-9 && Math.abs(p[1]) < 1e-9 && Math.abs(p[2] - 20) < 1e-9);
+  r = build([{ ...f, edits: { [top]: [0, 0, 15] } }]); okAll(r);
+  assert.ok(K.meshVolume(mesh(r)) > v + 300, 'pulling the top centre up adds volume');
+  r = build([{ ...f, prim: 'torus', w: 40, h: 10, nx: 2, ny: 2 }]); okAll(r); assert.ok(K.meshStats(mesh(r)).closed, 'torus closed');
+  r = build([{ ...f, prim: 'cylinder', w: 20, h: 30, nx: 2, nz: 2 }]); okAll(r); assert.ok(K.meshStats(mesh(r)).closed, 'cylinder closed');
+  r = build([{ ...f, prim: 'plane', w: 30, d: 30, nx: 3, ny: 3, level: 2 }]); okAll(r); assert.ok(!K.meshStats(mesh(r)).closed, 'plane is open');
+  r = build([{ ...f, output: 'solid', level: 1 }]); okAll(r); assert.equal(r.bodies.size, 1, 'form as a solid');
+});

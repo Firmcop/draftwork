@@ -400,6 +400,9 @@ function featureFields(f, idx) {
     case 'meshinsert': case 'tessellate': case 'facegroups': case 'meshrepair': case 'remesh': case 'reduce': case 'smooth': case 'meshplane': case 'meshconvert':
       meshDialog(f, idx, out);
       break;
+    case 'form':
+      formDialog(f, idx, out, placement);
+      break;
     case 'canvas': case 'decal': case 'derive':
       insertDialog(f, idx, out, placement);
       break;

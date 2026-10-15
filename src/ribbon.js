@@ -6,7 +6,7 @@ const planned = (id, label, iconKey, phase = P1, o = {}) => cmd(id, label, iconK
 
 // solid › create
 cmd('sketch', 'Create Sketch', 'sketch', { run: () => startCreateSketch() });
-planned('form', 'Create Form', 'form', P5);
+cmd('form', 'Create Form', 'form', { run: () => newForm() });
 cmd('derive', 'Derive', 'derive', { run: () => startDerive() });
 cmd('extrude', 'Extrude', 'extrude', { key: 'E', run: () => newProfileFeature('extrude') });
 cmd('revolve', 'Revolve', 'revolve', { run: () => newProfileFeature('revolve') });

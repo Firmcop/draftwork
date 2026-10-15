@@ -1,5 +1,5 @@
 // ===== Commands, picking, sketching, measuring, view cube, navigation, boot =====
-const NAMES = { sketch: 'Sketch', plane: 'Plane', axis: 'Axis', point: 'Point', splitbody: 'Split Body', scale: 'Scale', thicken: 'Thicken', replaceface: 'Replace Face', align: 'Align', patpath: 'Pattern on Path', boundary: 'Boundary Fill', coil: 'Coil', splitface: 'Split Face', sextrude: 'Extrude Surface', srevolve: 'Revolve Surface', patch: 'Patch', soffset: 'Offset Surface', sloft: 'Loft Surface', ssweep: 'Sweep Surface', ruled: 'Ruled Surface', trim: 'Trim', untrim: 'Untrim', sextend: 'Extend', stitch: 'Stitch', unstitch: 'Unstitch', reverse: 'Reverse Normal', deleteface: 'Delete Face', flange: 'Flange', contourflange: 'Contour Flange', unfold: 'Unfold', refold: 'Refold', boss: 'Boss', snapfit: 'Snap Fit', lip: 'Lip', rest: 'Rest', meshinsert: 'Mesh', tessellate: 'Tessellate', facegroups: 'Face Groups', meshrepair: 'Repair', remesh: 'Remesh', reduce: 'Reduce', smooth: 'Smooth', meshplane: 'Plane Cut', meshconvert: 'Convert Mesh', canvas: 'Canvas', decal: 'Decal', derive: 'Derive', thread: 'Thread', rib: 'Rib', web: 'Web', emboss: 'Emboss', extrude: 'Extrude', revolve: 'Revolve', box: 'Box', cylinder: 'Cylinder', sphere: 'Sphere', torus: 'Torus', hole: 'Hole', pattern: 'Pattern', mirror: 'Mirror', move: 'Move', combine: 'Combine', remove: 'Remove', fillet: 'Fillet', chamfer: 'Chamfer', shell: 'Shell', draft: 'Draft', loft: 'Loft', import: 'Import', sweep: 'Sweep' };
+const NAMES = { sketch: 'Sketch', plane: 'Plane', axis: 'Axis', point: 'Point', splitbody: 'Split Body', scale: 'Scale', thicken: 'Thicken', replaceface: 'Replace Face', align: 'Align', patpath: 'Pattern on Path', boundary: 'Boundary Fill', coil: 'Coil', splitface: 'Split Face', sextrude: 'Extrude Surface', srevolve: 'Revolve Surface', patch: 'Patch', soffset: 'Offset Surface', sloft: 'Loft Surface', ssweep: 'Sweep Surface', ruled: 'Ruled Surface', trim: 'Trim', untrim: 'Untrim', sextend: 'Extend', stitch: 'Stitch', unstitch: 'Unstitch', reverse: 'Reverse Normal', deleteface: 'Delete Face', flange: 'Flange', contourflange: 'Contour Flange', unfold: 'Unfold', refold: 'Refold', boss: 'Boss', snapfit: 'Snap Fit', lip: 'Lip', rest: 'Rest', meshinsert: 'Mesh', tessellate: 'Tessellate', facegroups: 'Face Groups', meshrepair: 'Repair', remesh: 'Remesh', reduce: 'Reduce', smooth: 'Smooth', meshplane: 'Plane Cut', meshconvert: 'Convert Mesh', canvas: 'Canvas', form: 'Form', decal: 'Decal', derive: 'Derive', thread: 'Thread', rib: 'Rib', web: 'Web', emboss: 'Emboss', extrude: 'Extrude', revolve: 'Revolve', box: 'Box', cylinder: 'Cylinder', sphere: 'Sphere', torus: 'Torus', hole: 'Hole', pattern: 'Pattern', mirror: 'Mirror', move: 'Move', combine: 'Combine', remove: 'Remove', fillet: 'Fillet', chamfer: 'Chamfer', shell: 'Shell', draft: 'Draft', loft: 'Loft', import: 'Import', sweep: 'Sweep' };
 function nextName(type) {
   let n = doc.features.filter(f => f.type === type).length + 1;
   while (doc.features.some(f => f.name === NAMES[type] + ' ' + n)) n++;
@@ -99,6 +99,7 @@ function startCreateSketch() {
 }
 const PLACED_DEFAULTS = {
   hole: { diameter: 6, depth: 10, cbore: false, cbDiameter: 11, cbDepth: 4, tip: true, tipAngle: 118 },
+  form: { prim: 'box', w: 40, d: 40, h: 40, nx: 2, ny: 2, nz: 2, level: 2, edits: {}, output: 'mesh', symmetric: true },
   boss: { diameter: 8, holeDiameter: 3, height: 10, holeDepth: 0, holeBelow: 0, draftAngle: 'pl_draft', ribs: 0, ribThickness: 'pl_wall*0.6', ribLength: 4, ribHeight: 7, ribAngle: 0, reverse: false },
   snapfit: { length: 12, thickness: 'pl_wall*0.75', width: 6, hookDepth: 1, insertAngle: 30, draftAngle: 0, orient: 0, reverse: false },
   rest: { shape: 'rect', w: 10, d: 6, r: 0, diameter: 10, height: 3, draftAngle: 'pl_draft', orient: 0, reverse: false },
@@ -595,6 +596,7 @@ viewport.addEventListener('pointerup', e => {
   if (jointEdit?.stage && jointPickAt(e)) return;
   if (cpick && constructPickAt(e)) return;
   if (combPickAt(e)) return;
+  if (formPickAt(e)) return;
   const rf = regionDialogFeature();
   if (rf && toggleRegion(rf, regionAt(e, rf))) return;
   const ef = edgeDialogFeature();

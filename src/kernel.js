@@ -591,7 +591,7 @@ function step(f, out) {
     } else if (f.type === 'remove') {
       if (!out.bodies.has(f.body)) throw new Error('Choose a body to remove');
       out.bodies.delete(f.body);
-    } else if (['fillet', 'chamfer', 'shell', 'draft', 'presspull', 'loft', 'import', 'sweep', 'splitbody', 'scale', 'thicken', 'replaceface', 'align', 'patpath', 'boundary', 'coil', 'thread', 'rib', 'web', 'emboss', 'splitface', 'boss', 'snapfit', 'lip', 'rest', 'meshinsert', 'tessellate', 'facegroups', 'meshrepair', 'remesh', 'reduce', 'smooth', 'meshconvert', 'meshplane', 'flange', 'contourflange', 'unfold', 'refold', 'sextrude', 'srevolve', 'patch', 'soffset', 'sloft', 'ssweep', 'ruled', 'trim', 'untrim', 'sextend', 'stitch', 'unstitch', 'reverse', 'deleteface', 'derive'].includes(f.type)) {
+    } else if (['fillet', 'chamfer', 'shell', 'draft', 'presspull', 'loft', 'import', 'sweep', 'splitbody', 'scale', 'thicken', 'replaceface', 'align', 'patpath', 'boundary', 'coil', 'thread', 'rib', 'web', 'emboss', 'splitface', 'boss', 'snapfit', 'lip', 'rest', 'meshinsert', 'tessellate', 'facegroups', 'meshrepair', 'remesh', 'reduce', 'smooth', 'meshconvert', 'meshplane', 'flange', 'contourflange', 'unfold', 'refold', 'sextrude', 'srevolve', 'patch', 'soffset', 'sloft', 'ssweep', 'ruled', 'trim', 'untrim', 'sextend', 'stitch', 'unstitch', 'reverse', 'deleteface', 'derive', 'form'].includes(f.type)) {
       throw new Error('This needs the exact geometry engine, which has not loaded in this view');
     }
     out.status.set(f.id, { state: 'ok' });
@@ -676,7 +676,7 @@ export function resolveFeatures(features, vars) {
   return features.map(f => { const holder = {}; const r = conv(f, holder); if (holder.error) r.error = holder.error; return r; });
 }
 const NUMERIC = new Set(['offset', 'distance', 'angle', 'count', 'count2', 'spacing', 'spacing2', 'cx', 'cy', 'w', 'h', 'd', 'r', 'rot', 'sides', 'length', 'width',
-  'diameter', 'depth', 'cbDiameter', 'cbDepth', 'radius', 'thickness', 'value', 'neutralOffset', 'wall', 'pathIndex', 'major', 'minor', 'dx', 'dy', 'dz', 'rx', 'ry', 'rz', 'tipAngle', 'x', 'y', 'bendRadius', 'kFactor', 'height', 'pitch', 'revolutions', 'section_size', 'factor', 'tolerance', 'gap', 'draftAngle', 'clearance', 'holeDiameter', 'holeDepth', 'holeBelow', 'ribs', 'ribThickness', 'ribLength', 'ribHeight', 'ribAngle', 'hookDepth', 'insertAngle', 'orient', 'edge', 'percent', 'iterations', 'strength']);
+  'diameter', 'depth', 'cbDiameter', 'cbDepth', 'radius', 'thickness', 'value', 'neutralOffset', 'wall', 'pathIndex', 'major', 'minor', 'dx', 'dy', 'dz', 'rx', 'ry', 'rz', 'tipAngle', 'x', 'y', 'bendRadius', 'kFactor', 'height', 'pitch', 'revolutions', 'section_size', 'factor', 'tolerance', 'gap', 'draftAngle', 'clearance', 'holeDiameter', 'holeDepth', 'holeBelow', 'ribs', 'ribThickness', 'ribLength', 'ribHeight', 'ribAngle', 'hookDepth', 'insertAngle', 'orient', 'edge', 'percent', 'iterations', 'strength', 'nx', 'ny', 'nz', 'level']);
 
 // ---- crease edges that tolerate T-junctions (boolean output) ----
 // Edges are grouped by the infinite line they lie on; two triangles are neighbours when
@@ -779,4 +779,77 @@ export function makeZip(files) {
   end.setUint32(0, 0x06054b50, true); end.setUint16(8, files.length, true); end.setUint16(10, files.length, true);
   end.setUint32(12, csize, true); end.setUint32(16, offset, true);
   return new Blob([...parts, ...central, new Uint8Array(end.buffer)], { type: 'application/zip' });
+}
+
+// ---- Form (subdivision surfaces): a control cage of polygons smoothed with Catmull-Clark ----
+// f = { prim: 'box'|'plane'|'cylinder'|'sphere'|'torus', w, d, h, nx, ny, nz, level, edits: { vertexIndex: [dx, dy, dz] } }
+export function formCage(f) {
+  const w = Math.max(+f.w || 40, 1e-3), d = Math.max(+f.d || 40, 1e-3), hh = Math.max(+f.h || 40, 1e-3);
+  const nx = Math.max(1, Math.min(12, Math.round(+f.nx || 2))), ny = Math.max(1, Math.min(12, Math.round(+f.ny || 2))), nz = Math.max(1, Math.min(12, Math.round(+f.nz || 2)));
+  const pos = [], faces = [], map = new Map();
+  const V = (x, y, z) => { const k = Math.round(x * 1e6) + ',' + Math.round(y * 1e6) + ',' + Math.round(z * 1e6); let i = map.get(k); if (i == null) { i = pos.length; pos.push([x, y, z]); map.set(k, i); } return i; };
+  const prim = f.prim || 'box';
+  if (prim === 'box' || prim === 'sphere') {
+    // six gridded faces of a cube (shared edges and corners), outward winding
+    const n = prim === 'sphere' ? [nx, nx, nx] : [nx, ny, nz], S = [w, prim === 'sphere' ? w : d, prim === 'sphere' ? w : hh];
+    const P = (u, v, ax, side) => { const c = [0, 0, 0], a = (ax + 1) % 3, b = (ax + 2) % 3; c[ax] = side * S[ax] / 2; c[a] = (u / n[a] - 0.5) * S[a]; c[b] = (v / n[b] - 0.5) * S[b]; return c; };
+    for (let ax = 0; ax < 3; ax++) for (const side of [-1, 1]) {
+      const a = (ax + 1) % 3, b = (ax + 2) % 3;
+      for (let u = 0; u < n[a]; u++) for (let v = 0; v < n[b]; v++) {
+        const q = [[u, v], [u + 1, v], [u + 1, v + 1], [u, v + 1]].map(([s, t]) => V(...P(s, t, ax, side)));
+        faces.push(side > 0 ? q : q.reverse());
+      }
+    }
+    if (prim === 'sphere') for (const p of pos) { const l = Math.hypot(...p) || 1; for (let k = 0; k < 3; k++) p[k] = p[k] / l * w / 2; }
+    else for (const p of pos) p[2] += hh / 2;   // the box sits on XY
+    if (prim === 'sphere') for (const p of pos) p[2] += w / 2;
+  } else if (prim === 'plane') {
+    for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) faces.push([[i, j], [i + 1, j], [i + 1, j + 1], [i, j + 1]].map(([s, t]) => V((s / nx - 0.5) * w, (t / ny - 0.5) * d, 0)));
+  } else if (prim === 'cylinder') {
+    const seg = Math.max(3, nx * 4), r = w / 2, ring = (z, k) => V(r * Math.cos(2 * Math.PI * k / seg), r * Math.sin(2 * Math.PI * k / seg), z);
+    for (let j = 0; j < nz; j++) for (let k = 0; k < seg; k++) faces.push([ring(hh * j / nz, k), ring(hh * j / nz, k + 1), ring(hh * (j + 1) / nz, k + 1), ring(hh * (j + 1) / nz, k)]);
+    faces.push(Array.from({ length: seg }, (_, k) => ring(hh, k)), Array.from({ length: seg }, (_, k) => ring(0, seg - k)));
+  } else if (prim === 'torus') {
+    const su = Math.max(3, nx * 4), sv = Math.max(3, ny * 2), R = w / 2, r = Math.min(+f.h || w / 6, R * 0.9) / 2;
+    const T = (i, j) => { const u = 2 * Math.PI * i / su, v = 2 * Math.PI * j / sv; return V((R + r * Math.cos(v)) * Math.cos(u), (R + r * Math.cos(v)) * Math.sin(u), r + r * Math.sin(v)); };
+    for (let i = 0; i < su; i++) for (let j = 0; j < sv; j++) faces.push([T(i, j), T(i + 1, j), T(i + 1, j + 1), T(i, j + 1)]);
+  }
+  for (const [k, dv] of Object.entries(f.edits || {})) { const p = pos[+k]; if (p && Array.isArray(dv)) for (let a = 0; a < 3; a++) p[a] += +dv[a] || 0; }
+  return { pos, faces };
+}
+export function catmullClark({ pos, faces }) {
+  const ek = (a, b) => a < b ? a + '_' + b : b + '_' + a;
+  const edges = new Map(), vf = pos.map(() => []), ve = pos.map(() => new Set());
+  const fp = faces.map(fc => { const c = [0, 0, 0]; for (const i of fc) for (let k = 0; k < 3; k++) c[k] += pos[i][k] / fc.length; return c; });
+  faces.forEach((fc, fi) => fc.forEach((a, i) => { const b = fc[(i + 1) % fc.length], key = ek(a, b); let e = edges.get(key); if (!e) edges.set(key, e = { a, b, f: [] }); e.f.push(fi); vf[a].push(fi); ve[a].add(key); ve[b].add(key); }));
+  const np = pos.map(p => [...p]), eIdx = new Map();
+  for (const [key, e] of edges) {
+    const mid = [0, 1, 2].map(k => (pos[e.a][k] + pos[e.b][k]) / 2);
+    const p = e.f.length === 2 ? [0, 1, 2].map(k => (pos[e.a][k] + pos[e.b][k] + fp[e.f[0]][k] + fp[e.f[1]][k]) / 4) : mid;
+    e.mid = mid; eIdx.set(key, np.length); np.push(p);
+  }
+  for (let v = 0; v < pos.length; v++) {
+    const es = [...ve[v]].map(k => edges.get(k)), bnd = es.filter(e => e.f.length !== 2);
+    if (bnd.length >= 2) {   // boundary vertex: stays on the boundary curve
+      const o = bnd.slice(0, 2).map(e => pos[e.a === v ? e.b : e.a]);
+      np[v] = [0, 1, 2].map(k => 0.75 * pos[v][k] + 0.125 * (o[0][k] + o[1][k]));
+    } else if (es.length >= 3) {
+      const n = es.length, F = [0, 1, 2].map(k => vf[v].reduce((s, fi) => s + fp[fi][k], 0) / vf[v].length), R = [0, 1, 2].map(k => es.reduce((s, e) => s + e.mid[k], 0) / n);
+      np[v] = [0, 1, 2].map(k => (F[k] + 2 * R[k] + (n - 3) * pos[v][k]) / n);
+    }
+  }
+  const nf = [];
+  faces.forEach((fc, fi) => {
+    const c = np.length; np.push(fp[fi]);
+    fc.forEach((a, i) => { const b = fc[(i + 1) % fc.length], pr = fc[(i - 1 + fc.length) % fc.length]; nf.push([a, eIdx.get(ek(a, b)), c, eIdx.get(ek(pr, a))]); });
+  });
+  return { pos: np, faces: nf };
+}
+export function formMesh(f) {
+  let m = formCage(f);
+  const L = Math.max(0, Math.min(4, Math.round(+f.level ?? 2)));
+  for (let i = 0; i < L; i++) m = catmullClark(m);
+  const idx = [];
+  for (const fc of m.faces) for (let k = 1; k + 1 < fc.length; k++) idx.push(fc[0], fc[k], fc[k + 1]);
+  return { pos: new Float32Array(m.pos.flat()), idx: new Uint32Array(idx) };
 }
