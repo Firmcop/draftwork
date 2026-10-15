@@ -63,6 +63,11 @@ function renderBrowser() {
         for (const b of own) bodyNode(3, b);
     }
   }
+  if (groups().length && add(1, { key: 'rgroups', icon: 'folder', label: 'Rigid Groups', sub: String(groups().length) })) {
+    for (const g of groups()) add(2, { icon: 'component', label: g.name, sub: g.comps.map(id => compById(id)?.name).filter(Boolean).join(', '),
+      renameKey: 'g:' + g.id, onRename: v => { checkpoint(); g.name = v.trim() || g.name; persist(); renderTimeline(); }, onDbl: () => { renaming = 'g:' + g.id; renderBrowser(); },
+      menu: () => [{ label: 'Rename', icon: 'params', action: () => { renaming = 'g:' + g.id; renderBrowser(); } }, '-', { label: 'Delete', icon: 'delete', action: () => deleteRigidGroup(g.id) }] });
+  }
   if (joints().length && add(1, { key: 'joints', icon: 'folder', label: 'Joints', sub: String(joints().length) })) {
     for (const j of joints()) {
       const st = jointStatus.get(j.id);
@@ -139,6 +144,8 @@ function renderTimeline() {
     if (doc.rollback === i) track.append(mk());
   });
   if (doc.rollback == null) track.append(mk());
+  const asm = assemblyChips();
+  if (asm.length) track.append(h('span', { class: 'tlsep', 'aria-hidden': 'true' }), ...asm);   // assembly steps apply after the features
   const cur = track.querySelector('[aria-current="true"]') || (doc.rollback != null ? track.querySelector('.marker') : null);
   if (cur) cur.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
@@ -149,7 +156,7 @@ function wireMarker(m) {
   });
   m.addEventListener('pointerdown', e => {
     e.preventDefault(); m.setPointerCapture(e.pointerId);
-    const chips = [...$('#tlTrack').querySelectorAll('.chip')];
+    const chips = [...$('#tlTrack').querySelectorAll('.chip[data-i]')];
     let target = doc.rollback;
     const move = ev => {
       const x = ev.clientX; let idx = -1;

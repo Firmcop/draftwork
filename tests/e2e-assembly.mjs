@@ -135,6 +135,40 @@ check(gap(world('Rocker', [60, 120, 3]), r0) > 1, `the rocker followed (moved ${
 check((await page.evaluate(() => window.__dw.doc())).joints[0].angle === 60, 'the crank keeps the angle that was set');
 if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/fourbar-60.png' });
 
+// as-built hinge: an arm already lying on a plate; joint it where it is, then turn it; a rigid group follows
+await page.evaluate(d => window.__dw.setDoc(d), {
+  version: 2, name: 'Hinge', units: 'mm', params: [], bodyMeta: {}, showOrigin: false, sketchShown: {}, planeHidden: {},
+  features: [
+    { id: 'plate', type: 'box', name: 'Plate', plane: 'XY', offset: 0, cx: 0, cy: 0, w: 40, d: 40, h: 5, op: 'new' },
+    { id: 'arm', type: 'box', name: 'Arm', plane: 'XY', offset: 5, cx: 20, cy: 0, w: 40, d: 6, h: 3, op: 'new' },
+    { id: 'armh', type: 'cylinder', name: 'Pivot hole', plane: 'XY', offset: 5, cx: 5, cy: 0, diameter: 3, h: 3, op: 'cut', target: 'arm' },
+    { id: 'tip', type: 'box', name: 'Tip', plane: 'XY', offset: 8, cx: 37, cy: 0, w: 4, d: 6, h: 4, op: 'new' },
+  ],
+  components: [{ id: 'ka', name: 'Arm', bodies: ['arm'] }, { id: 'kt', name: 'Tip', bodies: ['tip'] }],
+});
+await W(3000); await page.click('#vcHome'); await W(800);
+await page.click('.rlabel:has-text("ASSEMBLE")'); await W(200); await page.click('.menu .mi:has-text("As-built Joint")'); await W(600);
+await page.mouse.click(...Object.values(await scr(6.5, 0, 8))); await W(800);
+let jd = await page.evaluate(() => window.__dw.doc().joints.at(-1));
+check(jd?.a?.kind === 'edge', 'as-built: the pivot hole rim is the origin (' + (jd?.a?.kind || 'nothing') + ')');
+await page.mouse.click(...Object.values(await scr(-15, -15, 5))); await W(800);
+a = await asm();
+check(a.joints.at(-1).endsWith(':ok') && !a.comps.find(c => c.name === 'Arm').moved, 'as-built joint keeps the arm exactly where it is');
+await page.selectOption('#jt-type', 'revolute'); await W(300);
+await page.fill('#jv-angle', '90'); await W(600);
+a = await asm();
+const tipEnd = apply(a.xf.Arm, [40, 0, 8]);
+check(Math.abs(tipEnd[0] - 5) < 0.05 && Math.abs(Math.abs(tipEnd[1]) - 35) < 0.05 && Math.abs(tipEnd[2] - 8) < 0.05, `turning 90° swings the arm about the pivot (${tipEnd.map(v => v.toFixed(2))})`);
+check(!a.xf.Tip, 'the tip (not grouped yet) stays put');
+await page.click('.dialog .btn.ok'); await W(600);
+await page.click('.rlabel:has-text("ASSEMBLE")'); await W(200); await page.click('.menu .mi:has-text("Rigid Group")'); await W(600);
+await page.click('#rg-ka'); await page.click('#rg-kt'); await page.click('.dialog .btn.ok'); await W(800);
+a = await asm();
+check(a.xf.Tip && near(a.xf.Tip, a.xf.Arm, 1e-6), 'rigid group: the tip now moves with the arm');
+const chips = await page.$$eval('#tlTrack .chip.asm', els => els.map(e => e.getAttribute('aria-label')));
+check(chips.length === 4 && chips.some(t => /rigid group/.test(t)) && chips.some(t => /as-built revolute joint/.test(t)), 'timeline lists components, the group and the joint: ' + chips.join(' | '));
+if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/asbuilt.png' });
+
 check(errors.length === 0, 'no page errors' + (errors.length ? ': ' + errors.slice(0, 3).join(' | ') : ''));
 await browser.close(); server.close();
 process.exit(failed ? 1 : 0);

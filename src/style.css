@@ -312,3 +312,6 @@ table.grid tfoot td { font-weight: 600; border-bottom: 0; }
   .browser { top: 8px; max-width: calc(100% - 110px); }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+
+/* timeline: assembly steps come after the modeling features */
+.tlsep { flex: none; width: 1px; height: 22px; margin: 0 6px; background: var(--line); }

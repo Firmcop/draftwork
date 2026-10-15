@@ -39,10 +39,11 @@ Done
 - [x] Joint animation; assembled positions in display, mass properties, STL and STEP export
 - [x] Joint origins re-found after rebuilds; sketches on a component's face move with it
 - [x] Closed loops of joints (four-bar linkages) solved; joint limits; drag parts along their free motion
+- [x] As-built joints (join parts where they sit); rigid groups; components, groups and joints shown in the timeline
 
 Next
-- [ ] As-built joints, rigid groups, motion links; contact sets
-- [ ] Joints and components in the timeline; components as separate designs (external references)
+- [ ] Motion links; contact sets; joint origins at arbitrary points (between two faces, on a vertex)
+- [ ] Components as separate designs (external references); assembly steps placed between features in the timeline
 - [ ] 2D drawings with dimensions; render; add-ins
 
 ## Phase 3 — Manufacturing

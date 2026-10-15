@@ -23,9 +23,15 @@ const comps = () => doc.components || (doc.components = []);
 const joints = () => doc.joints || (doc.joints = []);
 const compById = id => comps().find(c => c.id === id) || null;
 function compOfBody(bid) { return comps().find(c => c.bodies.includes(bid)) || null; }
-const compKey = bid => compOfBody(bid)?.id || 'root';
+const groups = () => doc.rigidGroups || (doc.rigidGroups = []);
+const groupOfComp = cid => groups().find(g => g.comps.includes(cid)) || null;
+// solver node of a component: a rigid group moves as one node
+const keyOfComp = c => { const g = groupOfComp(c.id); return g ? 'g:' + g.id : c.id; };
+const compKey = bid => { const c = compOfBody(bid); return c ? keyOfComp(c) : 'root'; };
+let keyXf = new Map();             // solver node -> Matrix4
+const fixedKey = k => k === 'root' || comps().some(c => c.grounded && keyOfComp(c) === k);
 function bodyXf(bid) { const c = bid && compOfBody(bid); return (c && compXf.get(c.id)) || IDENT; }
-function compLabel(key) { return key === 'root' ? 'the fixed bodies' : compById(key)?.name || 'a component'; }
+function compLabel(key) { return key === 'root' ? 'the fixed bodies' : key.startsWith('g:') ? 'rigid group ' + (groups().find(g => 'g:' + g.id === key)?.name || '') : compById(key)?.name || 'a component'; }
 
 // Joint values: the solver's working values, then an animation/drag preview, then values a loop solve moved
 // (kept only while the document values they started from are unchanged), then the document. Limits clamp.
@@ -55,6 +61,7 @@ function frameFromSig(sig, kind) {
 function endFrame(end) {
   if (!end) return null;
   const rec = result.bodies.get(end.body); if (!rec) return null;
+  if (end.kind === 'frame') return new THREE.Matrix4().fromArray(end.frame);
   let sig = end.sig;
   if (rec.shape) { sig = rematchEnd(rec, end); if (!sig) return null; }
   return frameFromSig(sig, end.kind);
@@ -87,7 +94,7 @@ function motionOf(j) {
 // already placed closes a loop; its mismatch is returned so the loop solve can drive it to zero.
 function treePass(todo) {
   const solved = new Map([['root', IDENT]]), driver = new Map(), loops = [];
-  for (const c of comps()) if (c.grounded) solved.set(c.id, IDENT);
+  for (const c of comps()) if (c.grounded) solved.set(keyOfComp(c), IDENT);
   let left = todo;
   while (left.length) {
     const next = []; let progress = false;
@@ -168,7 +175,8 @@ function solveAssembly(o = {}) {
     }
   } else jointLive = new Map();
   assemblyDriver = res.driver;
-  compXf = new Map([...res.solved].filter(([k]) => k !== 'root'));
+  keyXf = res.solved;
+  compXf = new Map(comps().map(c => [c.id, res.solved.get(keyOfComp(c))]).filter(([, m]) => m));
   mpCache = null;
 }
 function solveLinear(A, b) {
@@ -195,7 +203,7 @@ function applyBodyTransforms() {
     for (const o of [s.mesh, s.edges, s.cap]) { o.matrixAutoUpdate = false; o.matrix.copy(m); o.matrixWorldNeedsUpdate = true; }
   }
 }
-function assemblyChanged(hold) { solveAssembly({ hold }); applyBodyTransforms(); drawToolsOverlay(); refreshOverlays(); renderInfo(); requestRender(); }
+function assemblyChanged(hold) { solveAssembly({ hold }); applyBodyTransforms(); drawToolsOverlay(); refreshOverlays(); renderInfo(); renderTimeline(); requestRender(); }
 
 // ---------- commands ----------
 function newComponent() {
@@ -231,11 +239,11 @@ function toggleGround(id) { const c = compById(id); if (!c) return; checkpoint()
 function deleteJoint(id) { checkpoint(); doc.joints = joints().filter(j => j.id !== id); persist(); assemblyChanged(); renderBrowser(); }
 function toggleJointSuppressed(id) { const j = joints().find(x => x.id === id); if (!j) return; checkpoint(); j.suppressed = !j.suppressed; persist(); assemblyChanged(); renderBrowser(); }
 
-function newJoint() {
+function newJoint(asBuilt = false) {
   if (!isBrep()) { toast(engineState === 'loading' ? 'The exact geometry engine is still loading. Try again in a moment.' : 'Joints need the exact geometry engine, which could not start here: ' + engineMsg); return; }
   if (!comps().length) { toast('Make a component first (Assemble ▸ New Component). Bodies outside components stay fixed.'); return; }
   const snap = JSON.stringify(doc); checkpoint();
-  const j = { id: uid(), name: 'Joint ' + (joints().length + 1), type: 'rigid', a: null, b: null, angle: 0, distance: 0, x: 0, y: 0, offset: 0, flip: false, range: { angle: [0, 360], distance: [0, 20] } };
+  const j = { id: uid(), name: (asBuilt ? 'As-built Joint ' : 'Joint ') + (joints().length + 1), type: 'rigid', a: null, b: null, angle: 0, distance: 0, x: 0, y: 0, offset: 0, flip: !!asBuilt, ...(asBuilt ? { asBuilt: true } : {}) };
   joints().push(j);
   openJointDialog(j.id, snap, 'a');
 }
@@ -251,9 +259,9 @@ function openJointDialog(id, snap, stage) {
     body: () => {
       const j = J(); if (!j) return [];
       const st = jointStatus.get(j.id);
-      const desc = e => !e ? 'Not picked' : (e.kind === 'edge' ? 'Round edge' : 'Face center') + ' on ' + bodyName(e.body) + (compOfBody(e.body) ? ' (' + compOfBody(e.body).name + ')' : ' (fixed)');
+      const desc = e => !e ? 'Not picked' : (e.kind === 'frame' ? 'As it sits now, with' : e.kind === 'edge' ? 'Round edge' : 'Face center') + ' on ' + bodyName(e.body) + (compOfBody(e.body) ? ' (' + compOfBody(e.body).name + ')' : ' (fixed)');
       const endRow = (k, label) => h('div', { class: 'row' }, h('span', { class: 'rl' }, label), h('div', {},
-        h('div', { class: 'note', style: 'margin:0' }, jointEdit?.stage === k ? 'Click a flat face or a round edge on the model…' : desc(j[k])),
+        h('div', { class: 'note', style: 'margin:0' }, jointEdit?.stage === k ? (j.asBuilt && k === 'b' ? 'Click the part it stays with…' : 'Click a flat face or a round edge on the model…') : desc(j[k])),
         h('button', { class: 'btn', type: 'button', id: 'jp-' + k, style: 'margin-top:4px', 'aria-pressed': String(jointEdit?.stage === k), onclick: () => { jointEdit.stage = k; rerenderDialog(); defaultHint(); } }, j[k] ? 'Pick again' : 'Pick')));
       const typeSel = h('select', { id: 'jt-type' }, ...Object.entries(JOINT_TYPES).map(([v, t]) => h('option', { value: v, selected: j.type === v }, t.label)));
       typeSel.addEventListener('change', () => { set('type', typeSel.value); rerenderDialog(); });
@@ -276,10 +284,10 @@ function openJointDialog(id, snap, stage) {
       const animBtn = h('button', { class: 'btn', type: 'button', id: 'jt-anim', disabled: !dofs.length || st?.state !== 'ok', 'aria-pressed': String(!!jointAnim), onclick: () => { jointAnim ? stopJointAnim() : startJointAnim(j.id); rerenderDialog(); } }, jointAnim ? 'Stop' : 'Animate');
       const nameI = h('input', { type: 'text', id: 'jt-name', value: j.name, autocomplete: 'off' }); nameI.addEventListener('input', () => { checkpoint('jname-' + id); j.name = nameI.value; renderBrowser(); });
       return [
-        section_('Position', endRow('a', 'Moves'), endRow('b', 'Attaches to'), st?.msg ? h('p', { class: 'note', style: 'color:var(--err)' }, st.msg) : null),
+        section_('Position', endRow('a', j.asBuilt ? 'Moving part' : 'Moves'), endRow('b', j.asBuilt ? 'Stays with' : 'Attaches to'), j.asBuilt ? h('p', { class: 'note' }, 'As-built: the parts stay where they are; the joint origin is on the moving part.') : null, st?.msg ? h('p', { class: 'note', style: 'color:var(--err)' }, st.msg) : null),
         section_('Motion', h('div', { class: 'row' }, h('label', { class: 'rl', for: 'jt-type' }, 'Type'), typeSel),
           ...dofs.map(k => num(k, k === 'angle' ? 'Angle' : k === 'distance' ? 'Distance' : k.toUpperCase(), DOF_UNITS[k], { slider: true })),
-          num('offset', 'Offset', 'mm'), h('label', { class: 'chk', for: 'jt-flip' }, flip, 'Flip (same direction instead of facing)'),
+          num('offset', 'Offset', 'mm'), j.asBuilt ? null : h('label', { class: 'chk', for: 'jt-flip' }, flip, 'Flip (same direction instead of facing)'),
           dofs.length ? h('div', { class: 'row' }, h('span', { class: 'rl' }), animBtn) : null),
         section_('Name', h('div', { class: 'row' }, h('label', { class: 'rl', for: 'jt-name' }, 'Name'), nameI)),
       ];
@@ -294,9 +302,26 @@ function openJointDialog(id, snap, stage) {
   assemblyChanged(); defaultHint();
 }
 // Click on the model while a joint origin is being picked: round edges first, then flat faces.
+// As-built: the base side is a fixed frame on the other part, chosen so the parts stay exactly where they are now.
+function asBuiltBase(j, body) {
+  const was = j.suppressed; j.suppressed = true; solveAssembly(); j.suppressed = was;
+  const Fa = endFrame(j.a); if (!Fa) return null;
+  const Ta = keyXf.get(compKey(j.a.body)) || IDENT, Tb = keyXf.get(compKey(body)) || IDENT;
+  const Fb = Tb.clone().invert().multiply(Ta).multiply(Fa).multiply(motionOf(j).invert());
+  return { body, kind: 'frame', frame: Fb.toArray() };
+}
 function jointPickAt(e) {
   if (!jointEdit?.stage) return false;
   const j = joints().find(x => x.id === jointEdit.id); if (!j) return false;
+  if (j.asBuilt && jointEdit.stage === 'b') {           // any click on the other part
+    raycaster.setFromCamera(ndcOf(e), camera); scene.updateMatrixWorld();
+    const meshes = []; for (const [, sb] of shownBodies) if (sb.mesh.visible) meshes.push(sb.mesh);
+    const hit = raycaster.intersectObjects(meshes, false)[0]; if (!hit) return true;
+    const body = hit.object.userData.body;
+    if (j.a && compKey(j.a.body) === compKey(body)) { toast('That is the same part. Click the part it stays with.'); return true; }
+    checkpoint(); j.b = asBuiltBase(j, body); jointEdit.stage = null;
+    assemblyChanged(); rerenderDialog(); defaultHint(); return true;
+  }
   let end = null;
   const eh = brepEdgeHit(e);
   if (eh?.sig?.type === 'CIRCLE' && eh.sig.cc) end = { body: eh.body, kind: 'edge', sig: eh.sig };
@@ -306,11 +331,17 @@ function jointPickAt(e) {
   if (other && compKey(other.body) === compKey(end.body)) { toast('Both origins would be on ' + compLabel(compKey(end.body)) + '. Pick a different part.'); return true; }
   checkpoint();
   j[jointEdit.stage] = end;
+  if (j.asBuilt && jointEdit.stage === 'a' && j.b) j.b = asBuiltBase(j, j.b.body);     // re-anchor to the new origin
   jointEdit.stage = jointEdit.stage === 'a' && !j.b ? 'b' : null;
   assemblyChanged(); rerenderDialog(); defaultHint();
   return true;
 }
-function jointHint() { return jointEdit?.stage === 'a' ? 'Click a flat face or round edge on the part that moves' : jointEdit?.stage === 'b' ? 'Click a flat face or round edge on the part it attaches to' : null; }
+function jointHint() {
+  const j = jointEdit && joints().find(x => x.id === jointEdit.id);
+  if (jointEdit?.stage === 'a') return j?.asBuilt ? 'Click a flat face or round edge on the moving part: that is where the joint turns or slides' : 'Click a flat face or round edge on the part that moves';
+  if (jointEdit?.stage === 'b') return j?.asBuilt ? 'Click the part it stays with (it does not move)' : 'Click a flat face or round edge on the part it attaches to';
+  return null;
+}
 
 // ---------- animation ----------
 function startJointAnim(id) {
@@ -375,10 +406,10 @@ function partDragStart(e) {
   raycaster.setFromCamera(ndcOf(e), camera); scene.updateMatrixWorld();
   const meshes = []; for (const [, sb] of shownBodies) if (sb.mesh.visible) meshes.push(sb.mesh);
   const hit = raycaster.intersectObjects(meshes, false)[0]; if (!hit) return;
-  const c = compOfBody(hit.object.userData.body); if (!c || c.grounded) return;
-  const t = assemblyDriver.get(c.id); if (!t) return;
+  const c = compOfBody(hit.object.userData.body); if (!c || fixedKey(keyOfComp(c))) return;
+  const t = assemblyDriver.get(keyOfComp(c)); if (!t) return;
   const j = t.j, dofs = JOINT_TYPES[j.type].dofs; if (!dofs.length) return;
-  const base = t.kb === 'root' ? IDENT : (compXf.get(t.kb) || IDENT);
+  const base = keyXf.get(t.kb) || IDENT;
   const W = base.clone().multiply(t.Fb).multiply(new THREE.Matrix4().makeTranslation(0, 0, jval(j, 'offset')));
   e.stopPropagation(); e.preventDefault();               // keep the view from orbiting
   downAt = { x: e.clientX, y: e.clientY, b: 0 };         // a click without movement still selects
@@ -423,4 +454,44 @@ function partDragEnd() {
   jointLive.delete(D.j.id);
   solveAssembly({ hold: D.j.id }); commitLive(); persist();
   applyBodyTransforms(); drawToolsOverlay(); renderBrowser(); if (dlg) rerenderDialog(); defaultHint(); requestRender();
+}
+
+// ---------- rigid groups: components that move as one ----------
+function newRigidGroup() {
+  const avail = comps().filter(c => !groupOfComp(c.id));
+  if (avail.length < 2) { toast('A rigid group needs at least two components that are not already in a group'); return; }
+  const pickSet = new Set(); let name = 'Rigid Group ' + (groups().length + 1);
+  openPanelDialog({ title: 'Rigid Group', icon: 'component', okLabel: 'OK', help: 'Components in a rigid group keep their positions relative to each other and move together.',
+    body: () => {
+      const list = h('div', { class: 'picklist' });
+      for (const c of avail) { const idn = 'rg-' + c.id, cb = h('input', { type: 'checkbox', id: idn, checked: pickSet.has(c.id) }); cb.addEventListener('change', () => { cb.checked ? pickSet.add(c.id) : pickSet.delete(c.id); }); list.append(h('label', { class: 'chk', for: idn }, cb, c.name)); }
+      const nm = h('input', { type: 'text', id: 'rg-name', value: name, autocomplete: 'off' }); nm.addEventListener('input', () => { name = nm.value; });
+      return [section_('Components', list), section_('Group', h('div', { class: 'row' }, h('label', { class: 'rl', for: 'rg-name' }, 'Name'), nm))];
+    },
+    onOK: () => {
+      if (pickSet.size < 2) { toast('Choose at least two components'); return; }
+      checkpoint(); groups().push({ id: uid(), name: name.trim() || 'Rigid Group', comps: [...pickSet] });
+      persist(); assemblyChanged(); renderBrowser(); renderTimeline(); toast('Rigid group created');
+    },
+  });
+}
+function deleteRigidGroup(id) { checkpoint(); doc.rigidGroups = groups().filter(g => g.id !== id); persist(); assemblyChanged(); renderBrowser(); renderTimeline(); }
+
+// ---------- timeline: assembly steps after the modeling features ----------
+function assemblyChips() {
+  const out = [];
+  const chip = (o) => { const b = h('button', { class: 'chip asm s-' + (o.state || 'ok'), 'aria-label': o.label, title: o.label + (o.msg ? '\n⚠ ' + o.msg : ''), 'aria-current': String(!!o.cur), html: icon(o.icon) });
+    b.addEventListener('click', o.click); b.addEventListener('dblclick', o.dbl || o.click);
+    b.addEventListener('contextmenu', e => { e.preventDefault(); openMenu(b, o.menu(), { at: { x: e.clientX, y: e.clientY - 160 } }); });
+    out.push(b); };
+  for (const c of comps()) chip({ icon: 'component', label: c.name + ' (component)', click: () => { if (c.bodies[0]) selectBody(c.bodies[0]); }, dbl: () => { renaming = 'c:' + c.id; expanded.add('components'); renderBrowser(); },
+    menu: () => [{ label: c.grounded ? 'Unground' : 'Ground', icon: 'component', action: () => toggleGround(c.id) }, '-', { label: 'Dissolve', icon: 'delete', action: () => dissolveComponent(c.id) }] });
+  for (const g of groups()) chip({ icon: 'component', label: g.name + ' (rigid group)', click: () => { }, menu: () => [{ label: 'Delete', icon: 'delete', action: () => deleteRigidGroup(g.id) }] });
+  for (const j of joints()) {
+    const st = jointStatus.get(j.id);
+    chip({ icon: 'joint', label: j.name + ' (' + (j.asBuilt ? 'as-built ' : '') + (JOINT_TYPES[j.type]?.label || '').toLowerCase() + ' joint)', state: st?.state === 'warn' ? 'error' : st?.state, msg: st?.msg, cur: selJoint === j.id || jointEdit?.id === j.id,
+      click: () => { if (selJoint === j.id && !dlg) editJoint(j.id); else selectJoint(j.id); }, dbl: () => editJoint(j.id),
+      menu: () => [{ label: 'Edit Joint', icon: 'joint', action: () => editJoint(j.id) }, { label: j.suppressed ? 'Unsuppress' : 'Suppress', icon: 'eye', action: () => toggleJointSuppressed(j.id) }, '-', { label: 'Delete', icon: 'delete', action: () => deleteJoint(j.id) }] });
+  }
+  return out;
 }
