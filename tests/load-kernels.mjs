@@ -13,6 +13,7 @@ export async function loadKernels({ exact = false } = {}) {
   const code = `import * as THREE from '${nm('three/build/three.module.js')}';
 import { Brush, Evaluator, ADDITION, SUBTRACTION, INTERSECTION } from '${nm('three-bvh-csg/build/index.module.js')}';
 import * as RCmod from '${nm('replicad/dist/replicad.js')}';
+${strip(fs.readFileSync(path.join(root, 'src/font.js'), 'utf8'))}
 ${strip(fs.readFileSync(path.join(root, 'src/solver.js'), 'utf8'))}
 ${strip(fs.readFileSync(path.join(root, 'src/kernel.js'), 'utf8'))}
 ${strip(fs.readFileSync(path.join(root, 'src/brep.js'), 'utf8'))}

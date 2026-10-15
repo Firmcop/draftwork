@@ -169,6 +169,8 @@ viewport.addEventListener('pointerdown', e => {
       selProfile = null;
       gdraw = { kind: 'drag', target: gp, start: hit, moved: false, base: cloneGeo(sk.geo) };
     } else {
+      const tx = textAt(sk, hit);
+      if (tx) { e.stopImmediatePropagation(); e.preventDefault(); openTextDialog(sk, tx); return; }
       const pr = pickProfile(sk, hit);
       if (!pr) { if (geoSel.size || selProfile) { geoSel.clear(); selProfile = null; refreshOverlays(); renderPalette(); } return; }   // empty space: let the camera orbit
       geoSel.clear(); selProfile = pr.id;
@@ -180,6 +182,7 @@ viewport.addEventListener('pointerdown', e => {
     return;
   }
   e.stopImmediatePropagation(); e.preventDefault();
+  if (SK_TOOLS2.has(sketchTool)) return sketchTool2Click(sk, hit, e);
   if (sketchTool === 'line') return lineClick(sk, hit);
   if (sketchTool === 'spline') return splineClick(sk, hit);
   if (sketchTool === 'arc3') return arcClick(sk, hit);
@@ -322,7 +325,7 @@ function drawGeo(sk, grp, active) {
     const free = st.analysis.free;
     for (const c of st.rg.curves) {
       const sel = active && geoSel.has(c.id), hov = active && geoHover === c.id;
-      const col = !active ? colors.muted : sel ? colors.select : hov ? colors.accent : c.constr ? colors['ico-c'] : free.has(c.id) ? colors.accent : colors.fg;
+      const col = !active ? colors.muted : sel ? colors.select : hov ? colors.accent : c.constr ? colors['ico-c'] : c.proj ? 0x9b59b6 : free.has(c.id) ? colors.accent : colors.fg;
       grp.add(line(curvePts(sk, c, posOf, radOf).map(([x, y]) => [x, y, 0.07]), col, { depthTest: !active, order: 5, dashed: !!c.constr, dash: 5 * zoom, gap: 3.5 * zoom }));
     }
     if (active) {
@@ -336,6 +339,7 @@ function drawGeo(sk, grp, active) {
       // constraint glyphs and dimensions
       const stack = new Map();
       for (const k of sk.geo.cons) {
+        if (k.proj) continue;   // projected geometry is held in place silently
         const rk = st.rg.cons.find(x => x.id === k.id) || k;
         const anchor = consAnchor(sk, rk, zoom, stack);
         if (!anchor) continue;

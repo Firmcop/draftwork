@@ -10,6 +10,7 @@
 // The solver moves points (and circle radii) as little as possible to satisfy every constraint
 // (minimum-norm Gauss-Newton), so under-constrained geometry stays where the user left it.
 
+import { textProfiles } from './font.js';
 export const DIM_TYPES = new Set(['distance', 'length', 'hdist', 'vdist', 'radius', 'diameter', 'angle', 'pdist']);
 export function emptyGeo() { return { points: [], curves: [], cons: [] }; }
 
@@ -257,7 +258,7 @@ export function sketchWithGeo(f) {
 }
 // Everything a solid feature uses from a sketch: legacy primitive profiles + chosen regions.
 export function sketchUse(sk, refs) {
-  return { profiles: sk.profiles || [], regions: pickRegions(sk.regions || [], refs) };
+  return { profiles: [...(sk.profiles || []), ...textProfiles(sk, refs)], regions: pickRegions(sk.regions || [], refs) };
 }
 
 // Open chains of non-construction lines/arcs (sweep paths), ordered from one free end to the other.

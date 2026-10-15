@@ -55,6 +55,11 @@ function modifyDialog(f, idx, out) {
         h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn', type: 'button', onclick: () => startPick({ prompt: 'Select the plane or flat face to move the face to', planes: true, faces: true, then: c => { checkpoint(); f.target = pickToPlaneRef(c); rerenderDialog(); scheduleRegen(0); } }) }, 'Pick plane or face')),
         h('p', { class: 'note' }, 'The picked flat face moves onto a parallel plane; the body grows or shrinks to follow.')));
       return true;
+    case 'splitface':
+      out.push(section_('Splitting tool', selField('Plane', f, 'tool', planesWithPick(f.tool)),
+        h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn', type: 'button', onclick: () => startPick({ prompt: 'Select the plane or flat face to split with', planes: true, faces: true, then: c => { checkpoint(); f.tool = pickToPlaneRef(c); rerenderDialog(); scheduleRegen(0); } }) }, 'Pick plane or face')),
+        h('p', { class: 'note' }, 'The picked faces are divided where the plane crosses them; the body stays one solid. Use the pieces for press pull, draft or appearance.')));
+      return true;
     case 'align':
       out.push(section_('Align', h('p', { class: 'note' }, `Moves ${bodyName(f.body)} so its face sits on the target face.`), exField('Offset', f, 'offset'), exField('Rotate', f, 'angle', '°'), chkField('Flip (same direction instead of facing)', f, 'flip'),
         h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn', type: 'button', onclick: () => startConstructPick(['face', 'face'], ([a, b]) => { checkpoint(); Object.assign(f, { body: a.body, a, b }); openFeatureDialog(f.id); scheduleRegen(0); }, ['Click the face on the body to move', 'Click the face to align it to']) }, 'Pick faces again'))));

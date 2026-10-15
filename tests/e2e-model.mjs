@@ -80,6 +80,13 @@ d = await docNow(); st = await state();
 const th = d.features.find(f => f.type === 'thread');
 check(th && th.edges?.length === 1 && st.features.at(-1) === 'thread:ok', 'cosmetic thread on the shaft face ' + JSON.stringify(st.features));
 
+// ---- split face: the block's top face divided by the YZ plane ----
+await setDoc({ features: [{ id: 'b', type: 'box', name: 'Block', plane: 'XY', offset: 0, cx: 0, cy: 0, w: 40, d: 20, h: 10, op: 'new' }] });
+await W(2500); await page.click('#vcHome'); await W(800);
+await menu('MODIFY', 'Split Face'); await clickAt(await scr(5, 3, 10)); await W(1500); await ok();
+st = await state();
+check(st.features.at(-1) === 'splitface:ok' && st.bodies.length === 1, 'split face: one body, top face split ' + JSON.stringify(st.features));
+
 check(errors.length === 0, 'no page errors' + (errors.length ? ': ' + errors.slice(0, 3).join(' | ') : ''));
 await browser.close(); server.close();
 process.exit(failed ? 1 : 0);

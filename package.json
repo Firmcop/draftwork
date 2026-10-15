@@ -1,6 +1,6 @@
 {
   "name": "draftwork",
-  "version": "0.15.0",
+  "version": "0.16.0",
   "private": true,
   "description": "Browser-based parametric CAD: sketches, features, exact B-rep geometry (OpenCascade), STEP/STL export.",
   "type": "module",
@@ -8,7 +8,7 @@
     "build": "node scripts/build.mjs",
     "dev": "node scripts/build.mjs && node scripts/serve.mjs",
     "test": "node --test tests/solver.test.mjs tests/kernel.test.mjs tests/brep.test.mjs",
-    "test:e2e": "node scripts/build.mjs && node tests/e2e.mjs && node tests/e2e-sketch.mjs && node tests/e2e-assembly.mjs && node tests/e2e-drawing.mjs && node tests/e2e-model.mjs && ENGINE_INLINE=1 node tests/e2e.mjs"
+    "test:e2e": "node scripts/build.mjs && node tests/e2e.mjs && node tests/e2e-sketch.mjs && node tests/e2e-assembly.mjs && node tests/e2e-drawing.mjs && node tests/e2e-model.mjs && node tests/e2e-sketch2.mjs && ENGINE_INLINE=1 node tests/e2e.mjs"
   },
   "engines": {
     "node": ">=20"

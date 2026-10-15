@@ -261,3 +261,25 @@ test('coil, modeled thread, web, rib and emboss', () => {
   r = K.regenerateBrep([plate, sq, { id: 'em', type: 'emboss', sketch: 'es', edges: [topF], depth: 1, mode: 'deboss' }]); okAll(r);
   near(vols(r)[0], 40 * 40 * 5 - 100, 1e-3, 'deboss removes 10×10×1');
 });
+
+test('sketch text extrudes into letters with holes', () => {
+  const d = { params: [], features: [
+    { id: 's', type: 'sketch', name: 'Sketch 1', plane: 'XY', offset: 0, profiles: [], texts: [{ id: 't1', str: 'OI', x: 0, y: 0, h: 10, angle: 0 }] },
+    { id: 'e', type: 'extrude', name: 'Extrude 1', sketch: 's', distance: 2, direction: 'one', op: 'new' }] };
+  const r = build(d); okAll(r);
+  const v = vols(r);
+  // 'O' has a counter (hole) and 'I' is a bar: roughly cap height 10, stroke ~1.3 mm
+  assert.ok(v.length >= 1 && v.reduce((a, b) => a + b, 0) > 40 && v.reduce((a, b) => a + b, 0) < 200, 'letters have plausible volume: ' + v.join(', '));
+});
+
+test('split face cuts only the picked face', () => {
+  const d = { params: [], features: [{ id: 'b', type: 'box', name: 'B', plane: 'XY', offset: 0, cx: 0, cy: 0, w: 40, d: 20, h: 10, op: 'new' }] };
+  let r = build(d);
+  const body = [...r.bodies.values()][0];
+  const top = [...K.brepSigMap(body, 'face').values()].find(s => s.type === 'PLANE' && Math.abs(s.c[2] - 10) < 1e-6);
+  d.features.push({ id: 'sf', type: 'splitface', name: 'Split Face 1', edges: [top], tool: 'YZ' });
+  r = build(d); okAll(r);
+  const b2 = [...r.bodies.values()][0];
+  assert.equal(K.brepSigMap(b2, 'face').size, 7, 'six faces + the top split in two');
+  near(K.brepProps(b2).volume, 8000, 1e-6, 'volume unchanged');
+});

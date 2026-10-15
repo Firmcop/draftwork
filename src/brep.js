@@ -371,7 +371,7 @@ function pressPull(f, out) {
   return matched;
 }
 // ---- solid modify tools: split body, scale, thicken, replace face, align, pattern on path, boundary fill ----
-const MODIFY_TYPES = new Set(['splitbody', 'scale', 'thicken', 'replaceface', 'align', 'patpath', 'boundary']);
+const MODIFY_TYPES = new Set(['splitface', 'splitbody', 'scale', 'thicken', 'replaceface', 'align', 'patpath', 'boundary']);
 // place a shape by a rigid THREE.Matrix4 (rotation about the origin, then translation)
 function placeShape(shape, M) {
   const p = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3(); M.decompose(p, q, sc);
@@ -400,6 +400,39 @@ function modifyStep(f, out) {
     if (!f.body && (f.edges || []).length) for (const b of out.bodies.values()) { const l = b.shape.faces, hs = matchRefs(l, f.edges, faceSig, 'c'); l.forEach(x => x.delete?.()); if (hs.size) return b; }   // the body the picked faces are on
     const b = out.bodies.get(f.body || bTarget(out, null)); if (!b) throw new Error('Choose a body'); return b;
   };
+  if (f.type === 'splitface') {
+    const b = body(); if (!(f.edges || []).length) throw new Error('Click the faces to split');
+    const { list, picked } = facesOf(b.shape, f.edges);
+    try {
+      if (!picked.length) throw new Error('The picked faces no longer exist. Edit this feature and pick them again.');
+      const oc = RC.getOC(), M = planeFrameOf(f.tool || 'XY', out), e = M.elements, n = [e[8], e[9], e[10]], o = [e[12], e[13], e[14]];
+      const nl = Math.hypot(...n); n.forEach((v, i) => n[i] = v / nl);
+      const tool = new oc.BRepBuilderAPI_MakeFace(RC.makePln(o, n)).Face();
+      const args = new oc.NCollection_List_TopoDS_Shape(), tools = new oc.NCollection_List_TopoDS_Shape();
+      for (const sh of RC.iterTopo(b.shape.wrapped, 'shell')) args.Append(sh);
+      tools.Append(tool);
+      const sp = new oc.BRepAlgoAPI_Splitter(); sp.SetArguments(args); sp.SetTools(tools); sp.Build();
+      if (sp.HasErrors()) throw new Error('Could not split the faces with that plane');
+      const shells = [...RC.iterTopo(sp.Shape(), 'shell')].map(s => RC.cast(s));
+      let solid = RC.makeSolid(shells);
+      // the splitter cuts every face the plane crosses; merge back the ones that were not picked
+      const dist = p => (p[0] - o[0]) * n[0] + (p[1] - o[1]) * n[1] + (p[2] - o[2]) * n[2];
+      const u = new oc.ShapeUpgrade_UnifySameDomain(solid.wrapped, true, true, false);
+      let freed = 0;
+      for (const ed of solid.edges) {
+        const P = q => [q.x, q.y, q.z], mid = P(ed.pointAt(0.5));
+        if (Math.abs(dist(mid)) < 1e-6 && Math.abs(dist(P(ed.startPoint))) < 1e-6) {
+          const v = RC.makeVertex(mid);
+          if (!picked.some(fc => RC.measureDistanceBetween(fc, v) < 1e-6)) { freed++; continue; }
+        }
+        u.KeepShape(ed.wrapped);
+      }
+      if (freed) { u.Build(); solid = RC.cast(u.Shape()); }
+      if (solid.faces.length <= list.length) throw new Error('The plane does not cross the picked faces');
+      bReplace(out, b.id, T(solid));
+    } finally { list.forEach(x => x.delete?.()); }
+    return;
+  }
   if (f.type === 'splitbody') {
     const b = body(), M = planeFrameOf(f.tool || 'XY', out), box = shapesBox([b.shape]);
     const up = halfSpace(M, box.size), A = T(b.shape.clone().intersect(up)), B = T(b.shape.clone().cut(up));
@@ -687,7 +720,7 @@ function regenerateBrep(features, upto = null, cache = null) {
   return out;
 }
 const EDGE_TYPES = new Set(['fillet', 'chamfer', 'shell', 'draft', 'presspull']);
-const FACE_PICK = new Set(['shell', 'draft', 'presspull', 'thicken', 'replaceface', 'thread', 'emboss']);
+const FACE_PICK = new Set(['shell', 'draft', 'presspull', 'thicken', 'replaceface', 'thread', 'emboss', 'splitface']);
 // Imported STEP shapes, parsed once per file (async) and reused by every rebuild: fileId -> Shape3D[]
 const importShapes = new Map();
 function brepStep(f, out) {

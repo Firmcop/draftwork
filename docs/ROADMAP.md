@@ -25,9 +25,13 @@ Done
 - [x] Press Pull on curved faces (holes grow/shrink, bosses thicken)
 - [x] Spline constraints (point on spline, tangent to a line or arc at an end), exact spline trim, spline offset
 - [x] Exact kernel runs in a Web Worker (falls back to the page when workers are blocked)
+- [x] Construction geometry: planes (offset, angle, mid, tangent, 3 points), axes (cylinder, edge, 2 points, 2 planes), points (vertex, centre, xyz); patterns and mirrors use them
+- [x] Modify: split body, split face, scale, align, replace face, thicken, boundary fill, pattern on path
+- [x] Create: coil, thread (cosmetic/modeled), rib, web, emboss/deboss
+- [x] Sketch point, text (embedded outline font), mirror, circular pattern, project model edges
 
 Next
-- [ ] Sketch text; spline handles (tangent direction and weight); extend for splines
+- [ ] Spline handles (tangent direction and weight); extend for splines
 - [ ] Press Pull on edges (fillet) and fillet faces (change radius); offset faces that meet neighbours at an angle; sweep with guide rails/twist
 - [ ] Desktop packaging (Tauri)
 
