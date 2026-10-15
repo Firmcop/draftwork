@@ -670,7 +670,7 @@ export function resolveFeatures(features, vars) {
   return features.map(f => { const holder = {}; const r = conv(f, holder); if (holder.error) r.error = holder.error; return r; });
 }
 const NUMERIC = new Set(['offset', 'distance', 'angle', 'count', 'count2', 'spacing', 'spacing2', 'cx', 'cy', 'w', 'h', 'd', 'r', 'rot', 'sides', 'length', 'width',
-  'diameter', 'depth', 'cbDiameter', 'cbDepth', 'radius', 'thickness', 'value', 'neutralOffset', 'wall', 'pathIndex', 'major', 'minor', 'dx', 'dy', 'dz', 'rx', 'ry', 'rz', 'tipAngle', 'x', 'y']);
+  'diameter', 'depth', 'cbDiameter', 'cbDepth', 'radius', 'thickness', 'value', 'neutralOffset', 'wall', 'pathIndex', 'major', 'minor', 'dx', 'dy', 'dz', 'rx', 'ry', 'rz', 'tipAngle', 'x', 'y', 'bendRadius', 'kFactor', 'height', 'pitch', 'revolutions', 'section_size', 'factor', 'tolerance', 'gap', 'draftAngle', 'clearance']);
 
 // ---- crease edges that tolerate T-junctions (boolean output) ----
 // Edges are grouped by the infinite line they lie on; two triangles are neighbours when

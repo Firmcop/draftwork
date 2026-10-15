@@ -27,7 +27,7 @@ const TRUE_VIEW = { front: 'front', back: 'back', top: 'bottom', bottom: 'top', 
 function engineHost(RCmod) {
   let cacheArr = [];
   const tokOf = new Map(), shapeOf = new Map(), shipped = new Set();
-  let nextTok = 1;
+  let nextTok = 1, lastRes = null;
   const tok = s => { if (!s) return 0; let t = tokOf.get(s); if (!t) { t = nextTok++; tokOf.set(s, t); shapeOf.set(t, s); } return t; };
 
   function meshPayload(t, full) {
@@ -64,6 +64,7 @@ function engineHost(RCmod) {
 
   function regen({ features, rollback }) {
     const res = regenerateBrep(features, rollback, cacheArr);
+    lastRes = res;
     brepCollect(cacheArr, res);
     const alive = aliveShapes(res), freed = [];
     for (const [t, s] of shapeOf) if (!alive.has(s)) { shapeOf.delete(t); tokOf.delete(s); shipped.delete(t); freed.push(t); }
@@ -75,6 +76,7 @@ function engineHost(RCmod) {
       beforeBodies: [...res.beforeBodies].map(([fid, m]) => [fid, [...m].map(([id, b]) => [id, pr(b)])]),
       tools: [...res.tools].map(([fid, t]) => [fid, { ...t, shape: tok(t.shape) }]),
       planes: [...res.planes], axes: [...res.axes], points: [...res.points],
+      sheets: [...res.sheet].filter(([id]) => res.bodies.has(id)).map(([id, r]) => [id, { t: r.t, R: r.R, k: r.k, unfolded: !!r.unfolded }]),
       sketches: [...res.sketches].map(([id, s]) => [id, { matrix: Array.from(s.matrix.elements), feature: s.feature }]),
       freed,
     };
@@ -103,6 +105,7 @@ function engineHost(RCmod) {
       }
       if (op === 'regen') return regen(a);
       if (op === 'reset') { cacheArr = []; return true; }
+      if (op === 'flat') { const r = lastRes?.sheet.get(a.body); return r ? sheetFlatData(r) : null; }
       if (op === 'mesh') { const t = a.tok; const p = meshPayload(t, true); if (p) shipped.add(t); return p; }
       if (op === 'import') { const n = await brepImportSTEP(a.fileId, a.text); cacheArr = []; return n; }
       if (op === 'step') {

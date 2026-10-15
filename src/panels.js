@@ -388,6 +388,9 @@ function featureFields(f, idx) {
     case 'sextrude': case 'srevolve': case 'patch': case 'soffset': case 'sloft': case 'ssweep': case 'ruled': case 'trim': case 'untrim': case 'sextend': case 'stitch': case 'unstitch': case 'reverse': case 'deleteface':
       surfaceDialog(f, idx, out);
       break;
+    case 'flange': case 'contourflange': case 'unfold': case 'refold':
+      sheetDialog(f, idx, out);
+      break;
     case 'coil': case 'rib': case 'web':
       createDialog2(f, idx, out, placement);
       break;

@@ -70,8 +70,8 @@ planned('m.repair', 'Repair', 'remesh', P1); planned('m.remesh', 'Remesh', 'reme
 planned('m.convert', 'Convert Mesh', 'insertmesh', P1);
 cmd('exportstl', 'Export STL', 'exportstl', { run: () => openExportDialog() });
 // sheet metal
-planned('sm.flange', 'Flange', 'flange', P3); planned('sm.contour', 'Contour Flange', 'contourflange', P3); planned('sm.unfold', 'Unfold', 'unfold', P3);
-planned('sm.refold', 'Refold', 'unfold', P3); planned('sm.flat', 'Create Flat Pattern', 'unfold', P3); planned('sm.rules', 'Sheet Metal Rules', 'sheetrules', P3);
+cmd('sm.flange', 'Flange', 'flange', { run: () => newSheet('flange') }); cmd('sm.contour', 'Contour Flange', 'contourflange', { run: () => newSheet('contourflange') }); cmd('sm.unfold', 'Unfold', 'unfold', { run: () => newSheet('unfold') });
+cmd('sm.refold', 'Refold', 'unfold', { run: () => newSheet('refold') }); cmd('sm.flat', 'Create Flat Pattern', 'unfold', { run: () => openFlatPattern() }); cmd('sm.rules', 'Sheet Metal Rules', 'sheetrules', { run: () => openSheetRules() });
 // plastic
 planned('pl.rules', 'Plastic Rules', 'plasticrules', P3); planned('pl.boss', 'Boss', 'boss', P3); planned('pl.snap', 'Snap Fit', 'snapfit', P3); planned('pl.lip', 'Lip', 'lip', P3);
 planned('pl.rest', 'Rest', 'boss', P3); planned('pl.rib', 'Rib', 'rib', P3); planned('pl.web', 'Web', 'web', P3);
@@ -150,8 +150,8 @@ const TABS = {
     { name: 'EXPORT', bar: ['exportstl'], menu: ['exportstl'] },
   ],
   'SHEET METAL': [
-    { name: 'CREATE', bar: ['sketch', 'sm.flange', 'sm.contour'], menu: ['sketch', 'sm.flange', 'sm.contour'] },
-    { name: 'MODIFY', bar: ['sm.unfold', 'sm.refold', 'sm.flat', 'sm.rules'], menu: ['sm.unfold', 'sm.refold', 'sm.flat', '-', 'sm.rules'] },
+    { name: 'CREATE', bar: ['sketch', 'sm.flange', 'sm.contour', 'extrude'], menu: ['sketch', 'sm.flange', 'sm.contour', '-', 'extrude', 'hole', 'patrect', 'patcirc', 'mirror'] },
+    { name: 'MODIFY', bar: ['sm.unfold', 'sm.refold', 'sm.flat', 'sm.rules'], menu: ['sm.unfold', 'sm.refold', 'sm.flat', '-', 'presspull', 'fillet', 'chamfer', 'splitbody', 'move', '-', 'sm.rules'] },
     { name: 'CONSTRUCT', bar: ['offsetplane'], menu: ['offsetplane'] },
     { name: 'INSPECT', bar: ['measure'], menu: ['measure', 'section'] },
     { name: 'SELECT', bar: ['select'], menu: ['select'] },

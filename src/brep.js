@@ -704,10 +704,10 @@ function createStep2(f, out) {
 }
 function brepClone(o) {
   return { bodies: new Map(o.bodies), bodyCount: o.bodyCount, lastBody: o.lastBody, sketches: new Map(o.sketches), planes: new Map(o.planes), axes: new Map(o.axes), points: new Map(o.points),
-    status: new Map(o.status), tools: new Map(o.tools), before: new Map(o.before), beforeBodies: new Map(o.beforeBodies) };
+    status: new Map(o.status), tools: new Map(o.tools), before: new Map(o.before), beforeBodies: new Map(o.beforeBodies), sheet: new Map(o.sheet) };
 }
 function regenerateBrep(features, upto = null, cache = null) {
-  let out = { bodies: new Map(), bodyCount: 0, lastBody: null, sketches: new Map(), planes: new Map(), axes: new Map(), points: new Map(), status: new Map(), tools: new Map(), before: new Map(), beforeBodies: new Map() };
+  let out = { bodies: new Map(), bodyCount: 0, lastBody: null, sketches: new Map(), planes: new Map(), axes: new Map(), points: new Map(), status: new Map(), tools: new Map(), before: new Map(), beforeBodies: new Map(), sheet: new Map() };
   const end = upto == null ? features.length : Math.min(upto + 1, features.length);
   let key = '', reuse = !!cache;
   for (let i = 0; i < features.length; i++) {
@@ -727,7 +727,7 @@ const FACE_PICK = new Set(['shell', 'draft', 'presspull', 'thicken', 'replacefac
 const importShapes = new Map();
 function brepStep(f, out) {
   out.before.set(f.id, [...out.bodies.keys()]);
-  if (EDGE_TYPES.has(f.type) || FACE_PICK.has(f.type) || SURF_FACE_PICK.has(f.type) || SURF_EDGE_PICK.has(f.type) || f.type === 'patch') out.beforeBodies.set(f.id, new Map(out.bodies));
+  if (EDGE_TYPES.has(f.type) || FACE_PICK.has(f.type) || SURF_FACE_PICK.has(f.type) || SURF_EDGE_PICK.has(f.type) || f.type === 'patch' || f.type === 'flange') out.beforeBodies.set(f.id, new Map(out.bodies));
   if (f.suppressed) { out.status.set(f.id, { state: 'suppressed' }); return; }
   try {
     if (f.error) throw new Error(f.error);
@@ -803,6 +803,8 @@ function brepStep(f, out) {
       createStep2(f, out);
     } else if (SURF_TYPES.has(f.type)) {
       surfaceStep(f, out);
+    } else if (SHEET_TYPES.has(f.type)) {
+      sheetStep(f, out);
     }
     out.status.set(f.id, { state: 'ok' });
   } catch (e) {

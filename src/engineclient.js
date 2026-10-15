@@ -79,13 +79,14 @@ async function engineRegen(features, rollback) {
     bodyCount: r.bodyCount, lastBody: r.lastBody,
     status: new Map(r.status), before: new Map(r.before),
     beforeBodies: new Map(r.beforeBodies.map(([fid, list]) => [fid, new Map(list.map(([id, b]) => [id, keep(b)]))])),
-    tools: new Map(r.tools), planes: new Map(r.planes), axes: new Map(r.axes || []), points: new Map(r.points || []),
+    tools: new Map(r.tools), planes: new Map(r.planes), axes: new Map(r.axes || []), points: new Map(r.points || []), sheets: new Map(r.sheets || []),
     sketches: new Map(r.sketches.map(([id, s]) => [id, { matrix: new THREE.Matrix4().fromArray(s.matrix), feature: s.feature }])),
   };
   proxyPool = pool;
   return out;
 }
 function engineReset() { return engineCall('reset'); }
+function brepFlat(body) { return engineCall('flat', { body }); }
 function brepSection(items, o) { return engineCall('section', { items: items.map(({ shape, place }) => ({ tok: shape, place })), ...o }); }
 function brepProject(items, kinds) { return engineCall('project', { items: items.map(({ shape, place }) => ({ tok: shape, place })), kinds }); }
 async function brepImportSTEP(fileId, text) { const n = await engineCall('import', { fileId, text }); importsRead.add(fileId); return n; }
