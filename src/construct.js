@@ -28,7 +28,8 @@ function vertexHit(e) {
 // point on a curved face and the surface normal there (exact for cylinders, interpolated otherwise)
 function curvedPointHit(e) {
   const hit = rawBodyHit(e); if (!hit) return null;
-  const s = shownBodies.get(hit.object.userData.body), m = brepMeshOf(s.rec), hash = m.triFace[hit.faceIndex], sig = brepSigMap(s.rec, 'face').get(hash);
+  const s = shownBodies.get(hit.object.userData.body); if (!s?.rec.shape) return null;
+  const m = brepMeshOf(s.rec), hash = m.triFace[hit.faceIndex], sig = brepSigMap(s.rec, 'face').get(hash);
   const p = toModel(hit, hit.point);
   let n;
   if (sig?.type === 'CYLINDRE' && sig.ax) {

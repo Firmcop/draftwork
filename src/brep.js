@@ -704,10 +704,10 @@ function createStep2(f, out) {
 }
 function brepClone(o) {
   return { bodies: new Map(o.bodies), bodyCount: o.bodyCount, lastBody: o.lastBody, sketches: new Map(o.sketches), planes: new Map(o.planes), axes: new Map(o.axes), points: new Map(o.points),
-    status: new Map(o.status), tools: new Map(o.tools), before: new Map(o.before), beforeBodies: new Map(o.beforeBodies), sheet: new Map(o.sheet) };
+    status: new Map(o.status), tools: new Map(o.tools), before: new Map(o.before), beforeBodies: new Map(o.beforeBodies), sheet: new Map(o.sheet), mbodies: new Map(o.mbodies), lastMesh: o.lastMesh };
 }
 function regenerateBrep(features, upto = null, cache = null) {
-  let out = { bodies: new Map(), bodyCount: 0, lastBody: null, sketches: new Map(), planes: new Map(), axes: new Map(), points: new Map(), status: new Map(), tools: new Map(), before: new Map(), beforeBodies: new Map(), sheet: new Map() };
+  let out = { bodies: new Map(), bodyCount: 0, lastBody: null, sketches: new Map(), planes: new Map(), axes: new Map(), points: new Map(), status: new Map(), tools: new Map(), before: new Map(), beforeBodies: new Map(), sheet: new Map(), mbodies: new Map(), lastMesh: null };
   const end = upto == null ? features.length : Math.min(upto + 1, features.length);
   let key = '', reuse = !!cache;
   for (let i = 0; i < features.length; i++) {
@@ -807,6 +807,8 @@ function brepStep(f, out) {
       sheetStep(f, out);
     } else if (PLASTIC_TYPES.has(f.type)) {
       plasticStep(f, out);
+    } else if (MESH_TYPES.has(f.type)) {
+      meshStep(f, out);
     }
     out.status.set(f.id, { state: 'ok' });
   } catch (e) {

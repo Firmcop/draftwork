@@ -27,7 +27,10 @@ const TRUE_VIEW = { front: 'front', back: 'back', top: 'bottom', bottom: 'top', 
 function engineHost(RCmod) {
   let cacheArr = [];
   const tokOf = new Map(), shapeOf = new Map(), shipped = new Set();
-  let nextTok = 1, lastRes = null;
+  let nextTok = 1, lastRes = null, nextMTok = 1;
+  const mTokOf = new WeakMap(), mStatOf = new WeakMap(), mShipped = new Set();
+  const mtok = m => { let t = mTokOf.get(m); if (!t) { t = nextMTok++; mTokOf.set(m, t); } return t; };
+  const mstat = m => { let s = mStatOf.get(m); if (!s) { s = { ...meshStats(m), volume: meshVolume(m) }; mStatOf.set(m, s); } return s; };
   const tok = s => { if (!s) return 0; let t = tokOf.get(s); if (!t) { t = nextTok++; tokOf.set(s, t); shapeOf.set(t, s); } return t; };
 
   function meshPayload(t, full) {
@@ -76,6 +79,7 @@ function engineHost(RCmod) {
       beforeBodies: [...res.beforeBodies].map(([fid, m]) => [fid, [...m].map(([id, b]) => [id, pr(b)])]),
       tools: [...res.tools].map(([fid, t]) => [fid, { ...t, shape: tok(t.shape) }]),
       planes: [...res.planes], axes: [...res.axes], points: [...res.points],
+      mbodies: [...res.mbodies].map(([id, m]) => [id, { name: m.name, feature: m.feature, tok: mtok(m), stats: mstat(m), groupCount: m.groupCount || 0 }]),
       sheets: [...res.sheet].filter(([id]) => res.bodies.has(id)).map(([id, r]) => [id, { t: r.t, R: r.R, k: r.k, unfolded: !!r.unfolded }]),
       sketches: [...res.sketches].map(([id, s]) => [id, { matrix: Array.from(s.matrix.elements), feature: s.feature }]),
       freed,
@@ -85,6 +89,10 @@ function engineHost(RCmod) {
     for (const [, b] of out.bodies) if (b.shape && !shipped.has(b.shape)) { shipped.add(b.shape); need.push(b.shape); }
     for (const [, list] of out.beforeBodies) for (const [, b] of list) if (b.shape && !shipped.has(b.shape)) { shipped.add(b.shape); need.push(b.shape); }
     out.meshes = need.map(t => meshPayload(t, true)).filter(Boolean);
+    out.meshData = [];
+    const live = new Set();
+    for (const [, m] of res.mbodies) { const t = mtok(m); live.add(t); if (mShipped.has(t)) continue; out.meshData.push([t, m.pos, m.idx, m.groups || null]); }
+    mShipped.clear(); live.forEach(t => mShipped.add(t));   // the page keeps exactly the live meshes
     return out;
   }
 
@@ -105,6 +113,7 @@ function engineHost(RCmod) {
       }
       if (op === 'regen') return regen(a);
       if (op === 'reset') { cacheArr = []; return true; }
+      if (op === 'meshfile') { const bin = a.binary ? Uint8Array.from(atob(a.data), c => c.charCodeAt(0)) : null; importMeshes.set(a.fileId, /\.obj$/i.test(a.name) ? parseOBJ(a.data) : parseSTL(bin || new TextEncoder().encode(a.data))); cacheArr = []; return importMeshes.get(a.fileId).idx.length / 3; }
       if (op === 'flat') { const r = lastRes?.sheet.get(a.body); return r ? sheetFlatData(r) : null; }
       if (op === 'mesh') { const t = a.tok; const p = meshPayload(t, true); if (p) shipped.add(t); return p; }
       if (op === 'import') { const n = await brepImportSTEP(a.fileId, a.text); cacheArr = []; return n; }

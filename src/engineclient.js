@@ -73,6 +73,11 @@ async function engineRegen(features, rollback) {
   const r = await engineCall('regen', { features, rollback });
   for (const t of r.freed) shapeData.delete(t);
   r.meshes.forEach(ingestMesh);
+  for (const [t, pos, idx, groups] of r.meshData || []) {
+    const flat = new Float32Array(idx.length * 3); for (let i = 0; i < idx.length; i++) { flat[3 * i] = pos[3 * idx[i]]; flat[3 * i + 1] = pos[3 * idx[i] + 1]; flat[3 * i + 2] = pos[3 * idx[i] + 2]; }
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(flat, 3)); g.computeVertexNormals();
+    meshGeoms.set(t, { geom: g, groups });
+  }
   const pool = new Map(), keep = b => { const p = proxy(b); pool.set(`${p.id}|${p.shape}|${p.name}|${p.feature}`, p); return p; };
   const out = {
     bodies: new Map(r.bodies.map(([id, b]) => [id, keep(b)])),
@@ -82,11 +87,19 @@ async function engineRegen(features, rollback) {
     tools: new Map(r.tools), planes: new Map(r.planes), axes: new Map(r.axes || []), points: new Map(r.points || []), sheets: new Map(r.sheets || []),
     sketches: new Map(r.sketches.map(([id, s]) => [id, { matrix: new THREE.Matrix4().fromArray(s.matrix), feature: s.feature }])),
   };
+  for (const [id, m] of r.mbodies || []) {
+    const k = `${id}|m${m.tok}|${m.name}|${m.feature}`, d = meshGeoms.get(m.tok); if (!d) continue;
+    const rec = proxyPool.get(k) || { id, name: m.name, feature: m.feature, geom: d.geom, mesh: true, groups: d.groups, groupCount: m.groupCount, stats: m.stats };
+    pool.set(k, rec); out.bodies.set(id, rec);
+  }
+  const live = new Set((r.mbodies || []).map(([, m]) => m.tok)); for (const t of meshGeoms.keys()) if (!live.has(t)) meshGeoms.delete(t);
   proxyPool = pool;
   return out;
 }
 function engineReset() { return engineCall('reset'); }
 function brepFlat(body) { return engineCall('flat', { body }); }
+const meshGeoms = new Map();   // mesh token -> { geom (non-indexed), groups }
+function engineMeshFile(fileId, name, data, binary) { return engineCall('meshfile', { fileId, name, data, binary }); }
 function brepSection(items, o) { return engineCall('section', { items: items.map(({ shape, place }) => ({ tok: shape, place })), ...o }); }
 function brepProject(items, kinds) { return engineCall('project', { items: items.map(({ shape, place }) => ({ tok: shape, place })), kinds }); }
 async function brepImportSTEP(fileId, text) { const n = await engineCall('import', { fileId, text }); importsRead.add(fileId); return n; }

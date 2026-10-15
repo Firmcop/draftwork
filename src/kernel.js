@@ -591,7 +591,7 @@ function step(f, out) {
     } else if (f.type === 'remove') {
       if (!out.bodies.has(f.body)) throw new Error('Choose a body to remove');
       out.bodies.delete(f.body);
-    } else if (['fillet', 'chamfer', 'shell', 'draft', 'presspull', 'loft', 'import', 'sweep', 'splitbody', 'scale', 'thicken', 'replaceface', 'align', 'patpath', 'boundary', 'coil', 'thread', 'rib', 'web', 'emboss', 'splitface', 'boss', 'snapfit', 'lip', 'rest', 'flange', 'contourflange', 'unfold', 'refold', 'sextrude', 'srevolve', 'patch', 'soffset', 'sloft', 'ssweep', 'ruled', 'trim', 'untrim', 'sextend', 'stitch', 'unstitch', 'reverse', 'deleteface'].includes(f.type)) {
+    } else if (['fillet', 'chamfer', 'shell', 'draft', 'presspull', 'loft', 'import', 'sweep', 'splitbody', 'scale', 'thicken', 'replaceface', 'align', 'patpath', 'boundary', 'coil', 'thread', 'rib', 'web', 'emboss', 'splitface', 'boss', 'snapfit', 'lip', 'rest', 'meshinsert', 'tessellate', 'facegroups', 'meshrepair', 'remesh', 'reduce', 'smooth', 'meshconvert', 'meshplane', 'flange', 'contourflange', 'unfold', 'refold', 'sextrude', 'srevolve', 'patch', 'soffset', 'sloft', 'ssweep', 'ruled', 'trim', 'untrim', 'sextend', 'stitch', 'unstitch', 'reverse', 'deleteface'].includes(f.type)) {
       throw new Error('This needs the exact geometry engine, which has not loaded in this view');
     }
     out.status.set(f.id, { state: 'ok' });
@@ -670,7 +670,7 @@ export function resolveFeatures(features, vars) {
   return features.map(f => { const holder = {}; const r = conv(f, holder); if (holder.error) r.error = holder.error; return r; });
 }
 const NUMERIC = new Set(['offset', 'distance', 'angle', 'count', 'count2', 'spacing', 'spacing2', 'cx', 'cy', 'w', 'h', 'd', 'r', 'rot', 'sides', 'length', 'width',
-  'diameter', 'depth', 'cbDiameter', 'cbDepth', 'radius', 'thickness', 'value', 'neutralOffset', 'wall', 'pathIndex', 'major', 'minor', 'dx', 'dy', 'dz', 'rx', 'ry', 'rz', 'tipAngle', 'x', 'y', 'bendRadius', 'kFactor', 'height', 'pitch', 'revolutions', 'section_size', 'factor', 'tolerance', 'gap', 'draftAngle', 'clearance', 'holeDiameter', 'holeDepth', 'holeBelow', 'ribs', 'ribThickness', 'ribLength', 'ribHeight', 'ribAngle', 'hookDepth', 'insertAngle', 'orient']);
+  'diameter', 'depth', 'cbDiameter', 'cbDepth', 'radius', 'thickness', 'value', 'neutralOffset', 'wall', 'pathIndex', 'major', 'minor', 'dx', 'dy', 'dz', 'rx', 'ry', 'rz', 'tipAngle', 'x', 'y', 'bendRadius', 'kFactor', 'height', 'pitch', 'revolutions', 'section_size', 'factor', 'tolerance', 'gap', 'draftAngle', 'clearance', 'holeDiameter', 'holeDepth', 'holeBelow', 'ribs', 'ribThickness', 'ribLength', 'ribHeight', 'ribAngle', 'hookDepth', 'insertAngle', 'orient', 'edge', 'percent', 'iterations', 'strength']);
 
 // ---- crease edges that tolerate T-junctions (boolean output) ----
 // Edges are grouped by the infinite line they lie on; two triangles are neighbours when

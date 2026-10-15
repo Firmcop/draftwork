@@ -52,7 +52,7 @@ cmd('com', 'Center of Mass', 'com', { run: () => toggleCOM() });
 cmd('properties', 'Properties', 'properties', { run: () => openPropertiesModal() });
 // insert
 planned('insderive', 'Insert Derive', 'derive', P2); planned('decal', 'Decal', 'decal', P2); planned('canvas', 'Canvas', 'canvas', P2);
-cmd('insstep', 'Insert STEP', 'insertmesh', { run: () => startImportSTEP() }); planned('insmesh', 'Insert Mesh', 'insertmesh', P1); planned('inssvg', 'Insert SVG', 'insertsvg', P1); planned('insdxf', 'Insert DXF', 'insertsvg', P1);
+cmd('insstep', 'Insert STEP', 'insertmesh', { run: () => startImportSTEP() }); cmd('insmesh', 'Insert Mesh', 'insertmesh', { run: () => startInsertMesh() }); planned('inssvg', 'Insert SVG', 'insertsvg', P1); planned('insdxf', 'Insert DXF', 'insertsvg', P1);
 // assemble
 cmd('newcomp', 'New Component', 'component', { run: () => newComponent() }); cmd('joint', 'Joint', 'joint', { key: 'J', run: () => newJoint() }); cmd('asbuilt', 'As-built Joint', 'joint', { run: () => newJoint(true) });
 cmd('rigid', 'Rigid Group', 'component', { run: () => newRigidGroup() }); cmd('drive', 'Drive Joints', 'motion', { run: () => { const j = (selJoint && joints().find(x => x.id === selJoint)) || joints().at(-1); j ? editJoint(j.id) : toast('There are no joints yet'); } }); planned('motionlink', 'Motion Link', 'motion', P2); planned('contact', 'Enable Contact Sets', 'interference', P2);
@@ -65,9 +65,9 @@ for (const [k, t, l, ic] of [['s.extrude', 'sextrude', 'Extrude Surface', 'patch
   cmd(k, l, ic, { run: () => newSurface(t) });
 cmd('s.thicken', 'Thicken', 'thicken', { run: () => newEdgeFeature('thicken') });
 // mesh
-planned('m.insert', 'Insert Mesh', 'insertmesh', P1); planned('m.tessellate', 'Tessellate', 'remesh', P1); planned('m.facegroups', 'Generate Face Groups', 'remesh', P1);
-planned('m.repair', 'Repair', 'remesh', P1); planned('m.remesh', 'Remesh', 'remesh', P1); planned('m.reduce', 'Reduce', 'reduce', P1); planned('m.smooth', 'Smooth', 'smooth', P1);
-planned('m.convert', 'Convert Mesh', 'insertmesh', P1);
+cmd('m.insert', 'Insert Mesh', 'insertmesh', { run: () => startInsertMesh() }); cmd('m.tessellate', 'Tessellate', 'remesh', { run: () => newMesh('tessellate') }); cmd('m.facegroups', 'Generate Face Groups', 'remesh', { run: () => newMesh('facegroups') });
+cmd('m.repair', 'Repair', 'remesh', { run: () => newMesh('meshrepair') }); cmd('m.remesh', 'Remesh', 'remesh', { run: () => newMesh('remesh') }); cmd('m.reduce', 'Reduce', 'reduce', { run: () => newMesh('reduce') }); cmd('m.smooth', 'Smooth', 'smooth', { run: () => newMesh('smooth') });
+cmd('m.convert', 'Convert Mesh', 'insertmesh', { run: () => newMesh('meshconvert') }); cmd('m.planecut', 'Plane Cut', 'splitbody', { run: () => newMesh('meshplane') });
 cmd('exportstl', 'Export STL', 'exportstl', { run: () => openExportDialog() });
 // sheet metal
 cmd('sm.flange', 'Flange', 'flange', { run: () => newSheet('flange') }); cmd('sm.contour', 'Contour Flange', 'contourflange', { run: () => newSheet('contourflange') }); cmd('sm.unfold', 'Unfold', 'unfold', { run: () => newSheet('unfold') });
@@ -144,7 +144,7 @@ const TABS = {
   MESH: [
     { name: 'CREATE', bar: ['m.insert', 'm.tessellate'], menu: ['m.insert', 'm.tessellate'] },
     { name: 'PREPARE', bar: ['m.facegroups', 'm.repair'], menu: ['m.facegroups', 'm.repair'] },
-    { name: 'MODIFY', bar: ['m.remesh', 'm.reduce', 'm.smooth', 'm.convert'], menu: ['m.remesh', 'm.reduce', 'm.smooth', '-', 'm.convert'] },
+    { name: 'MODIFY', bar: ['m.remesh', 'm.reduce', 'm.smooth', 'm.convert'], menu: ['m.remesh', 'm.reduce', 'm.smooth', 'm.planecut', '-', 'm.convert'] },
     { name: 'INSPECT', bar: ['measure', 'section'], menu: ['measure', 'section', 'properties'] },
     { name: 'SELECT', bar: ['select'], menu: ['select'] },
     { name: 'EXPORT', bar: ['exportstl'], menu: ['exportstl'] },
