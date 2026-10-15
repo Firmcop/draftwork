@@ -370,6 +370,148 @@ function pressPull(f, out) {
   if (!matched) throw new Error('The picked faces no longer exist. Edit this feature and pick them again.');
   return matched;
 }
+// ---- solid modify tools: split body, scale, thicken, replace face, align, pattern on path, boundary fill ----
+const MODIFY_TYPES = new Set(['splitbody', 'scale', 'thicken', 'replaceface', 'align', 'patpath', 'boundary']);
+// place a shape by a rigid THREE.Matrix4 (rotation about the origin, then translation)
+function placeShape(shape, M) {
+  const p = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3(); M.decompose(p, q, sc);
+  const w = Math.min(1, Math.max(-1, q.w)), ang = 2 * Math.acos(w) * 180 / Math.PI, sn = Math.sqrt(1 - w * w);
+  let r = shape;
+  if (ang > 1e-9 && sn > 1e-12) r = r.rotate(ang, [0, 0, 0], [q.x / sn, q.y / sn, q.z / sn]);
+  return r.translate([p.x, p.y, p.z]);
+}
+function planeFrameOf(ref, out) { const pl = resolvePlane(ref, out); return planeMatrix(pl.base, pl.offset, pl.flip); }
+function shapesBox(shapes, pad = 10) {
+  let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (const sh of shapes) { const [a, b] = sh.boundingBox.bounds; for (let i = 0; i < 3; i++) { lo[i] = Math.min(lo[i], a[i]); hi[i] = Math.max(hi[i], b[i]); } }
+  return { lo: lo.map(v => v - pad), hi: hi.map(v => v + pad), size: Math.max(...hi.map((v, i) => v - lo[i])) + 2 * pad };
+}
+// half of space on the + side of a plane (as a large box), sized to cover the given shapes
+function halfSpace(M, size) { const L = size * 4; return T(placeShape(RC.makeBox([-L, -L, 0], [L, L, L]), M)); }
+// frame (THREE.Matrix4, z along the normal or axis) of a face signature
+function sigFrame(sig) {
+  const o = new THREE.Vector3(...(sig.type === 'CYLINDRE' && sig.ap ? sig.ap : sig.c)), z = new THREE.Vector3(...(sig.type === 'CYLINDRE' && sig.ax ? sig.ax : sig.n)).normalize();
+  const a = Math.abs(z.x) < 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0), x = a.sub(z.clone().multiplyScalar(a.dot(z))).normalize();
+  return new THREE.Matrix4().makeBasis(x, z.clone().cross(x), z).setPosition(o);
+}
+function facesOf(shape, refs) { const list = shape.faces, hs = matchRefs(list, refs, faceSig, 'c'); const picked = list.filter(x => hs.has(x.hashCode)); return { list, picked }; }
+function modifyStep(f, out) {
+  const body = () => {
+    if (!f.body && (f.edges || []).length) for (const b of out.bodies.values()) { const l = b.shape.faces, hs = matchRefs(l, f.edges, faceSig, 'c'); l.forEach(x => x.delete?.()); if (hs.size) return b; }   // the body the picked faces are on
+    const b = out.bodies.get(f.body || bTarget(out, null)); if (!b) throw new Error('Choose a body'); return b;
+  };
+  if (f.type === 'splitbody') {
+    const b = body(), M = planeFrameOf(f.tool || 'XY', out), box = shapesBox([b.shape]);
+    const up = halfSpace(M, box.size), A = T(b.shape.clone().intersect(up)), B = T(b.shape.clone().cut(up));
+    let va = 0, vb = 0; try { va = RC.measureVolume(A); vb = RC.measureVolume(B); } catch (e) { }
+    if (va < 1e-9 || vb < 1e-9) throw new Error('The plane does not cut through the body');
+    bReplace(out, b.id, A); bNew(out, b.id + ':split', B, f.id);
+    return;
+  }
+  if (f.type === 'scale') {
+    const b = body(), k = +f.factor; if (!(k > 0)) throw new Error('Scale must be greater than 0');
+    const c = f.center === 'point' && f.point ? (out.points.get(f.point)?.p || [0, 0, 0]) : f.center === 'body' ? (() => { const bb = b.shape.boundingBox.bounds; return bb[0].map((v, i) => (v + bb[1][i]) / 2); })() : [0, 0, 0];
+    bReplace(out, b.id, T(b.shape.clone().scale(k, c)));
+    return;
+  }
+  if (f.type === 'replaceface') {
+    const b = body(); if (!(f.edges || []).length) throw new Error('Click the face to replace');
+    const { list, picked } = facesOf(b.shape, f.edges);
+    try {
+      if (!picked.length) throw new Error('The picked face no longer exists. Edit this feature and pick it again.');
+      const M = planeFrameOf(f.target || 'XY', out), e = M.elements, pn = new THREE.Vector3(e[8], e[9], e[10]).normalize(), po = new THREE.Vector3(e[12], e[13], e[14]);
+      let shape = b.shape.clone();
+      for (const face of picked) {
+        if (face.geomType !== 'PLANE') throw new Error('Replace Face works on flat faces');
+        const n = face.normalAt(), fn = new THREE.Vector3(n.x, n.y, n.z).normalize(), c = face.center, fc = new THREE.Vector3(c.x, c.y, c.z); n.delete?.();
+        if (Math.abs(Math.abs(fn.dot(pn)) - 1) > 1e-6) throw new Error('The target plane must be parallel to the face');
+        const d = po.clone().sub(fc).dot(fn); if (Math.abs(d) < 1e-9) continue;
+        const v = face.normalAt(); const prism = RC.basicFaceExtrusion(face, v.multiply(d / Math.hypot(v.x, v.y, v.z)));
+        const next = d > 0 ? shape.fuse(prism) : shape.cut(prism); shape.delete?.(); prism.delete?.(); shape = next;
+      }
+      bReplace(out, b.id, T(shape));
+    } finally { list.forEach(x => x.delete?.()); }
+    return;
+  }
+  if (f.type === 'thicken') {
+    const b = body(), t = +f.thickness; if (!(Math.abs(t) > 0)) throw new Error('Thickness must not be 0 mm');
+    if (!(f.edges || []).length) throw new Error('Click the faces to thicken');
+    const { list, picked } = facesOf(b.shape, f.edges);
+    try {
+      if (!picked.length) throw new Error('The picked faces no longer exist. Edit this feature and pick them again.');
+      let tool = null;
+      for (const face of picked) {
+        const one = d => face.geomType === 'PLANE' ? (() => { const n = face.normalAt(), v = n.multiply(d / Math.hypot(n.x, n.y, n.z)); return RC.basicFaceExtrusion(face, v); })() : offsetSlab(face, d);
+        let s1 = f.side === 'both' ? T(one(t / 2)).fuse(T(one(-t / 2))) : one(f.side === 'in' ? -Math.abs(t) : Math.abs(t));
+        tool = tool ? T(tool.fuse(T(s1))) : T(s1);
+      }
+      const res = bApply(out, f, tool, f.op || 'new', b.id);
+      out.tools.set(f.id, { shape: tool, ...res, op: f.op || 'new' });
+    } finally { list.forEach(x => x.delete?.()); }
+    return;
+  }
+  if (f.type === 'align') {
+    const b = body(); if (!f.a || !f.b) throw new Error('Pick a face on the body to move, then a face to align it to');
+    const findSig = (shape, sig) => { const list = shape.faces, hs = matchRefs(list, [sig], faceSig, 'c'), hit = list.find(x => hs.has(x.hashCode)); const r = hit ? faceSig(hit) : null; list.forEach(x => x.delete?.()); return r; };
+    const sa = findSig(b.shape, f.a.sig), tb = out.bodies.get(f.b.body), sb = tb ? findSig(tb.shape, f.b.sig) : null;
+    if (!sa || !sb) throw new Error('A picked face no longer exists. Edit this feature and pick it again.');
+    const Fa = sigFrame(sa), Fb = sigFrame(sb), X = f.flip ? new THREE.Matrix4() : new THREE.Matrix4().makeRotationX(Math.PI);
+    const Mv = Fb.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0, +f.offset || 0)).multiply(X).multiply(new THREE.Matrix4().makeRotationZ((+f.angle || 0) * Math.PI / 180)).multiply(Fa.clone().invert());
+    bReplace(out, b.id, T(placeShape(b.shape.clone(), Mv)));
+    return;
+  }
+  if (f.type === 'patpath') {
+    const src = out.tools.get(f.source); if (!src) throw new Error('Choose a feature that comes before this one');
+    const ps = out.sketches.get(f.path); if (!ps) throw new Error('Choose the sketch with the path');
+    const geo = ps.feature.geo; if (!geo?.curves?.length) throw new Error('The path sketch has no lines or curves');
+    const solved = solveSketch(geo); if (!solved.ok) throw new Error('The path sketch constraints conflict');
+    const { paths } = geoPaths(geo, solved); if (!paths?.length) throw new Error('The path sketch needs one connected chain of lines and arcs');
+    // sample the chain in sketch coordinates, then place in 3D
+    const pts = [];
+    for (const sg of paths[0].segs) {
+      const n = sg.t === 'line' ? 1 : 32;
+      for (let i = pts.length ? 1 : 0; i <= n; i++) {
+        const t = i / n;
+        if (sg.t === 'line') pts.push([sg.a[0] + (sg.b[0] - sg.a[0]) * t, sg.a[1] + (sg.b[1] - sg.a[1]) * t]);
+        else if (sg.t === 'bez') pts.push(bezPoint(sg.P, t));
+        else { const m = arcMid(sg), ang = m.a0 + (m.a1 - m.a0) * t; pts.push([sg.c[0] + m.r * Math.cos(ang), sg.c[1] + m.r * Math.sin(ang)]); }
+      }
+    }
+    const M = ps.matrix, P3 = p => new THREE.Vector3(p[0], p[1], 0).applyMatrix4(M), len = [0];
+    for (let i = 1; i < pts.length; i++) len.push(len[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]));
+    const total = len[len.length - 1]; if (total < 1e-9) throw new Error('The path has no length');
+    const count = Math.max(2, Math.min(100, Math.round(+f.count || 2))), step = f.spacing === 'fill' || !(+f.distance > 0) ? total / (count - 1) : +f.distance;
+    const at = s => { let i = 1; while (i < len.length - 1 && len[i] < s) i++; const t = (s - len[i - 1]) / ((len[i] - len[i - 1]) || 1); const p = [pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * t, pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * t]; return { p, tan: Math.atan2(pts[i][1] - pts[i - 1][1], pts[i][0] - pts[i - 1][0]) }; };
+    const start = at(0), nrm = new THREE.Vector3(0, 0, 1).transformDirection(M), copies = [];
+    for (let k = 1; k < count; k++) {
+      const s2 = k * step; if (s2 > total + 1e-6) break;
+      const q = at(Math.min(s2, total)), d = P3(q.p).sub(P3(start.p));
+      let X = new THREE.Matrix4().makeTranslation(d.x, d.y, d.z);
+      if (f.orient === 'path') { const o = P3(q.p); X = new THREE.Matrix4().makeTranslation(o.x, o.y, o.z).multiply(new THREE.Matrix4().makeRotationAxis(nrm, q.tan - start.tan)).multiply(new THREE.Matrix4().makeTranslation(-o.x, -o.y, -o.z)).multiply(X); }
+      copies.push(T(placeShape(src.shape.clone(), X)));
+    }
+    if (!copies.length) throw new Error('The path is too short for that spacing');
+    if (src.op === 'new') { copies.forEach((c, k) => bApply(out, f, c, 'new', null, ':' + (k + 1))); out.tools.set(f.id, { shape: copies.length > 1 ? T(RC.makeCompound(copies.map(c => c.clone()))) : copies[0], op: 'new' }); }
+    else { let tool = copies[0]; for (let k = 1; k < copies.length; k++) tool = T(tool.fuse(copies[k])); const res = bApply(out, f, tool, src.op, src.target); out.tools.set(f.id, { shape: tool, ...res, op: src.op }); }
+    return;
+  }
+  if (f.type === 'boundary') {
+    const tools = (f.bodies || []).map(id => out.bodies.get(id)).filter(Boolean);
+    if (!tools.length && !(f.planes || []).length) throw new Error('Choose the bodies and planes that bound the region');
+    const box = shapesBox(tools.length ? tools.map(b => b.shape) : [...out.bodies.values()].map(b => b.shape));
+    let cell = T(RC.makeBox(box.lo, box.hi));
+    for (const pl of f.planes || []) { const M = planeFrameOf(pl.ref, out), hs = halfSpace(pl.side === 'below' ? M.clone().multiply(new THREE.Matrix4().makeRotationX(Math.PI)) : M, box.size); cell = T(cell.intersect(hs)); }
+    for (const b of tools) cell = T(cell.cut(b.shape));
+    let solids = []; try { solids = cell.solids || [cell]; } catch (e) { solids = [cell]; }
+    // keep the enclosed cells (not touching the outer box) unless the user picked cells by number
+    const inner = solids.filter(sd => { const [a, c] = sd.boundingBox.bounds; return a.every((v, i) => v > box.lo[i] + 1e-6) && c.every((v, i) => v < box.hi[i] - 1e-6); });
+    const keep = (f.cells?.length ? f.cells.map(i => solids[i - 1]).filter(Boolean) : inner.length ? inner : solids.slice(0, 1));
+    if (!keep.length) throw new Error('No closed region found between those tools');
+    keep.forEach((sd, k) => bNew(out, f.id + (k ? ':' + k : ''), T(sd.clone()), f.id));
+    out.tools.set(f.id, { shape: keep.length > 1 ? T(RC.makeCompound(keep.map(c => c.clone()))) : T(keep[0].clone()), op: 'new' });
+    return;
+  }
+}
 function brepClone(o) {
   return { bodies: new Map(o.bodies), bodyCount: o.bodyCount, lastBody: o.lastBody, sketches: new Map(o.sketches), planes: new Map(o.planes), axes: new Map(o.axes), points: new Map(o.points),
     status: new Map(o.status), tools: new Map(o.tools), before: new Map(o.before), beforeBodies: new Map(o.beforeBodies) };
@@ -390,12 +532,12 @@ function regenerateBrep(features, upto = null, cache = null) {
   return out;
 }
 const EDGE_TYPES = new Set(['fillet', 'chamfer', 'shell', 'draft', 'presspull']);
-const FACE_PICK = new Set(['shell', 'draft', 'presspull']);
+const FACE_PICK = new Set(['shell', 'draft', 'presspull', 'thicken', 'replaceface']);
 // Imported STEP shapes, parsed once per file (async) and reused by every rebuild: fileId -> Shape3D[]
 const importShapes = new Map();
 function brepStep(f, out) {
   out.before.set(f.id, [...out.bodies.keys()]);
-  if (EDGE_TYPES.has(f.type)) out.beforeBodies.set(f.id, new Map(out.bodies));
+  if (EDGE_TYPES.has(f.type) || FACE_PICK.has(f.type)) out.beforeBodies.set(f.id, new Map(out.bodies));
   if (f.suppressed) { out.status.set(f.id, { state: 'suppressed' }); return; }
   try {
     if (f.error) throw new Error(f.error);
@@ -465,6 +607,8 @@ function brepStep(f, out) {
       out.bodies.delete(f.body);
     } else if (EDGE_TYPES.has(f.type)) {
       edgeFeature(f, out);
+    } else if (MODIFY_TYPES.has(f.type)) {
+      modifyStep(f, out);
     }
     out.status.set(f.id, { state: 'ok' });
   } catch (e) {

@@ -24,7 +24,7 @@ const MATERIALS = {
 const TYPE = {
   sketch: { label: 'Sketch', icon: 'sketch' }, plane: { label: 'Construction Plane', icon: 'plane' }, axis: { label: 'Construction Axis', icon: 'axis' }, point: { label: 'Construction Point', icon: 'point' }, extrude: { label: 'Extrude', icon: 'extrude' }, revolve: { label: 'Revolve', icon: 'revolve' },
   box: { label: 'Box', icon: 'box' }, cylinder: { label: 'Cylinder', icon: 'cylinder' }, sphere: { label: 'Sphere', icon: 'sphere' }, torus: { label: 'Torus', icon: 'torus' },
-  hole: { label: 'Hole', icon: 'hole' }, fillet: { label: 'Fillet', icon: 'fillet' }, presspull: { label: 'Press Pull', icon: 'presspull' }, draft: { label: 'Draft', icon: 'draft' }, loft: { label: 'Loft', icon: 'loft' }, sweep: { label: 'Sweep', icon: 'sweep' }, import: { label: 'Imported file', icon: 'insertmesh' }, chamfer: { label: 'Chamfer', icon: 'chamfer' }, shell: { label: 'Shell', icon: 'shell' }, pattern: { label: 'Pattern', icon: 'patrect' }, mirror: { label: 'Mirror', icon: 'mirror' }, move: { label: 'Move/Copy', icon: 'move' },
+  hole: { label: 'Hole', icon: 'hole' }, fillet: { label: 'Fillet', icon: 'fillet' }, presspull: { label: 'Press Pull', icon: 'presspull' }, splitbody: { label: 'Split Body', icon: 'splitbody' }, scale: { label: 'Scale', icon: 'scale' }, thicken: { label: 'Thicken', icon: 'thicken' }, replaceface: { label: 'Replace Face', icon: 'replaceface' }, align: { label: 'Align', icon: 'align' }, patpath: { label: 'Pattern on Path', icon: 'patpath' }, boundary: { label: 'Boundary Fill', icon: 'boundary' }, draft: { label: 'Draft', icon: 'draft' }, loft: { label: 'Loft', icon: 'loft' }, sweep: { label: 'Sweep', icon: 'sweep' }, import: { label: 'Imported file', icon: 'insertmesh' }, chamfer: { label: 'Chamfer', icon: 'chamfer' }, shell: { label: 'Shell', icon: 'shell' }, pattern: { label: 'Pattern', icon: 'patrect' }, mirror: { label: 'Mirror', icon: 'mirror' }, move: { label: 'Move/Copy', icon: 'move' },
   combine: { label: 'Combine', icon: 'combine' }, remove: { label: 'Remove', icon: 'delete' },
 };
 const featIcon = f => f.type === 'pattern' ? (f.kind === 'circular' ? 'patcirc' : 'patrect') : (TYPE[f.type]?.icon || 'generic');
@@ -90,7 +90,7 @@ let sketchOpts = { grid: true, snap: true, profiles: true, dims: true };
 let activeTab = 'SOLID';
 let engine = 'mesh', engineState = 'loading', engineMsg = '';
 const isBrep = () => engine === 'brep';
-const EDGE_FEATS = new Set(['fillet', 'chamfer', 'shell', 'draft', 'presspull']);
+const EDGE_FEATS = new Set(['fillet', 'chamfer', 'shell', 'draft', 'presspull', 'thicken', 'replaceface']);
 const bodyGeomOf = b => b.shape ? brepMeshOf(b).display : b.geom;
 function edgeDialogFeature() { const f = dlg && !dlg.custom && featById(dlg.fid); return f && EDGE_FEATS.has(f.type) ? f : null; }
 function shownSource() { const f = edgeDialogFeature(); return (f && result.beforeBodies?.get(f.id)) || result.bodies; }

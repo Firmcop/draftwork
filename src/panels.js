@@ -258,7 +258,7 @@ function planeOptions(beforeIdx, cur) {
   doc.features.slice(0, beforeIdx).filter(f => f.type === 'plane').forEach(p => opts.push([p.id, p.name]));
   return opts;
 }
-function bodiesBefore(fid) { return (result.before.get(fid) || []).map(id => [id, bodyName(id)]); }
+function bodiesBefore(fid) { return (result.before.get(fid) || [...result.bodies.keys()]).map(id => [id, bodyName(id)]); }   // before its first rebuild a new feature sees the current bodies
 const opOptions = [['join', 'Join'], ['cut', 'Cut'], ['intersect', 'Intersect'], ['new', 'New Body']];
 
 // ---------- command dialog ----------
@@ -382,11 +382,15 @@ function featureFields(f, idx) {
       out.push(section_('Result', segField('Operation', f, 'op', [['join', 'Join'], ['cut', 'Cut'], ['intersect', 'Intersect']]), chkField('Keep tool bodies', f, 'keep')));
       break;
     }
-    case 'fillet': case 'chamfer': case 'shell': case 'draft': case 'presspull': {
+    case 'splitbody': case 'scale': case 'align': case 'patpath': case 'boundary':
+      modifyDialog(f, idx, out);
+      break;
+    case 'fillet': case 'chamfer': case 'shell': case 'draft': case 'presspull': case 'thicken': case 'replaceface': {
       const n = (f.edges || []).length, what = FACE_PICK.has(f.type) ? 'face' : 'edge';
-      out.push(section_(f.type === 'presspull' ? 'Faces' : f.type === 'shell' ? 'Faces to remove' : f.type === 'draft' ? 'Faces to taper' : 'Edges',
+      out.push(section_(f.type === 'presspull' || f.type === 'thicken' ? 'Faces' : f.type === 'replaceface' ? 'Face to replace' : f.type === 'shell' ? 'Faces to remove' : f.type === 'draft' ? 'Faces to taper' : 'Edges',
         h('p', { class: 'note' }, n ? `${n} ${what}${n > 1 ? 's' : ''} selected. Click on the model to add or remove ${what}s.` : `Click the ${what}s on the model.`),
         h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn', type: 'button', disabled: !n, onclick: () => { checkpoint(); f.edges = []; rerenderDialog(); scheduleRegen(0); drawToolsOverlay(); } }, 'Clear selection'))));
+      if (modifyDialog(f, idx, out)) break;
       if (f.type === 'presspull') {
         out.push(section_('Offset', exField('Distance', f, 'distance', 'mm', { id: 'dx-ppdist' }), h('p', { class: 'note' }, 'Positive pulls the face out and adds material; negative pushes it in and removes material. On a hole, positive makes it smaller.')));
         break;
@@ -461,6 +465,12 @@ function closeDialog(ok, silent) {
       if (d.isNew) selFeature = null;
       afterDocReplace(); return;
     }
+  }
+  // OK: the whole command becomes one undo step (the snapshot taken when it opened)
+  if (ok && history.undo.length > d.undoLen) {
+    const keep = d.isNew ? d.undoLen : d.undoLen + 1;
+    if (!d.isNew && history.undo.length > d.undoLen) history.undo[d.undoLen] = d.snapshot;
+    history.undo.length = Math.max(0, keep); history.redo.length = 0; lastTag = null; updateUndoButtons();
   }
   if (!silent) { updateScene(); renderTimeline(); renderBrowser(); }
 }

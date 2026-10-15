@@ -199,3 +199,34 @@ test('construction planes, axes and points drive revolve, pattern and mirror', (
   okAll(r); const mx = [...r.bodies.values()].map(b => K.brepProps(b).com.x).sort((a, b) => a - b);
   near(mx[1], 50, 1e-6, 'mirror copy at x = 50');
 });
+
+test('split body, scale, thicken, replace face, align, pattern on path, boundary fill', () => {
+  const box = { id: 'b', type: 'box', plane: 'XY', cx: 0, cy: 0, w: 40, d: 20, h: 10, op: 'new' };
+  let r = K.regenerateBrep([box, { id: 's', type: 'splitbody', body: 'b', tool: 'YZ' }]); okAll(r);
+  assert.equal(r.bodies.size, 2, 'split into two'); near(vols(r)[0], 4000, 1e-6, 'half'); near(vols(r)[1], 4000, 1e-6, 'other half');
+  r = K.regenerateBrep([box, { id: 'k', type: 'scale', body: 'b', factor: 2, center: 'origin' }]); okAll(r);
+  near(vols(r)[0], 8000 * 8, 1e-3, 'scale ×2 gives 8× volume');
+  const sigs = [...K.brepSigMap([...K.regenerateBrep([box]).bodies.values()][0], 'face').values()];
+  const top = sigs.find(s => Math.abs(s.c[2] - 10) < 1e-6), side = sigs.find(s => Math.abs(s.c[0] - 20) < 1e-6);
+  r = K.regenerateBrep([box, { id: 't', type: 'thicken', edges: [top], thickness: 3, side: 'out', op: 'new' }]); okAll(r);
+  near(vols(r)[1], 40 * 20 * 3, 1e-6, 'thicken the top face 3 mm into a new body');
+  r = K.regenerateBrep([box, { id: 'pl', type: 'plane', base: 'XY', offset: 25 }, { id: 'rf', type: 'replaceface', edges: [top], target: 'pl' }]); okAll(r);
+  near(vols(r)[0], 40 * 20 * 25, 1e-6, 'replace the top face with a plane at z = 25');
+  // align: a 10 mm cube's bottom face onto the box top (face to face)
+  const cube = { id: 'c', type: 'box', plane: 'XY', cx: 60, cy: 0, w: 10, d: 10, h: 10, op: 'new' };
+  const cs = [...K.brepSigMap([...K.regenerateBrep([box, cube]).bodies.values()][1], 'face').values()];
+  const cubeBottom = cs.find(s => Math.abs(s.c[2]) < 1e-6);
+  r = K.regenerateBrep([box, cube, { id: 'al', type: 'align', body: 'c', a: { body: 'c', sig: cubeBottom }, b: { body: 'b', sig: top } }]); okAll(r);
+  const com = K.brepProps([...r.bodies.values()][1]).com;
+  near(com.x, 0, 1e-6, 'aligned cube centred on the top face'); near(com.z, 15, 1e-6, 'sitting on it');
+  // pattern on path: a straight 30 mm path, 4 copies of a small box
+  const path = { id: 'pa', type: 'sketch', plane: 'XY', profiles: [], geo: { points: [{ id: 'p1', x: 0, y: 40 }, { id: 'p2', x: 30, y: 40 }], curves: [{ id: 'l', kind: 'line', a: 'p1', b: 'p2' }], cons: [] } };
+  r = K.regenerateBrep([path, { id: 'm', type: 'box', plane: 'XY', cx: 0, cy: 40, w: 2, d: 2, h: 2, op: 'new' }, { id: 'pp', type: 'patpath', source: 'm', path: 'pa', count: 4, spacing: 'fill' }]); okAll(r);
+  const px = [...r.bodies.values()].map(b => K.brepProps(b).com.x).sort((a, b) => a - b);
+  assert.equal(px.length, 4); near(px[3], 30, 1e-6, 'last copy at the end of the path'); near(px[1], 10, 1e-6, 'evenly spaced');
+  // boundary fill: the cavity inside a hollow box
+  r = K.regenerateBrep([box, { id: 'sh', type: 'shell', edges: [], thickness: 2 }]);
+  const hollow = [{ id: 'o', type: 'box', plane: 'XY', cx: 0, cy: 0, w: 40, d: 20, h: 10, op: 'new' }, { id: 'i', type: 'box', plane: 'XY', offset: 2, cx: 0, cy: 0, w: 36, d: 16, h: 6, op: 'cut', target: 'o' }];
+  r = K.regenerateBrep([...hollow, { id: 'bf', type: 'boundary', bodies: ['o'] }]); okAll(r);
+  near(vols(r).find(v => Math.abs(v - 36 * 16 * 6) < 1e-3) || 0, 36 * 16 * 6, 1e-3, 'boundary fill finds the enclosed cavity');
+});

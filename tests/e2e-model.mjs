@@ -41,6 +41,31 @@ d = await docNow();
 const pa = d.features.find(f => f.type === 'plane' && f.mode === 'angle');
 check(pa && +pa.angle === 30, 'plane at angle created (30°)');
 
+// ---- modify tools ----
+const volsNow = async () => (await state()).bodies.map(b => +b.split('=')[1].replace(/,/g, ''));
+await setDoc({ features: [{ id: 'b', type: 'box', name: 'Block', plane: 'XY', offset: 0, cx: 0, cy: 0, w: 40, d: 20, h: 10, op: 'new' }, { id: 'c', type: 'box', name: 'Cube', plane: 'XY', offset: 0, cx: 60, cy: 0, w: 10, d: 10, h: 10, op: 'new' }] });
+await W(2500); await page.click('#vcHome'); await W(800);
+// thicken the block's top face into a new body
+await menu('CREATE', 'Thicken'); await clickAt(await scr(-5, -3, 10)); await page.fill('#dx-thickness', '3'); await W(1500); await ok();
+let v = await volsNow();
+check(v.includes(2400), 'thicken: a 3 mm slab on the top face (' + v.join(', ') + ')');
+await page.click('#abUndo'); await W(1500);
+// align the cube's top face onto the block's top face
+await menu('MODIFY', 'Align'); await clickAt(await scr(60, 0, 10)); await clickAt(await scr(-8, 4, 10)); await W(1200); await ok();
+st = await state();
+check(st.features.at(-1) === 'align:ok', 'align: cube moved onto the block ' + JSON.stringify(st.features));
+await page.click('#abUndo'); await W(1500);
+// split the block with the YZ plane
+await menu('MODIFY', 'Split Body');
+if (!(await page.locator('.node .nlab:text-is("YZ")').isVisible())) await page.click('.node:has-text("Origin") .tw');
+await page.click('.node .nlab:text-is("YZ")'); await W(1000); if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/split.png' }); await page.selectOption('.dialog #ds-body', 'b', { timeout: 5000 }); await W(1500); await ok();
+v = await volsNow();
+check(v.filter(x => x === 4000).length === 2, 'split body: two halves of 4,000 mm³ (' + v.join(', ') + ')');
+// scale dialog
+await menu('MODIFY', 'Scale'); await page.fill('#dx-factor', '0.5'); await W(1500); await ok();
+st = await state();
+check(st.features.at(-1) === 'scale:ok', 'scale applied');
+
 check(errors.length === 0, 'no page errors' + (errors.length ? ': ' + errors.slice(0, 3).join(' | ') : ''));
 await browser.close(); server.close();
 process.exit(failed ? 1 : 0);

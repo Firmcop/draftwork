@@ -43,7 +43,7 @@ function curvedPointHit(e) {
 }
 const PICK_PROMPTS = {
   vertex: 'Click a corner on the model', lineedge: 'Click a straight edge', circleedge: 'Click a round edge',
-  cylface: 'Click a cylindrical face (a hole or a shaft)', curved: 'Click a curved face where the plane should touch', plane: 'Click a plane or flat face',
+  cylface: 'Click a cylindrical face (a hole or a shaft)', face: 'Click a flat or cylindrical face', curved: 'Click a curved face where the plane should touch', plane: 'Click a plane or flat face',
 };
 function startConstructPick(steps, done, prompts = []) {
   cancelPick(); if (dlg) closeDialog(true);
@@ -67,6 +67,7 @@ function constructPickAt(e) {
   else if (kind === 'lineedge') { const h = brepEdgeHit(e); if (h?.sig?.type === 'LINE' && h.sig.a) got = h.sig; else if (h) toast('That edge is not straight'); }
   else if (kind === 'circleedge') { const h = brepEdgeHit(e); if (h?.sig?.type === 'CIRCLE' && h.sig.cc) got = h.sig; else if (h) toast('That edge is not round'); }
   else if (kind === 'cylface') { const h = brepFaceHit(e); if (h?.sig?.type === 'CYLINDRE' && h.sig.ax) got = h.sig; else if (h) toast('That face is not cylindrical'); }
+  else if (kind === 'face') { const h = brepFaceHit(e); if (h?.sig && (h.sig.type === 'PLANE' || (h.sig.type === 'CYLINDRE' && h.sig.ax))) got = { body: h.body, sig: h.sig }; else if (h) toast('Pick a flat or cylindrical face'); }
   else if (kind === 'curved') { const h = curvedPointHit(e); if (h && h.sig?.type !== 'PLANE') got = h; else if (h) toast('Pick a curved face; for a flat face use Offset Plane'); }
   if (got) { cpick.picks.push(got); constructNextStep(); }
   return true;
