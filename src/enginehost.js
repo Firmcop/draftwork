@@ -96,6 +96,30 @@ function engineHost(RCmod) {
         });
         try { return new Uint8Array(await brepSTEP(items).arrayBuffer()); } finally { temp.forEach(t => t.delete?.()); }
       }
+      if (op === 'project') {
+        // 2D drawing views with exact hidden-line removal: SVG paths (y down, model millimeters) per view kind
+        const temp = [];
+        const shapes = a.items.map(x => {
+          let sh = shapeOf.get(x.tok); if (!sh) return null;
+          sh = sh.clone();
+          if (x.place) { if (x.place.angle > 1e-9) sh = sh.rotate(x.place.angle, [0, 0, 0], x.place.axis); sh = sh.translate(x.place.move); }
+          temp.push(sh); return sh;
+        }).filter(Boolean);
+        if (!shapes.length) return {};
+        const all = shapes.length === 1 ? shapes[0] : RC.makeCompound(shapes.map(x => x.clone()));
+        if (shapes.length > 1) temp.push(all);
+        const flat = p => (Array.isArray(p) ? p.flat(2) : []).filter(x => typeof x === 'string' && x.trim());
+        const out = {};
+        try {
+          for (const kind of a.kinds) {
+            const cam = kind === 'iso' ? new RC.ProjectionCamera([1, -1, 1], [-1, 1, -1], [1, 1, 0]) : kind;
+            const { visible, hidden } = RC.drawProjection(all, cam);
+            let bb = null; try { bb = visible.boundingBox.bounds; } catch (e) { }
+            out[kind] = { vis: flat(visible.toSVGPaths()), hid: flat(hidden.toSVGPaths()), bbox: bb };
+          }
+        } finally { temp.forEach(t => t.delete?.()); }
+        return out;
+      }
       throw new Error('Unknown engine request ' + op);
     } catch (e) { throw new Error(occMsg(e)); }
   }

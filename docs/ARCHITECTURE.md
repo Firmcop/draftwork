@@ -87,6 +87,12 @@ Dragging a jointed part drives the joint that placed it: the pointer ray is expr
 
 The result is one transform per component. Display (mesh matrices), pick overlays, mass properties and STL export apply it on the page; STEP export sends a rotation and translation per body to the worker. Features keep modeling in as-modeled coordinates: picks on a moved component are mapped back through the inverse transform, and a sketch made on a component's face records that body so it is drawn moving with it. Animation sweeps the joint values in a preview (no document edits, no rebuild).
 
+## Drawings
+
+`doc.drawing = { sheet, scale, auto, views: [{ id, kind, x, y, hidden, parent?, dir?, gap? }], dims: [...], title }`. The engine's `project` request clones the visible bodies at their assembled positions and runs OpenCascade hidden-line removal (`drawProjection`) for each view kind, returning SVG paths (y down, model millimeters) for visible and hidden edges. The page parses them (`parsePath`: arcs become Béziers; circular arcs and endpoints become snap targets) and drops hidden lines that lie under visible ones.
+
+Projected views keep a parent and a gap, so they stay aligned with the front view; while `auto` is set (nobody has moved a view) the standard layout and scale re-flow after model changes. Dimensions store view-local points plus their position relative to the view's extents; after a change each point snaps to the nearest geometry at either place, and labels keep their offset from their own dimension. One display list (paths and text in sheet millimeters) is drawn as SVG on screen and written by a small PDF writer (Helvetica, WinAnsi) for export; the zip also carries an SVG.
+
 ## UI
 
 - `ribbon.js` — one registry of commands (`cmd` for working ones, `planned` with a roadmap phase for the rest). Tabs and dropdowns are data.

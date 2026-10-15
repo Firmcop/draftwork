@@ -44,7 +44,9 @@ Done
 Next
 - [ ] Motion links; contact sets; joint origins at arbitrary points (between two faces, on a vertex)
 - [ ] Components as separate designs (external references); assembly steps placed between features in the timeline
-- [ ] 2D drawings with dimensions; render; add-ins
+- [x] 2D drawings: standard views with exact hidden lines, associative dimensions (linear, diameter), title block, PDF/SVG export
+- [ ] Drawings: section and detail views, centerlines, radius/angle dimensions, more sheets, parts lists for assemblies
+- [ ] Render; add-ins
 
 ## Phase 3 — Manufacturing
 2.5D milling, routing, laser/plasma toolpaths, G-code post-processors; sheet metal; plastic design; nesting.

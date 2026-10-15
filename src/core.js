@@ -586,7 +586,7 @@ function finishRegen() {
   $('#busy').hidden = true;
   if (selBody && !result.bodies.has(selBody)) selBody = null;
   solveAssembly();
-  updateScene(); renderTimeline(); renderBrowser(); renderInfo(); refreshDialogStatus(); persist();
+  updateScene(); dwAfterRegen(); renderTimeline(); renderBrowser(); renderInfo(); refreshDialogStatus(); persist();
 }
 
 // ---------- persistence (per-browser convenience) ----------

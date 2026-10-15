@@ -20,6 +20,7 @@ jobs:
       - run: node tests/e2e.mjs
       - run: node tests/e2e-sketch.mjs
       - run: node tests/e2e-assembly.mjs
+      - run: node tests/e2e-drawing.mjs
       - run: ENGINE_INLINE=1 node tests/e2e.mjs
       - uses: actions/upload-artifact@v4
         with:

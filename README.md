@@ -16,6 +16,7 @@ Parametric CAD in the browser. Sketch on planes or faces, build solids with a fe
 | Assemble | Components; rigid groups; joints and as-built joints (rigid, revolute, slider, cylindrical, planar) on face centers and round edges; limits; closed loops (linkages); drag parts to move them; drive and animate joints |
 | Parameters | User parameters and expressions in any field (`width/2 - edge`, `sqrt(…)`, `sin(…)` …) |
 | Construct | Offset planes |
+| Drawing | Drawing workspace: front/top/right/isometric views with exact hidden lines, views placed anywhere, linear and diameter dimensions that follow model changes, title block, PDF + SVG export |
 | Inspect | Measure, section analysis, center of mass, properties, bill of materials (CSV) |
 | Files | Project save/open (.json), STEP import, STEP and STL export (.zip) |
 
@@ -49,6 +50,7 @@ src/
   enginehost.js  message interface to the exact kernel (runs in a Web Worker)
   engineclient.js page side: starts the worker (or runs inline), body proxies, picking data
   assembly.js    components, joint solving, joint dialog and animation
+  drawing.js     drawing workspace: views, dimensions, title block, PDF writer
   icons.js       icon set
   core.js        document model, state, undo/redo, three.js scene, display, mass properties
   solver.js      sketch geometry, constraint solver (minimum-norm Gauss-Newton), DOF analysis, loop detection

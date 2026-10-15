@@ -96,7 +96,24 @@ cmd('k.construction', 'Normal/Construction', 'construction', { key: 'X', run: ()
 cmd('k.select', 'Select', 'select', { run: () => setSketchTool('select') });
 cmd('k.finish', 'Finish Sketch', 'finish', { run: () => finishSketch() });
 
+// drawing workspace
+cmd('dw.std', 'Standard Views', 'patrect', { run: () => dwStandardViews() });
+for (const [k, l] of Object.entries(VIEW_KINDS)) cmd('dw.view.' + k, l + ' View', k === 'iso' ? 'box' : 'lookat', { run: () => dwSetTool('place:' + k) });
+cmd('dw.hidden', 'Hidden Lines On/Off', 'eyeoff', { run: () => dwToggleHidden() });
+cmd('dw.dim', 'Dimension', 'dimension', { key: 'D', run: () => dwSetTool('dim') });
+cmd('dw.dia', 'Diameter Dimension', 'circle', { run: () => dwSetTool('dia') });
+cmd('dw.sheet', 'Sheet & Title Block', 'properties', { run: () => dwSheetDialog() });
+cmd('dw.fit', 'Fit Sheet', 'fit', { key: 'F', run: () => { dwFit(); renderSheet(); } });
+cmd('dw.export', 'Export PDF (.zip)', 'exportstl', { run: () => exportDrawing() });
+cmd('dw.finish', 'Finish Drawing', 'finish', { run: () => exitDrawing() });
 const TABS = {
+  DRAWING: [
+    { name: 'VIEWS', bar: ['dw.std', 'dw.view.front', 'dw.view.iso', 'dw.hidden'], menu: ['dw.std', '-', ...Object.keys(VIEW_KINDS).map(k => 'dw.view.' + k), '-', 'dw.hidden'] },
+    { name: 'ANNOTATE', bar: ['dw.dim', 'dw.dia'], menu: ['dw.dim', 'dw.dia'] },
+    { name: 'SHEET', bar: ['dw.sheet', 'dw.fit'], menu: ['dw.sheet', 'dw.fit'] },
+    { name: 'EXPORT', bar: ['dw.export'], menu: ['dw.export'] },
+    { name: 'FINISH DRAWING', finish: true, bar: ['dw.finish'], menu: [] },
+  ],
   SOLID: [
     { name: 'CREATE', bar: ['sketch', 'extrude', 'revolve', 'sweep', 'loft', 'hole', 'box', 'patrect', 'mirror'], menu: ['sketch', 'form', 'derive', '-', 'extrude', 'revolve', 'sweep', 'loft', 'rib', 'web', 'emboss', '-', 'hole', 'thread', '-', 'box', 'cylinder', 'sphere', 'torus', 'coil', 'pipe', '-', { sub: 'Pattern', icon: 'patrect', items: ['patrect', 'patcirc', 'patpath'] }, 'mirror', '-', 'thicken', 'boundary'] },
     { name: 'MODIFY', bar: ['presspull', 'fillet', 'chamfer', 'shell', 'draft', 'combine', 'move', 'params'], menu: ['presspull', 'fillet', 'chamfer', 'shell', 'draft', 'scale', 'combine', '-', 'replaceface', 'splitface', 'splitbody', '-', 'move', 'align', 'delete', '-', 'material', 'appearance', '-', 'params'] },
@@ -155,7 +172,7 @@ const TABS = {
     { name: 'FINISH SKETCH', bar: ['k.finish'], menu: ['k.finish'], finish: true },
   ],
 };
-const WORKSPACES = [['Design', null], ['Generative Design', P5], ['Render', P2], ['Animation', P2], ['Simulation', P4], ['Manufacture', P3], ['Drawing', P2]];
+const WORKSPACES = [['Design', null], ['Generative Design', P5], ['Render', P2], ['Animation', P2], ['Simulation', P4], ['Manufacture', P3], ['Drawing', null]];
 
 function runCmd(id) {
   const c = CMD[id]; if (!c) return;
@@ -168,9 +185,10 @@ function tip(c) { return c.label + (c.key ? ` (${c.key})` : '') + (c.phase ? ` Â
 
 function renderRibbon() {
   const tabs = $('#rtabs'); tabs.replaceChildren();
-  const names = Object.keys(TABS).filter(t => t !== 'SKETCH');
-  if (mode === 'sketch') names.push('SKETCH');
+  const names = workspace === 'drawing' ? ['DRAWING'] : Object.keys(TABS).filter(t => t !== 'SKETCH' && t !== 'DRAWING');
+  if (mode === 'sketch' && workspace !== 'drawing') names.push('SKETCH');
   if (mode !== 'sketch' && activeTab === 'SKETCH') activeTab = 'SOLID';
+  if (!names.includes(activeTab)) activeTab = names[0];
   for (const t of names) {
     tabs.append(h('button', { class: 'rtab' + (t === 'SKETCH' ? ' ctx' : ''), role: 'tab', 'aria-selected': String(activeTab === t), onclick: () => { activeTab = t; renderRibbon(); } }, t));
   }
@@ -179,8 +197,8 @@ function renderRibbon() {
     const bar = h('div', { class: 'rbar' });
     for (const id of g.bar) {
       const c = CMD[id];
-      const pressed = (mode === 'sketch' && id === 'k.' + sketchTool) || (id === 'k.select' && sketchTool === 'select' && mode === 'sketch') || (id === 'measure' && measure) || (id === 'section' && section) || (id === 'com' && showCOM);
-      if (g.finish) bar.append(h('button', { class: 'rbtn finish', title: tip(c), 'aria-label': c.label, onclick: () => runCmd(id), html: icon(c.icon) + '<span>FINISH SKETCH</span>' }));
+      const pressed = (workspace === 'drawing' && ((id === 'dw.dim' && dwTool === 'dim') || (id === 'dw.dia' && dwTool === 'dia') || (id.startsWith('dw.view.') && dwTool === 'place:' + id.slice(8)))) || (mode === 'sketch' && id === 'k.' + sketchTool) || (id === 'k.select' && sketchTool === 'select' && mode === 'sketch') || (id === 'measure' && measure) || (id === 'section' && section) || (id === 'com' && showCOM);
+      if (g.finish) bar.append(h('button', { class: 'rbtn finish', title: tip(c), 'aria-label': c.label, onclick: () => runCmd(id), html: icon(c.icon) + '<span>' + c.label.toUpperCase() + '</span>' }));
       else bar.append(h('button', { class: 'rbtn' + (c.phase ? ' planned' : ''), title: tip(c), 'aria-label': tip(c), 'aria-pressed': pressed ? 'true' : null, onclick: () => runCmd(id), html: icon(c.icon) }));
     }
     const lab = h('button', { class: 'rlabel', 'aria-haspopup': 'true', html: g.name + icon('caret') });
@@ -231,7 +249,7 @@ function openMenu(anchor, items, o = {}) {
 document.addEventListener('pointerdown', e => { if (!e.target.closest('.menu') && !e.target.closest('[aria-haspopup]')) closeMenus(); });
 
 function openWorkspaceMenu() {
-  openMenu($('#wsBtn'), [{ head: 'Workspaces' }, ...WORKSPACES.map(([n, ph]) => ({ label: n.toUpperCase(), icon: n === 'Design' ? 'doc' : n === 'Simulation' ? 'analysis' : n === 'Manufacture' ? 'make' : n === 'Drawing' ? 'properties' : n === 'Animation' ? 'motion' : n === 'Render' ? 'appearance' : 'form', phase: ph, checked: n === 'Design' ? true : null, action: () => { if (ph) toast(`The ${n} workspace is planned for ${ph}`); } }))]);
+  openMenu($('#wsBtn'), [{ head: 'Workspaces' }, ...WORKSPACES.map(([n, ph]) => ({ label: n.toUpperCase(), icon: n === 'Design' ? 'doc' : n === 'Simulation' ? 'analysis' : n === 'Manufacture' ? 'make' : n === 'Drawing' ? 'properties' : n === 'Animation' ? 'motion' : n === 'Render' ? 'appearance' : 'form', phase: ph, checked: (n === 'Design' && workspace === 'design') || (n === 'Drawing' && workspace === 'drawing') ? true : null, action: () => { if (ph) toast(`The ${n} workspace is planned for ${ph}`); else if (n === 'Drawing') enterDrawing(); else if (n === 'Design' && workspace !== 'design') exitDrawing(); } }))]);
 }
 function openFileMenu() {
   openMenu($('#abFile'), [

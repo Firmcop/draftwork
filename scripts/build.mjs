@@ -13,7 +13,7 @@ const pkg = name => JSON.parse(fs.readFileSync(path.join(root, 'node_modules', n
 
 const strip = s => s.split('\n').filter(l => !/^import /.test(l)).map(l => l.replace(/^export /, '')).join('\n');
 // Concatenation order matters: later modules use functions from earlier ones.
-const MODULES = ['solver', 'kernel', 'engineclient', 'icons', 'assembly', 'core', 'ribbon', 'panels', 'interact', 'sketchui'];
+const MODULES = ['solver', 'kernel', 'engineclient', 'icons', 'assembly', 'drawing', 'core', 'ribbon', 'panels', 'interact', 'sketchui'];
 // The exact kernel runs in a Web Worker: solver + kernel + brep + host wrapped in one self-contained async function.
 // The page sends engineFactory.toString() to the worker, or calls it directly when workers are blocked.
 const ENGINE = ['solver', 'kernel', 'brep', 'enginehost'];
@@ -38,6 +38,15 @@ let template = src('template.html');
 for (const [name, v] of Object.entries(versions)) template = template.replace(new RegExp(`npm/${name}@[0-9.]+/`, 'g'), `npm/${name}@${v}/`);
 const html = template.replace('/*__CSS__*/', () => src('style.css')).replace('/*__JS__*/', () => js);
 
+// Refuse to ship a bundle with a syntax error (node parses it as a module without running it).
+{
+  const { execFileSync } = await import('node:child_process'), os = await import('node:os');
+  const tmp = path.join(os.tmpdir(), 'draftwork-check-' + process.pid + '.mjs');
+  fs.writeFileSync(tmp, js);
+  try { execFileSync(process.execPath, ['--check', tmp], { stdio: 'pipe' }); }
+  catch (e) { console.error(String(e.stderr || e.message)); process.exit(1); }
+  finally { fs.rmSync(tmp, { force: true }); }
+}
 const dist = path.join(root, 'dist');
 fs.mkdirSync(path.join(dist, 'engine'), { recursive: true });
 fs.writeFileSync(path.join(dist, 'index.html'), html);

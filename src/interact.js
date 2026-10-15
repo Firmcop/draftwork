@@ -29,6 +29,7 @@ function deleteFeature(id) {
 }
 function setHint(t) { $('#hint').textContent = t || ''; }
 function defaultHint() {
+  if (workspace === 'drawing') return setHint(drawingHint());
   if (pick) return setHint(pick.prompt + ' · Esc cancels');
   if (jointHint()) return setHint(jointHint());
   if (measure) return setHint('Click points on the model to measure between them · Esc closes');
@@ -827,6 +828,8 @@ if (location.hostname === 'localhost') window.__dw = {
   sketchScreen: (x, y) => { const v = new THREE.Vector3(x, y, 0).applyMatrix4(sketchMatrix(featById(sketchId))).project(camera), r = renderer.domElement.getBoundingClientRect(); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; },
   doc: () => JSON.parse(JSON.stringify(doc)),
   engine: () => engineMode,
+  sheet: (kind, x, y) => { const v = dw()?.views.find(w => w.kind === kind); if (!v) return null; const P = viewXf(v).toSheet([x, y]), r = sheetSvg.getBoundingClientRect(); return { x: r.left + (P[0] - dwCam.x) / dwCam.w * r.width, y: r.top + (P[1] - dwCam.y) / dwCam.h * r.height }; },
+  drawing: () => dw() && { views: dw().views.map(v => v.kind + ':' + (dwData[v.kind]?.vis.length || 0) + '/' + (dwData[v.kind]?.hid.length || 0)), dims: dw().dims.map(m => m.kind + ':' + fmtDim(dimValue(m))), scale: dw().scale, size: sheetSize(), boxes: dw().views.filter(v => dwData[v.kind]).map(v => { const X = viewXf(v), d = dwData[v.kind]; return [X.x - X.s * d.w / 2, X.y - X.s * d.h / 2, X.x + X.s * d.w / 2, X.y + X.s * d.h / 2]; }), texts: [...sheetSvg.querySelectorAll('text')].map(t => t.textContent) },
   setDoc: d => { checkpoint(); doc = upgradeDoc(d); afterDocReplace(); },
   assembly: () => ({ comps: comps().map(c => ({ name: c.name, bodies: c.bodies.length, moved: compXf.has(c.id) && !compXf.get(c.id).equals(IDENT) })), joints: joints().map(j => j.name + ':' + (jointStatus.get(j.id)?.state || '?')), xf: Object.fromEntries([...compXf].map(([k, m]) => [compById(k)?.name, m.elements.map(v => Math.round(v * 1e4) / 1e4)])) }),
   regen: () => doRegen(),
