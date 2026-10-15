@@ -4,6 +4,24 @@
 // Outline of a planar face seen square-on in a standard view, as one SVG path (one closed loop per wire), in the
 // same page coordinates the projections use: front (X, −Z), top (X, −Y), right (Y, −Z).
 const VIEW_MAP = { front: p => [p[0], -p[2]], top: p => [p[0], -p[1]], right: p => [p[1], -p[2]], left: p => [-p[1], -p[2]], back: p => [-p[0], -p[2]], bottom: p => [p[0], p[1]] };
+// axes of cylindrical faces, as 2D segments in a view (skipped when the axis points at the viewer)
+function axesOf(shapes, map) {
+  const out = [], seen = new Set();
+  for (const sh of shapes) for (const fc of sh.faces) {
+    try {
+      if (fc.geomType !== 'CYLINDRE') continue;
+      const sig = faceSig(fc); if (!sig.ax || !sig.ap) continue;
+      const ax = sig.ax, ap = sig.ap, [lo, hi] = fc.boundingBox.bounds;
+      let t0 = Infinity, t1 = -Infinity;
+      for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) { const t = (x - ap[0]) * ax[0] + (y - ap[1]) * ax[1] + (z - ap[2]) * ax[2]; t0 = Math.min(t0, t); t1 = Math.max(t1, t); }
+      const A = map(ap.map((v, i) => v + ax[i] * t0)), B = map(ap.map((v, i) => v + ax[i] * t1));
+      if (Math.hypot(B[0] - A[0], B[1] - A[1]) < 1e-6) continue;
+      const k = [A, B].map(p => p.map(v => v.toFixed(3)).join(',')).sort().join('|'); if (seen.has(k)) continue; seen.add(k);
+      out.push([A[0], A[1], B[0], B[1], sig.r || 0]);
+    } finally { fc.delete?.(); }
+  }
+  return out;
+}
 function faceOutline(face, kind) {
   const map = VIEW_MAP[kind], wires = [face.clone().outerWire(), ...face.clone().innerWires()];   // both consume the face they are called on
   let d = '';
@@ -134,11 +152,12 @@ function engineHost(RCmod) {
       if (op === 'project') {
         // 2D drawing views with exact hidden-line removal: SVG paths (y down, model millimeters) per view kind
         const temp = [];
+        const ids = [];
         const shapes = a.items.map(x => {
           let sh = shapeOf.get(x.tok); if (!sh) return null;
           sh = sh.clone();
           if (x.place) { if (x.place.angle > 1e-9) sh = sh.rotate(x.place.angle, [0, 0, 0], x.place.axis); sh = sh.translate(x.place.move); }
-          temp.push(sh); return sh;
+          temp.push(sh); ids.push(x.id); return sh;
         }).filter(Boolean);
         if (!shapes.length) return {};
         const all = shapes.length === 1 ? shapes[0] : RC.makeCompound(shapes.map(x => x.clone()));
@@ -153,6 +172,12 @@ function engineHost(RCmod) {
             const { visible, hidden } = RC.drawProjection(all, cam);
             let bb = null; try { bb = visible.boundingBox.bounds; } catch (e) { }
             out[kind] = { vis: flat(visible.toSVGPaths()), hid: flat(hidden.toSVGPaths()), bbox: bb };
+            const map = VIEW_MAP[kind];
+            if (map) {
+              // per-body extents (for balloons) and hole / shaft axes seen from the side (for centrelines), in view coordinates
+              out[kind].boxes = shapes.map((sh, k) => { const [lo, hi] = sh.boundingBox.bounds, P = []; for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) P.push(map([x, y, z])); return { id: ids[k], b: [Math.min(...P.map(p => p[0])), Math.min(...P.map(p => p[1])), Math.max(...P.map(p => p[0])), Math.max(...P.map(p => p[1]))] }; });
+              out[kind].axes = axesOf(shapes, map);
+            }
           }
         } finally { temp.forEach(t => t.delete?.()); }
         return out;

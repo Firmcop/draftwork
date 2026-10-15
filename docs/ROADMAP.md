@@ -43,6 +43,10 @@ Next
 
 ## Phase 2 — Drawings, assemblies, animation *(started)*
 
+Done (drawings)
+- [x] Multiple sheets, detail views, centrelines, balloons, notes, dimension tolerances, multi-page PDF, DXF export
+
+
 Done
 - [x] Components (group bodies; ground)
 - [x] Joints: rigid, revolute, slider, cylindrical, planar; origins on flat faces and round edges; offset, flip; live values

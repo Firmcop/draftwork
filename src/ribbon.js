@@ -113,14 +113,16 @@ cmd('dw.section', 'Section View', 'section', { run: () => dwSetTool('section') }
 cmd('dw.centers', 'Center Marks On/Off', 'point', { run: () => dwToggleCenters() });
 cmd('dw.parts', 'Parts List', 'bom', { run: () => dwToggleParts() });
 cmd('dw.fit', 'Fit Sheet', 'fit', { key: 'F', run: () => { dwFit(); renderSheet(); } });
-cmd('dw.export', 'Export PDF (.zip)', 'exportstl', { run: () => exportDrawing() });
+cmd('dw.export', 'Export PDF, SVG, DXF (.zip)', 'exportstl', { run: () => exportDrawingAll() });
+cmd('dw.detail', 'Detail View', 'zoom', { run: () => dwSetTool('detail') }); cmd('dw.balloon', 'Balloon', 'bom', { run: () => dwSetTool('balloon') }); cmd('dw.note', 'Note', 'text', { run: () => dwSetTool('note') });
+cmd('dw.addsheet', 'New Sheet', 'doc', { run: () => addSheet() }); cmd('dw.delsheet', 'Delete Sheet', 'delete', { run: () => deleteSheet() });
 cmd('dw.finish', 'Finish Drawing', 'finish', { run: () => exitDrawing() });
 const TABS = {
   DRAWING: [
-    { name: 'VIEWS', bar: ['dw.std', 'dw.view.front', 'dw.view.iso', 'dw.section'], menu: ['dw.std', '-', ...Object.keys(VIEW_KINDS).map(k => 'dw.view.' + k), 'dw.section', '-', 'dw.hidden', 'dw.centers'] },
-    { name: 'ANNOTATE', bar: ['dw.dim', 'dw.dia', 'dw.rad', 'dw.ang'], menu: ['dw.dim', 'dw.dia', 'dw.rad', 'dw.ang', '-', 'dw.centers', 'dw.hidden'] },
-    { name: 'TABLES', bar: ['dw.parts'], menu: ['dw.parts'] },
-    { name: 'SHEET', bar: ['dw.sheet', 'dw.fit'], menu: ['dw.sheet', 'dw.fit'] },
+    { name: 'VIEWS', bar: ['dw.std', 'dw.view.front', 'dw.view.iso', 'dw.section', 'dw.detail'], menu: ['dw.std', '-', ...Object.keys(VIEW_KINDS).map(k => 'dw.view.' + k), 'dw.section', 'dw.detail', '-', 'dw.hidden', 'dw.centers'] },
+    { name: 'ANNOTATE', bar: ['dw.dim', 'dw.dia', 'dw.rad', 'dw.ang', 'dw.note'], menu: ['dw.dim', 'dw.dia', 'dw.rad', 'dw.ang', '-', 'dw.note', 'dw.balloon', '-', 'dw.centers', 'dw.hidden'] },
+    { name: 'TABLES', bar: ['dw.parts', 'dw.balloon'], menu: ['dw.parts', 'dw.balloon'] },
+    { name: 'SHEET', bar: ['dw.sheet', 'dw.addsheet', 'dw.fit'], menu: ['dw.sheet', 'dw.fit', '-', 'dw.addsheet', 'dw.delsheet'] },
     { name: 'EXPORT', bar: ['dw.export'], menu: ['dw.export'] },
     { name: 'FINISH DRAWING', finish: true, bar: ['dw.finish'], menu: [] },
   ],
@@ -207,7 +209,7 @@ function renderRibbon() {
     const bar = h('div', { class: 'rbar' });
     for (const id of g.bar) {
       const c = CMD[id];
-      const pressed = (workspace === 'drawing' && ((id === 'dw.dim' && dwTool === 'dim') || (id === 'dw.dia' && dwTool === 'dia') || (id === 'dw.rad' && dwTool === 'rad') || (id === 'dw.ang' && dwTool === 'ang') || (id === 'dw.section' && dwTool === 'section') || (id.startsWith('dw.view.') && dwTool === 'place:' + id.slice(8)))) || (mode === 'sketch' && id === 'k.' + sketchTool) || (id === 'k.select' && sketchTool === 'select' && mode === 'sketch') || (id === 'measure' && measure) || (id === 'section' && section) || (id === 'com' && showCOM) || (id === 'zebra' && zebraOn) || (id === 'curvature' && combMode) || (id === 'contact' && !!doc.contact?.on);
+      const pressed = (workspace === 'drawing' && ((id === 'dw.dim' && dwTool === 'dim') || (id === 'dw.dia' && dwTool === 'dia') || (id === 'dw.rad' && dwTool === 'rad') || (id === 'dw.ang' && dwTool === 'ang') || (id === 'dw.section' && dwTool === 'section') || (id === 'dw.detail' && dwTool === 'detail') || (id === 'dw.balloon' && dwTool === 'balloon') || (id === 'dw.note' && dwTool === 'note') || (id.startsWith('dw.view.') && dwTool === 'place:' + id.slice(8)))) || (mode === 'sketch' && id === 'k.' + sketchTool) || (id === 'k.select' && sketchTool === 'select' && mode === 'sketch') || (id === 'measure' && measure) || (id === 'section' && section) || (id === 'com' && showCOM) || (id === 'zebra' && zebraOn) || (id === 'curvature' && combMode) || (id === 'contact' && !!doc.contact?.on);
       if (g.finish) bar.append(h('button', { class: 'rbtn finish', title: tip(c), 'aria-label': c.label, onclick: () => runCmd(id), html: icon(c.icon) + '<span>' + c.label.toUpperCase() + '</span>' }));
       else bar.append(h('button', { class: 'rbtn' + (c.phase ? ' planned' : ''), title: tip(c), 'aria-label': tip(c), 'aria-pressed': pressed ? 'true' : null, onclick: () => runCmd(id), html: icon(c.icon) }));
     }

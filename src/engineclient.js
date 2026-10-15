@@ -101,7 +101,7 @@ function brepFlat(body) { return engineCall('flat', { body }); }
 const meshGeoms = new Map();   // mesh token -> { geom (non-indexed), groups }
 function engineMeshFile(fileId, name, data, binary) { return engineCall('meshfile', { fileId, name, data, binary }); }
 function brepSection(items, o) { return engineCall('section', { items: items.map(({ shape, place }) => ({ tok: shape, place })), ...o }); }
-function brepProject(items, kinds) { return engineCall('project', { items: items.map(({ shape, place }) => ({ tok: shape, place })), kinds }); }
+function brepProject(items, kinds) { return engineCall('project', { items: items.map(({ id, shape, place }) => ({ id, tok: shape, place })), kinds }); }
 async function brepImportSTEP(fileId, text) { const n = await engineCall('import', { fileId, text }); importsRead.add(fileId); return n; }
 function brepSTEP(items) { return engineCall('step', { items: items.map(({ shape, name, color, place }) => ({ tok: shape, name, color, place })) }); }
 
