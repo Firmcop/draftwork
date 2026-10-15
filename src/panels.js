@@ -388,18 +388,21 @@ function featureFields(f, idx) {
     case 'sextrude': case 'srevolve': case 'patch': case 'soffset': case 'sloft': case 'ssweep': case 'ruled': case 'trim': case 'untrim': case 'sextend': case 'stitch': case 'unstitch': case 'reverse': case 'deleteface':
       surfaceDialog(f, idx, out);
       break;
+    case 'boss': case 'snapfit': case 'rest':
+      plasticDialog(f, idx, out, placement);
+      break;
     case 'flange': case 'contourflange': case 'unfold': case 'refold':
       sheetDialog(f, idx, out);
       break;
     case 'coil': case 'rib': case 'web':
       createDialog2(f, idx, out, placement);
       break;
-    case 'fillet': case 'chamfer': case 'shell': case 'draft': case 'presspull': case 'thicken': case 'replaceface': case 'thread': case 'emboss': case 'splitface': {
+    case 'fillet': case 'chamfer': case 'shell': case 'draft': case 'presspull': case 'thicken': case 'replaceface': case 'thread': case 'emboss': case 'splitface': case 'lip': {
       const n = (f.edges || []).length, what = FACE_PICK.has(f.type) ? 'face' : 'edge';
-      out.push(section_(f.type === 'presspull' || f.type === 'thicken' ? 'Faces' : f.type === 'replaceface' ? 'Face to replace' : f.type === 'thread' ? 'Cylindrical faces' : f.type === 'splitface' ? 'Faces to split' : f.type === 'emboss' ? 'Target face' : f.type === 'shell' ? 'Faces to remove' : f.type === 'draft' ? 'Faces to taper' : 'Edges',
+      out.push(section_(f.type === 'presspull' || f.type === 'thicken' ? 'Faces' : f.type === 'replaceface' ? 'Face to replace' : f.type === 'thread' ? 'Cylindrical faces' : f.type === 'splitface' ? 'Faces to split' : f.type === 'lip' ? 'Rim face' : f.type === 'emboss' ? 'Target face' : f.type === 'shell' ? 'Faces to remove' : f.type === 'draft' ? 'Faces to taper' : 'Edges',
         h('p', { class: 'note' }, n ? `${n} ${what}${n > 1 ? 's' : ''} selected. Click on the model to add or remove ${what}s.` : `Click the ${what}s on the model.`),
         h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn', type: 'button', disabled: !n, onclick: () => { checkpoint(); f.edges = []; rerenderDialog(); scheduleRegen(0); drawToolsOverlay(); } }, 'Clear selection'))));
-      if (modifyDialog(f, idx, out) || createDialog2(f, idx, out, placement)) break;
+      if (modifyDialog(f, idx, out) || createDialog2(f, idx, out, placement) || plasticDialog(f, idx, out, placement)) break;
       if (f.type === 'presspull') {
         out.push(section_('Offset', exField('Distance', f, 'distance', 'mm', { id: 'dx-ppdist' }), h('p', { class: 'note' }, 'Positive pulls the face out and adds material; negative pushes it in and removes material. On a hole, positive makes it smaller.')));
         break;

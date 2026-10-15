@@ -13,10 +13,10 @@ const pkg = name => JSON.parse(fs.readFileSync(path.join(root, 'node_modules', n
 
 const strip = s => s.split('\n').filter(l => !/^import /.test(l)).map(l => l.replace(/^export /, '')).join('\n');
 // Concatenation order matters: later modules use functions from earlier ones.
-const MODULES = ['font', 'solver', 'kernel', 'engineclient', 'icons', 'assembly', 'drawing', 'construct', 'modify', 'surfaceui', 'sheetui', 'core', 'ribbon', 'panels', 'interact', 'sketchui', 'sketchtools'];
+const MODULES = ['font', 'solver', 'kernel', 'engineclient', 'icons', 'assembly', 'drawing', 'construct', 'modify', 'surfaceui', 'sheetui', 'plasticui', 'core', 'ribbon', 'panels', 'interact', 'sketchui', 'sketchtools'];
 // The exact kernel runs in a Web Worker: solver + kernel + brep + host wrapped in one self-contained async function.
 // The page sends engineFactory.toString() to the worker, or calls it directly when workers are blocked.
-const ENGINE = ['font', 'solver', 'kernel', 'brep', 'brepsurf', 'brepsheet', 'enginehost'];
+const ENGINE = ['font', 'solver', 'kernel', 'brep', 'brepsurf', 'brepsheet', 'brepplastic', 'enginehost'];
 const engineFactory = `async function engineFactory(urls) {
 const THREE = await import(urls.three);
 class Brush { } class Evaluator { } const ADDITION = 0, SUBTRACTION = 1, INTERSECTION = 2;   // mesh booleans are not used here

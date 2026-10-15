@@ -73,8 +73,8 @@ cmd('exportstl', 'Export STL', 'exportstl', { run: () => openExportDialog() });
 cmd('sm.flange', 'Flange', 'flange', { run: () => newSheet('flange') }); cmd('sm.contour', 'Contour Flange', 'contourflange', { run: () => newSheet('contourflange') }); cmd('sm.unfold', 'Unfold', 'unfold', { run: () => newSheet('unfold') });
 cmd('sm.refold', 'Refold', 'unfold', { run: () => newSheet('refold') }); cmd('sm.flat', 'Create Flat Pattern', 'unfold', { run: () => openFlatPattern() }); cmd('sm.rules', 'Sheet Metal Rules', 'sheetrules', { run: () => openSheetRules() });
 // plastic
-planned('pl.rules', 'Plastic Rules', 'plasticrules', P3); planned('pl.boss', 'Boss', 'boss', P3); planned('pl.snap', 'Snap Fit', 'snapfit', P3); planned('pl.lip', 'Lip', 'lip', P3);
-planned('pl.rest', 'Rest', 'boss', P3); planned('pl.rib', 'Rib', 'rib', P3); planned('pl.web', 'Web', 'web', P3);
+cmd('pl.rules', 'Plastic Rules', 'plasticrules', { run: () => openPlasticRules() }); cmd('pl.boss', 'Boss', 'boss', { run: () => newPlastic('boss') }); cmd('pl.snap', 'Snap Fit', 'snapfit', { run: () => newPlastic('snapfit') }); cmd('pl.lip', 'Lip / Groove', 'lip', { run: () => newPlastic('lip') });
+cmd('pl.rest', 'Rest', 'boss', { run: () => newPlastic('rest') }); cmd('pl.rib', 'Rib', 'rib', { run: () => startRibWeb('rib') }); cmd('pl.web', 'Web', 'web', { run: () => startRibWeb('web') });
 // manage / utilities
 cmd('bom', 'Bill of Materials', 'bom', { run: () => openBOMModal() });
 cmd('make3d', '3D Print', 'make', { run: () => openExportDialog() });
@@ -158,8 +158,8 @@ const TABS = {
   ],
   PLASTIC: [
     { name: 'SETUP', bar: ['pl.rules'], menu: ['pl.rules'] },
-    { name: 'CREATE', bar: ['sketch', 'extrude', 'pl.boss', 'pl.snap', 'pl.lip', 'pl.rib'], menu: ['sketch', 'extrude', '-', 'pl.boss', 'pl.snap', 'pl.lip', 'pl.rest', 'pl.rib', 'pl.web'] },
-    { name: 'MODIFY', bar: ['fillet', 'shell', 'draft'], menu: ['fillet', 'shell', 'draft'] },
+    { name: 'CREATE', bar: ['sketch', 'extrude', 'pl.boss', 'pl.snap', 'pl.lip', 'pl.rib'], menu: ['sketch', 'extrude', 'revolve', 'box', '-', 'pl.boss', 'pl.snap', 'pl.lip', 'pl.rest', 'pl.rib', 'pl.web', '-', 'hole', 'thread', 'emboss'] },
+    { name: 'MODIFY', bar: ['fillet', 'shell', 'draft'], menu: ['presspull', 'fillet', 'chamfer', 'shell', 'draft', '-', 'splitbody', 'splitface', 'combine', 'move'] },
     { name: 'INSPECT', bar: ['measure', 'section'], menu: ['measure', 'section'] },
     { name: 'SELECT', bar: ['select'], menu: ['select'] },
   ],

@@ -1,7 +1,7 @@
 // Page side of the exact engine. The kernel runs in a Web Worker (engineFactory, see enginehost.js) so long
 // rebuilds don't freeze the interface; when the page may not start workers it runs the same code here.
 // Bodies arrive as records whose `shape` is a token; their meshes, signatures and properties come with them.
-const FACE_PICK = new Set(['shell', 'draft', 'presspull', 'thicken', 'replaceface', 'thread', 'emboss', 'splitface', 'soffset', 'untrim', 'deleteface']);
+const FACE_PICK = new Set(['shell', 'draft', 'presspull', 'thicken', 'replaceface', 'thread', 'emboss', 'splitface', 'soffset', 'untrim', 'deleteface', 'lip']);
 let engineMode = null;                 // 'worker' | 'inline'
 let engineWorker = null, engineInline = null;
 const engineCalls = new Map(); let engineCallId = 0;

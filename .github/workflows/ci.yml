@@ -25,6 +25,7 @@ jobs:
       - run: node tests/e2e-sketch2.mjs
       - run: node tests/e2e-surface.mjs
       - run: node tests/e2e-sheet.mjs
+      - run: node tests/e2e-plastic.mjs
       - run: ENGINE_INLINE=1 node tests/e2e.mjs
       - uses: actions/upload-artifact@v4
         with:

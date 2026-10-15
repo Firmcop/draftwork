@@ -722,12 +722,12 @@ function regenerateBrep(features, upto = null, cache = null) {
   return out;
 }
 const EDGE_TYPES = new Set(['fillet', 'chamfer', 'shell', 'draft', 'presspull']);
-const FACE_PICK = new Set(['shell', 'draft', 'presspull', 'thicken', 'replaceface', 'thread', 'emboss', 'splitface']);
+const FACE_PICK = new Set(['shell', 'draft', 'presspull', 'thicken', 'replaceface', 'thread', 'emboss', 'splitface', 'lip']);
 // Imported STEP shapes, parsed once per file (async) and reused by every rebuild: fileId -> Shape3D[]
 const importShapes = new Map();
 function brepStep(f, out) {
   out.before.set(f.id, [...out.bodies.keys()]);
-  if (EDGE_TYPES.has(f.type) || FACE_PICK.has(f.type) || SURF_FACE_PICK.has(f.type) || SURF_EDGE_PICK.has(f.type) || f.type === 'patch' || f.type === 'flange') out.beforeBodies.set(f.id, new Map(out.bodies));
+  if (EDGE_TYPES.has(f.type) || FACE_PICK.has(f.type) || SURF_FACE_PICK.has(f.type) || SURF_EDGE_PICK.has(f.type) || f.type === 'patch' || f.type === 'flange' || f.type === 'lip') out.beforeBodies.set(f.id, new Map(out.bodies));
   if (f.suppressed) { out.status.set(f.id, { state: 'suppressed' }); return; }
   try {
     if (f.error) throw new Error(f.error);
@@ -805,6 +805,8 @@ function brepStep(f, out) {
       surfaceStep(f, out);
     } else if (SHEET_TYPES.has(f.type)) {
       sheetStep(f, out);
+    } else if (PLASTIC_TYPES.has(f.type)) {
+      plasticStep(f, out);
     }
     out.status.set(f.id, { state: 'ok' });
   } catch (e) {

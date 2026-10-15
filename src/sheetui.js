@@ -61,16 +61,7 @@ function sheetDialog(f, idx, out) {
   }
   return false;
 }
-function openSheetRules() {
-  const snap = JSON.stringify(doc.params);
-  ensureSheetParams();
-  const work = SM_PARAMS.map(([name, , label]) => { const p = doc.params.find(q => q.name === name); return { p, label, inp: h('input', { type: 'text', value: p.expr, spellcheck: 'false', 'aria-label': label, id: 'sm-' + name }) }; });
-  const body = h('div', { class: 'tablewrap' }, h('p', { class: 'note' }, 'These are user parameters, so you can also use them in any dimension. Flanges made with the defaults update when you change them here.'),
-    ...work.map(w => h('div', { class: 'row' }, h('label', { class: 'rl', for: w.inp.id }, w.label.replace('Sheet metal ', '')), w.inp)));
-  openModal('Sheet Metal Rules', 'sheetrules', body, [
-    h('button', { class: 'btn ok', onclick: () => { checkpoint(); work.forEach(w => { w.p.expr = w.inp.value.trim() || w.p.expr; }); params = evalParams(doc.params); closeModal(); scheduleRegen(0); renderBrowser(); } }, 'OK'),
-    h('button', { class: 'btn', onclick: () => { doc.params = JSON.parse(snap); params = evalParams(doc.params); closeModal(); } }, 'Cancel')]);
-}
+function openSheetRules() { openRulesModal('Sheet Metal Rules', 'sheetrules', SM_PARAMS, ensureSheetParams); }
 // ---- flat pattern viewer + DXF ----
 function dxfOf(fd, name) {
   const L = [];

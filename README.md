@@ -14,6 +14,7 @@ Parametric CAD in the browser. Sketch on planes or faces, build solids with a fe
 | Modify | Press Pull (flat and curved faces), fillet, chamfer, shell, draft (pick edges/faces on the model), replace face, split face, split body, scale, align, combine, move/copy, remove, physical material, appearance |
 | Surface | Extrude, revolve, sweep and loft surfaces from open or closed sketch curves; patch (flat or filling) from a sketch or picked boundary edges; offset, ruled, trim (by plane or surface), untrim, extend, delete face, stitch (closed results become solids), unstitch, reverse normal, thicken |
 | Sheet metal | Rules as user parameters (thickness, bend radius, K-factor); base flange from a sketch, edge flanges (any angle, chained on flange edges), contour flange from an open chain with automatic bends; unfold/refold; flat pattern viewer with size, bend lines and DXF export |
+| Plastic | Rules as user parameters (wall, draft, clearance); screw boss (draft, blind/through hole, gusset ribs), cantilever snap fit, lip and groove around a shell opening, rest pads (drafted), rib and web |
 | Bodies | Multiple solid and surface bodies with New Body / Join / Cut / Intersect |
 | Assemble | Components; rigid groups; joints and as-built joints (rigid, revolute, slider, cylindrical, planar) on face centers and round edges; limits; closed loops (linkages); drag parts to move them; drive and animate joints |
 | Parameters | User parameters and expressions in any field (`width/2 - edge`, `sqrt(…)`, `sin(…)` …) |

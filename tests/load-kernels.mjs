@@ -19,6 +19,7 @@ ${strip(fs.readFileSync(path.join(root, 'src/kernel.js'), 'utf8'))}
 ${strip(fs.readFileSync(path.join(root, 'src/brep.js'), 'utf8'))}
 ${strip(fs.readFileSync(path.join(root, 'src/brepsurf.js'), 'utf8'))}
 ${strip(fs.readFileSync(path.join(root, 'src/brepsheet.js'), 'utf8'))}
+${strip(fs.readFileSync(path.join(root, 'src/brepplastic.js'), 'utf8'))}
 export function setOC(oc) { RCmod.setOC(oc); RC = RCmod; }
 export { sheetFlatData, regenerate, regenerateBrep, resolveFeatures, evalParams, evalExpr, signedVolume, brepProps, brepMeshOf, brepSigMap, brepCollect, brepSTEP, brepImportSTEP, frameFromPoint, toBinarySTL, makeZip, solveSketch, analyzeSketch, applySolved, geoProfiles, geoPaths, geoRegions, pickRegions, curveSplits, arrCurves, extendTarget, splineBeziers, bezPoint, splineFull, splineSpans, splineClosest, splineAt };
 export const THREEns = THREE;`;

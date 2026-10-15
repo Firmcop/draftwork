@@ -47,7 +47,7 @@ check(dxfOk, 'Export DXF downloads a zip with the DXF (outline + bend layer)');
 await page.click('#modal .btn.ok'); await W(300);
 
 // rules: thickness 2 rebuilds everything
-await menu('MODIFY', 'Sheet Metal Rules'); await page.fill('#sm-sm_thickness', '2'); await page.click('#modal .btn.ok'); await W(2500);
+await menu('MODIFY', 'Sheet Metal Rules'); await page.fill('#rule-sm_thickness', '2'); await page.click('#modal .btn.ok'); await W(2500);
 p = await props();
 check(p[0].volume > 60 * 40 * 2, 'changing the rule thickness to 2 mm rebuilds the part (' + p[0].volume + ')');
 // unfold
