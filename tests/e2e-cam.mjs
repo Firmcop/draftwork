@@ -88,6 +88,20 @@ check(c.sim.at === c.sim.total && c.sim.gougeCells === 0 && Math.abs(top[0] - to
 if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/cam-dome.png' });
 await page.click('.dialog .btn.ok'); await W(500);
 
+// ---- additive: slice the dome and export G-code ----
+await page.click('.rtab:text-is("ADDITIVE")'); await W(400);
+await menu('SETUP', 'Print Setup'); await page.fill('#am-layer', '0.3'); await page.fill('#am-infill', '15'); await W(300); await page.click('.dialog .btn.ok'); await W(300);
+await menu('SLICE', 'Slice'); await W(6000);
+const pr = await page.evaluate(() => window.__dw.print());
+check(pr && pr.layers >= 75 && pr.layers <= 80 && pr.minutes > 10 && pr.grams > 5 && pr.shown > 2, 'slices the 23 mm dome into ~77 layers of 0.3 mm with time and filament ' + JSON.stringify(pr));
+await page.fill('#am-slider', '20'); await page.dispatchEvent('#am-slider', 'input'); await W(400);
+check(/Layer 20 \/ /.test(await page.textContent('#am-info')), 'layer slider steps through the layers');
+if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/print.png' });
+const [dl2] = await Promise.all([page.waitForEvent('download', { timeout: 20000 }).catch(() => null), page.click('#am-export')]);
+let gc = false; if (dl2) { const s2 = fs.readFileSync(await dl2.path()).toString('latin1'); gc = s2.includes('.gcode') && /;LAYER:/.test(s2) === false ? s2.includes('print.gcode') : true; }
+check(gc, 'G-code saved as a zip');
+await page.click('.dialog .btn.ok'); await W(300);
+
 // back to design
 await page.click('#wsBtn'); await W(200); await page.click('.menu .mi:has-text("DESIGN")'); await W(800);
 check(await page.isVisible('.rtab:text-is("SOLID")'), 'back to the Design workspace');

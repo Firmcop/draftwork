@@ -126,6 +126,11 @@ const TABS = {
     { name: 'ACTIONS', bar: ['cam.generate', 'cam.simulate', 'cam.post'], menu: ['cam.generate', 'cam.simulate', 'cam.post'] },
     { name: 'MANAGE', bar: ['cam.tools'], menu: ['cam.tools'] },
   ],
+  ADDITIVE: [
+    { name: 'SETUP', bar: ['am.setup'], menu: ['am.setup'] },
+    { name: 'SLICE', bar: ['am.slice'], menu: ['am.slice'] },
+    { name: 'EXPORT', bar: ['am.export'], menu: ['am.export'] },
+  ],
   DRAWING: [
     { name: 'VIEWS', bar: ['dw.std', 'dw.view.front', 'dw.view.iso', 'dw.section', 'dw.detail'], menu: ['dw.std', '-', ...Object.keys(VIEW_KINDS).map(k => 'dw.view.' + k), 'dw.section', 'dw.detail', '-', 'dw.hidden', 'dw.centers'] },
     { name: 'ANNOTATE', bar: ['dw.dim', 'dw.dia', 'dw.rad', 'dw.ang', 'dw.note'], menu: ['dw.dim', 'dw.dia', 'dw.rad', 'dw.ang', '-', 'dw.note', 'dw.balloon', '-', 'dw.centers', 'dw.hidden'] },
@@ -205,12 +210,12 @@ function tip(c) { return c.label + (c.key ? ` (${c.key})` : '') + (c.phase ? ` Â
 
 function renderRibbon() {
   const tabs = $('#rtabs'); tabs.replaceChildren();
-  const names = workspace === 'drawing' ? ['DRAWING'] : workspace === 'manufacture' ? ['MILLING'] : Object.keys(TABS).filter(t => t !== 'SKETCH' && t !== 'DRAWING' && t !== 'MILLING');
+  const names = workspace === 'drawing' ? ['DRAWING'] : workspace === 'manufacture' ? ['MILLING', 'ADDITIVE'] : Object.keys(TABS).filter(t => t !== 'SKETCH' && t !== 'DRAWING' && t !== 'MILLING' && t !== 'ADDITIVE');
   if (mode === 'sketch' && workspace !== 'drawing') names.push('SKETCH');
   if (mode !== 'sketch' && activeTab === 'SKETCH') activeTab = 'SOLID';
   if (!names.includes(activeTab)) activeTab = names[0];
   for (const t of names) {
-    tabs.append(h('button', { class: 'rtab' + (t === 'SKETCH' ? ' ctx' : ''), role: 'tab', 'aria-selected': String(activeTab === t), onclick: () => { activeTab = t; renderRibbon(); } }, t));
+    tabs.append(h('button', { class: 'rtab' + (t === 'SKETCH' ? ' ctx' : ''), role: 'tab', 'aria-selected': String(activeTab === t), onclick: () => { activeTab = t; renderRibbon(); if (workspace === 'manufacture') { drawCam(); drawPrint(); renderBrowser(); defaultHint(); } } }, t));
   }
   const groups = $('#rgroups'); groups.replaceChildren();
   for (const g of TABS[activeTab]) {

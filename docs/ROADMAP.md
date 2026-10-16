@@ -69,7 +69,8 @@ Done
 - [x] Milling: setups, tool library, face, 2D pocket/contour, drilling, 3D roughing, parallel and waterline finishing, simulation with gouge check, Fanuc/Haas/LinuxCNC/GRBL posts, setup sheet
 
 Next
-- [ ] Additive slicing (3D printing), nesting, turning, adaptive (constant-engagement) clearing, tool holders and collision checks
+- [x] Additive: FFF slicing with perimeters, solid/sparse infill, skirt, preview and Marlin G-code
+- [ ] Supports for overhangs, nesting, turning, adaptive (constant-engagement) clearing, tool holders and collision checks
 2.5D milling, routing, laser/plasma toolpaths, G-code post-processors; sheet metal; plastic design; nesting.
 
 ## Phase 4 — Simulation

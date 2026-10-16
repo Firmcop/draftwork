@@ -44,9 +44,10 @@ function enterManufacture() {
 }
 function exitManufacture() {
   stopSim(); workspace = 'design'; document.body.classList.remove('ws-manufacture'); $('#wsBtn span').textContent = 'DESIGN';
-  clearGroup(camGroup); activeTab = 'SOLID'; renderRibbon(); renderBrowser(); updateScene(); defaultHint(); requestRender();
+  clearGroup(camGroup); activeTab = 'SOLID'; drawPrint(); renderRibbon(); renderBrowser(); updateScene(); defaultHint(); requestRender();
 }
 function camHint() {
+  if (activeTab === 'ADDITIVE') return 'Print Setup sets the printer and quality; Slice shows the layers and saves G-code.';
   if (camPick) return camPick === 'floor' ? 'Click the flat floor of each pocket · click again to remove · OK when done' : 'Click the holes to drill · click again to remove';
   return 'Add operations from the ribbon. Double-click one in the browser to edit it; Simulate shows the material being cut.';
 }
@@ -160,7 +161,7 @@ async function genAll(s = camSetup()) {
 const camToModel = (ctx, x, y, z) => new THREE.Vector3(x, y, z).applyMatrix4(ctx.Ri);
 function drawCam() {
   clearGroup(camGroup);
-  if (workspace !== 'manufacture') { requestRender(); return; }
+  if (workspace !== 'manufacture' || activeTab === 'ADDITIVE') { requestRender(); return; }
   const s = camSetup(); if (!s) return;
   const ctx = camContext(s); if (!ctx) return;
   const st = ctx.stock, P = (x, y, z) => camToModel(ctx, x, y, z);
@@ -188,6 +189,12 @@ function drawCam() {
 
 // ---- browser tree ----
 function renderCamBrowser(add) {
+  if (activeTab === 'ADDITIVE') {
+    const o = prn(), pc = printCache;
+    add(0, { icon: 'make', label: 'Print', sub: `${o.material} · ${o.layer} mm · ${o.infill}% infill`, onDbl: () => openPrintSetup(), onClick: () => openPrintSetup() });
+    if (pc) { add(1, { icon: 'bodyi', label: 'Part', sub: pc.size.map(v => fmt(v)).join(' × ') + ' mm' }); add(1, { icon: 'start', label: 'Print time', sub: fmtMin(pc.stats.minutes) }); add(1, { icon: 'material', label: 'Filament', sub: fmt(pc.stats.filament / 1000) + ' m · ' + fmt(pc.stats.grams) + ' g' }); }
+    return;
+  }
   const C = cam();
   if (!add(0, { key: 'camroot', icon: 'make', label: 'Setups', sub: String(C.setups.length) })) return;
   for (const s of C.setups) {
