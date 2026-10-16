@@ -118,6 +118,14 @@ cmd('dw.detail', 'Detail View', 'zoom', { run: () => dwSetTool('detail') }); cmd
 cmd('dw.addsheet', 'New Sheet', 'doc', { run: () => addSheet() }); cmd('dw.delsheet', 'Delete Sheet', 'delete', { run: () => deleteSheet() });
 cmd('dw.finish', 'Finish Drawing', 'finish', { run: () => exitDrawing() });
 const TABS = {
+  MILLING: [
+    { name: 'SETUP', bar: ['cam.setup'], menu: ['cam.setup', 'cam.tools'] },
+    { name: '2D', bar: ['cam.face', 'cam.pocket', 'cam.contour'], menu: ['cam.face', 'cam.pocket', 'cam.contour'] },
+    { name: '3D', bar: ['cam.rough', 'cam.parallel', 'cam.waterline'], menu: ['cam.rough', 'cam.parallel', 'cam.waterline'] },
+    { name: 'DRILLING', bar: ['cam.drill'], menu: ['cam.drill'] },
+    { name: 'ACTIONS', bar: ['cam.generate', 'cam.simulate', 'cam.post'], menu: ['cam.generate', 'cam.simulate', 'cam.post'] },
+    { name: 'MANAGE', bar: ['cam.tools'], menu: ['cam.tools'] },
+  ],
   DRAWING: [
     { name: 'VIEWS', bar: ['dw.std', 'dw.view.front', 'dw.view.iso', 'dw.section', 'dw.detail'], menu: ['dw.std', '-', ...Object.keys(VIEW_KINDS).map(k => 'dw.view.' + k), 'dw.section', 'dw.detail', '-', 'dw.hidden', 'dw.centers'] },
     { name: 'ANNOTATE', bar: ['dw.dim', 'dw.dia', 'dw.rad', 'dw.ang', 'dw.note'], menu: ['dw.dim', 'dw.dia', 'dw.rad', 'dw.ang', '-', 'dw.note', 'dw.balloon', '-', 'dw.centers', 'dw.hidden'] },
@@ -184,7 +192,7 @@ const TABS = {
     { name: 'FINISH SKETCH', bar: ['k.finish'], menu: ['k.finish'], finish: true },
   ],
 };
-const WORKSPACES = [['Design', null], ['Generative Design', P5], ['Render', P2], ['Animation', P2], ['Simulation', P4], ['Manufacture', P3], ['Drawing', null]];
+const WORKSPACES = [['Design', null], ['Generative Design', P5], ['Render', P2], ['Animation', P2], ['Simulation', P4], ['Manufacture', null], ['Drawing', null]];
 
 function runCmd(id) {
   const c = CMD[id]; if (!c) return;
@@ -197,7 +205,7 @@ function tip(c) { return c.label + (c.key ? ` (${c.key})` : '') + (c.phase ? ` Â
 
 function renderRibbon() {
   const tabs = $('#rtabs'); tabs.replaceChildren();
-  const names = workspace === 'drawing' ? ['DRAWING'] : Object.keys(TABS).filter(t => t !== 'SKETCH' && t !== 'DRAWING');
+  const names = workspace === 'drawing' ? ['DRAWING'] : workspace === 'manufacture' ? ['MILLING'] : Object.keys(TABS).filter(t => t !== 'SKETCH' && t !== 'DRAWING' && t !== 'MILLING');
   if (mode === 'sketch' && workspace !== 'drawing') names.push('SKETCH');
   if (mode !== 'sketch' && activeTab === 'SKETCH') activeTab = 'SOLID';
   if (!names.includes(activeTab)) activeTab = names[0];
@@ -261,7 +269,7 @@ function openMenu(anchor, items, o = {}) {
 document.addEventListener('pointerdown', e => { if (!e.target.closest('.menu') && !e.target.closest('[aria-haspopup]')) closeMenus(); });
 
 function openWorkspaceMenu() {
-  openMenu($('#wsBtn'), [{ head: 'Workspaces' }, ...WORKSPACES.map(([n, ph]) => ({ label: n.toUpperCase(), icon: n === 'Design' ? 'doc' : n === 'Simulation' ? 'analysis' : n === 'Manufacture' ? 'make' : n === 'Drawing' ? 'properties' : n === 'Animation' ? 'motion' : n === 'Render' ? 'appearance' : 'form', phase: ph, checked: (n === 'Design' && workspace === 'design') || (n === 'Drawing' && workspace === 'drawing') ? true : null, action: () => { if (ph) toast(`The ${n} workspace is planned for ${ph}`); else if (n === 'Drawing') enterDrawing(); else if (n === 'Design' && workspace !== 'design') exitDrawing(); } }))]);
+  openMenu($('#wsBtn'), [{ head: 'Workspaces' }, ...WORKSPACES.map(([n, ph]) => ({ label: n.toUpperCase(), icon: n === 'Design' ? 'doc' : n === 'Simulation' ? 'analysis' : n === 'Manufacture' ? 'make' : n === 'Drawing' ? 'properties' : n === 'Animation' ? 'motion' : n === 'Render' ? 'appearance' : 'form', phase: ph, checked: (n === 'Design' && workspace === 'design') || (n === 'Drawing' && workspace === 'drawing') || (n === 'Manufacture' && workspace === 'manufacture') ? true : null, action: () => { if (ph) toast(`The ${n} workspace is planned for ${ph}`); else if (n === 'Drawing') { if (workspace === 'manufacture') exitManufacture(); enterDrawing(); } else if (n === 'Manufacture') enterManufacture(); else if (n === 'Design') { if (workspace === 'drawing') exitDrawing(); if (workspace === 'manufacture') exitManufacture(); } } }))]);
 }
 function openFileMenu() {
   openMenu($('#abFile'), [

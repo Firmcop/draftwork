@@ -63,7 +63,13 @@ Next
 - [ ] Drawings: detail views, centerlines on side views of holes, more sheets, balloons, tolerances and notes
 - [ ] Render; add-ins
 
-## Phase 3 — Manufacturing
+## Phase 3 — Manufacturing *(started)*
+
+Done
+- [x] Milling: setups, tool library, face, 2D pocket/contour, drilling, 3D roughing, parallel and waterline finishing, simulation with gouge check, Fanuc/Haas/LinuxCNC/GRBL posts, setup sheet
+
+Next
+- [ ] Additive slicing (3D printing), nesting, turning, adaptive (constant-engagement) clearing, tool holders and collision checks
 2.5D milling, routing, laser/plasma toolpaths, G-code post-processors; sheet metal; plastic design; nesting.
 
 ## Phase 4 — Simulation

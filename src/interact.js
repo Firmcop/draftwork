@@ -30,6 +30,7 @@ function deleteFeature(id) {
 function setHint(t) { $('#hint').textContent = t || ''; }
 function defaultHint() {
   if (workspace === 'drawing') return setHint(drawingHint());
+  if (workspace === 'manufacture' && !pick) return setHint(camHint());
   if (pick) return setHint(pick.prompt + ' · Esc cancels');
   if (jointHint()) return setHint(jointHint());
   if (combMode) return setHint('Click curved edges to show or hide their curvature comb · Esc ends');
@@ -596,6 +597,7 @@ viewport.addEventListener('pointerup', e => {
   if (jointEdit?.stage && jointPickAt(e)) return;
   if (cpick && constructPickAt(e)) return;
   if (combPickAt(e)) return;
+  if (camPickAt(e)) return;
   if (formPickAt(e)) return;
   const rf = regionDialogFeature();
   if (rf && toggleRegion(rf, regionAt(e, rf))) return;
@@ -853,6 +855,9 @@ if (location.hostname === 'localhost') window.__dw = {
   props: () => [...result.bodies].map(([id, b]) => { const pr = b.shape ? brepProps(b) : {}; return { id, surface: !!pr.surface, area: Math.round(pr.area * 1e4) / 1e4, volume: Math.round(pr.volume * 1e4) / 1e4 }; }),
   meshes: () => [...result.bodies].filter(([, b]) => b.mesh).map(([id, b]) => ({ id, tris: b.stats.tris, closed: b.stats.closed, volume: Math.round(Math.abs(b.stats.volume) * 1e4) / 1e4, groups: b.groupCount })),
   inspect: () => ({ combMode, combEdges: combEdges.length, multi: multiSel.size, winSel: !!winSel }),
+  cam: () => { const st = camSetup(); return st && { setups: cam().setups.length, ops: st.ops.map(o => { const r = camCache.get(o.id)?.res; return { type: o.type, name: o.name, moves: r?.moves.length || 0, warn: r?.warn || null, minutes: r?.stats?.minutes || 0, floors: (o.floors || []).length, holes: (o.holes || []).length }; }), sim: camSim && { at: camSim.at, total: camSim.moves.length, ...compareStock(camSim.ctx.G, camSim.S, 0.02) } }; },
+  simAt: (x, y) => { if (!camSim) return null; const G = camSim.ctx.G, k = Math.round((y - G.y0) / G.g) * G.nx + Math.round((x - G.x0) / G.g); return [camSim.S[k], G.H[k]]; },
+  camDbg: () => { const st = camSetup(), o = st.ops.find(x => x.type === 'pocket'), r = camCache.get(o.id)?.res, m = r.moves.filter(q => q[0] !== 0); return { n: m.length, zmin: Math.min(...m.map(q => q[3])), x: [Math.min(...m.map(q => q[1])), Math.max(...m.map(q => q[1]))], y: [Math.min(...m.map(q => q[2])), Math.max(...m.map(q => q[2]))], floors: floorsOf(o, camContext(st)), ops: camSim?.ops.map(q => q.name + ':' + q.moves.length), seq: camSim && [...new Set(camSim.moves.map(q => q[4]))] }; },
   regen: () => doRegen(),
   rebuild: async () => { if (isBrep()) await engineReset(); else cache = []; await doRegen(); },
   curveScreen: i => { const sk = featById(sketchId), c = sk.geo.curves[i]; const pts = curvePts(sk, c, id => geoPos(sk, id), cc => geoRadius(sk, cc)); const m = pts[Math.floor(pts.length / 2)], m2 = pts.length === 2 ? [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2] : m; return window.__dw.sketchScreen(m2[0], m2[1]); },
