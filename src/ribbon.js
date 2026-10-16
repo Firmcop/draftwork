@@ -78,7 +78,7 @@ cmd('pl.rest', 'Rest', 'boss', { run: () => newPlastic('rest') }); cmd('pl.rib',
 // manage / utilities
 cmd('bom', 'Bill of Materials', 'bom', { run: () => openBOMModal() });
 cmd('make3d', '3D Print', 'make', { run: () => openExportDialog() });
-planned('nest', 'Nest', 'nest', P3); planned('addins', 'Scripts and Add-Ins', 'addins', P2); planned('taskmgr', 'Task Manager', 'utility', P2);
+planned('addins', 'Scripts and Add-Ins', 'addins', P2); planned('taskmgr', 'Task Manager', 'utility', P2);
 planned('pmi', 'Create PMI', 'pmi', P2); planned('co2', 'Carbon Footprint', 'co2', P4);
 // sketch (contextual)
 cmd('k.line', 'Line', 'line', { key: 'L', run: () => setSketchTool('line') });
@@ -128,6 +128,7 @@ const TABS = {
   ],
   ADDITIVE: [
     { name: 'SETUP', bar: ['am.setup'], menu: ['am.setup'] },
+    { name: 'NEST', bar: ['nest'], menu: ['nest'] },
     { name: 'SLICE', bar: ['am.slice'], menu: ['am.slice'] },
     { name: 'EXPORT', bar: ['am.export'], menu: ['am.export'] },
   ],

@@ -345,3 +345,5 @@ table.grid tfoot td { font-weight: 600; border-bottom: 0; }
 .ws-manufacture .timeline { display: none !important; }
 pre.gcode { max-height: 260px; overflow: auto; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 8px; font: 11px/1.4 var(--font-data, monospace); white-space: pre; margin: 8px 0; }
 .note.bad { color: var(--danger, #c0392b); }
+.nestsheet { margin: 10px 0; }
+.nestsheet svg { border: 1px solid var(--line); border-radius: 4px; background: #fff; max-height: 360px; }

@@ -56,6 +56,20 @@ p = await props();
 const BA2 = Math.PI / 2 * (1.5 + 0.44 * 2);
 check(Math.abs(p[0].volume - 60 * (40 + BA2 + 12) * 2) < 0.01, 'unfold lays it flat: 60 × (40 + BA + 12) × 2 (' + p[0].volume + ')');
 
+// nest four flat patterns on a 300 x 200 sheet
+await page.click('.rtab:text-is("UTILITIES")'); await W(200);
+await page.click('.rbtn[aria-label^="Nest"]'); await W(2500);
+await page.fill('#modal input[id^="nq-"]', '4'); await page.dispatchEvent('#modal input[id^="nq-"]', 'change');
+await page.fill('#ns-width', '300'); await page.dispatchEvent('#ns-width', 'change'); await page.fill('#ns-height', '200'); await page.dispatchEvent('#ns-height', 'change');
+await page.click('#nest-run'); await W(3000);
+const nestTxt = await page.textContent('#nest-out');
+const nParts = await page.locator('#nest-out svg path').count();
+check(/flat pattern/.test(await page.textContent('#modal')) && nParts === 4 && /Sheet 1/.test(nestTxt) && !/Did not fit/.test(nestTxt), 'nest: four flat patterns placed (' + nParts + ', ' + nestTxt.replace(/\s+/g, ' ').slice(0, 80) + ')');
+const [ndl] = await Promise.all([page.waitForEvent('download', { timeout: 15000 }).catch(() => null), page.click('#modal .btn.ok')]);
+let nOk = false; if (ndl) { const z = fs.readFileSync(await ndl.path()).toString('latin1'); nOk = z.includes('nest.dxf') && z.includes('PARTS'); }
+check(nOk, 'nest exports a DXF in a zip');
+await page.click('#modal .btn:has-text("Close")'); await W(300);
+
 check(errors.length === 0, 'no page errors' + (errors.length ? ': ' + errors.slice(0, 3).join(' | ') : ''));
 await browser.close(); server.close();
 process.exit(failed ? 1 : 0);

@@ -70,7 +70,8 @@ Done
 
 Next
 - [x] Additive: FFF slicing with perimeters, solid/sparse infill, skirt, preview and Marlin G-code
-- [ ] Supports for overhangs, nesting, turning, adaptive (constant-engagement) clearing, tool holders and collision checks
+- [x] Nesting of flat patterns and outlines onto sheets with DXF export
+- [ ] Supports for overhangs, turning, adaptive (constant-engagement) clearing, tool holders and collision checks
 2.5D milling, routing, laser/plasma toolpaths, G-code post-processors; sheet metal; plastic design; nesting.
 
 ## Phase 4 — Simulation
