@@ -78,9 +78,13 @@ Next
 
 Done
 - [x] Linear static stress (voxel FEA with bending-accurate elements), fixed/force/pressure/gravity, stress, displacement, safety factor, report
+- [x] Geometric multigrid preconditioner (Galerkin coarse grids, Chebyshev smoothing): about 10 solver iterations regardless of mesh size
+- [x] Modal frequencies: natural frequencies and mode shapes (LOBPCG), supported or free, effective mass fractions, animated mode shapes
+- [x] Steady-state thermal: fixed temperatures, heat sources, convection; temperature and heat-flux plots, heat balance
+- [x] Several studies per design, each with its own ribbon tab; loads spread by tributary area
 
 Next
-- [ ] Tetrahedral meshing that follows curved faces, contacts, modal frequencies, thermal, buckling
+- [ ] Tetrahedral meshing that follows curved faces, contacts, thermal stress, buckling
 Static stress and deflection (FEA) on a server.
 
 ## Phase 5 — Generative design

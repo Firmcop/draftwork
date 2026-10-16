@@ -127,10 +127,27 @@ const TABS = {
     { name: 'MANAGE', bar: ['cam.tools'], menu: ['cam.tools'] },
   ],
   'STATIC STRESS': [
-    { name: 'STUDY', bar: ['sim.study'], menu: ['sim.study'] },
+    { name: 'STUDY', bar: ['sim.study', 'sim.studies'], menu: ['sim.study', 'sim.studies'] },
     { name: 'MATERIALS', bar: ['sim.mats'], menu: ['sim.mats'] },
     { name: 'CONSTRAINTS', bar: ['sim.fixed'], menu: ['sim.fixed'] },
     { name: 'LOADS', bar: ['sim.force', 'sim.pressure', 'sim.gravity'], menu: ['sim.force', 'sim.pressure', 'sim.gravity'] },
+    { name: 'MESH', bar: ['sim.mesh'], menu: ['sim.mesh'] },
+    { name: 'SOLVE', bar: ['sim.solve'], menu: ['sim.solve'] },
+    { name: 'RESULTS', bar: ['sim.results', 'sim.report'], menu: ['sim.results', 'sim.report'] },
+  ],
+  'MODAL FREQUENCIES': [
+    { name: 'STUDY', bar: ['sim.study', 'sim.studies'], menu: ['sim.study', 'sim.studies'] },
+    { name: 'MATERIALS', bar: ['sim.mats'], menu: ['sim.mats'] },
+    { name: 'CONSTRAINTS', bar: ['sim.fixed'], menu: ['sim.fixed'] },
+    { name: 'MESH', bar: ['sim.mesh'], menu: ['sim.mesh'] },
+    { name: 'SOLVE', bar: ['sim.solve'], menu: ['sim.solve'] },
+    { name: 'RESULTS', bar: ['sim.results', 'sim.animate', 'sim.report'], menu: ['sim.results', 'sim.animate', 'sim.report'] },
+  ],
+  THERMAL: [
+    { name: 'STUDY', bar: ['sim.study', 'sim.studies'], menu: ['sim.study', 'sim.studies'] },
+    { name: 'MATERIALS', bar: ['sim.mats'], menu: ['sim.mats'] },
+    { name: 'CONSTRAINTS', bar: ['sim.temp'], menu: ['sim.temp'] },
+    { name: 'LOADS', bar: ['sim.heat', 'sim.conv'], menu: ['sim.heat', 'sim.conv'] },
     { name: 'MESH', bar: ['sim.mesh'], menu: ['sim.mesh'] },
     { name: 'SOLVE', bar: ['sim.solve'], menu: ['sim.solve'] },
     { name: 'RESULTS', bar: ['sim.results', 'sim.report'], menu: ['sim.results', 'sim.report'] },
@@ -220,7 +237,7 @@ function tip(c) { return c.label + (c.key ? ` (${c.key})` : '') + (c.phase ? ` Â
 
 function renderRibbon() {
   const tabs = $('#rtabs'); tabs.replaceChildren();
-  const names = workspace === 'drawing' ? ['DRAWING'] : workspace === 'manufacture' ? ['MILLING', 'ADDITIVE'] : workspace === 'simulation' ? ['STATIC STRESS'] : Object.keys(TABS).filter(t => !['SKETCH', 'DRAWING', 'MILLING', 'ADDITIVE', 'STATIC STRESS'].includes(t));
+  const names = workspace === 'drawing' ? ['DRAWING'] : workspace === 'manufacture' ? ['MILLING', 'ADDITIVE'] : workspace === 'simulation' ? [simTabName()] : Object.keys(TABS).filter(t => !['SKETCH', 'DRAWING', 'MILLING', 'ADDITIVE', 'STATIC STRESS', 'MODAL FREQUENCIES', 'THERMAL'].includes(t));
   if (mode === 'sketch' && workspace !== 'drawing') names.push('SKETCH');
   if (mode !== 'sketch' && activeTab === 'SKETCH') activeTab = 'SOLID';
   if (!names.includes(activeTab)) activeTab = names[0];
@@ -232,7 +249,7 @@ function renderRibbon() {
     const bar = h('div', { class: 'rbar' });
     for (const id of g.bar) {
       const c = CMD[id];
-      const pressed = (workspace === 'drawing' && ((id === 'dw.dim' && dwTool === 'dim') || (id === 'dw.dia' && dwTool === 'dia') || (id === 'dw.rad' && dwTool === 'rad') || (id === 'dw.ang' && dwTool === 'ang') || (id === 'dw.section' && dwTool === 'section') || (id === 'dw.detail' && dwTool === 'detail') || (id === 'dw.balloon' && dwTool === 'balloon') || (id === 'dw.note' && dwTool === 'note') || (id.startsWith('dw.view.') && dwTool === 'place:' + id.slice(8)))) || (mode === 'sketch' && id === 'k.' + sketchTool) || (id === 'k.select' && sketchTool === 'select' && mode === 'sketch') || (id === 'measure' && measure) || (id === 'section' && section) || (id === 'com' && showCOM) || (id === 'zebra' && zebraOn) || (id === 'curvature' && combMode) || (id === 'contact' && !!doc.contact?.on);
+      const pressed = (workspace === 'drawing' && ((id === 'dw.dim' && dwTool === 'dim') || (id === 'dw.dia' && dwTool === 'dia') || (id === 'dw.rad' && dwTool === 'rad') || (id === 'dw.ang' && dwTool === 'ang') || (id === 'dw.section' && dwTool === 'section') || (id === 'dw.detail' && dwTool === 'detail') || (id === 'dw.balloon' && dwTool === 'balloon') || (id === 'dw.note' && dwTool === 'note') || (id.startsWith('dw.view.') && dwTool === 'place:' + id.slice(8)))) || (mode === 'sketch' && id === 'k.' + sketchTool) || (id === 'k.select' && sketchTool === 'select' && mode === 'sketch') || (id === 'measure' && measure) || (id === 'section' && section) || (id === 'com' && showCOM) || (id === 'zebra' && zebraOn) || (id === 'curvature' && combMode) || (id === 'contact' && !!doc.contact?.on) || (id === 'sim.animate' && simView.anim);
       if (g.finish) bar.append(h('button', { class: 'rbtn finish', title: tip(c), 'aria-label': c.label, onclick: () => runCmd(id), html: icon(c.icon) + '<span>' + c.label.toUpperCase() + '</span>' }));
       else bar.append(h('button', { class: 'rbtn' + (c.phase ? ' planned' : ''), title: tip(c), 'aria-label': tip(c), 'aria-pressed': pressed ? 'true' : null, onclick: () => runCmd(id), html: icon(c.icon) }));
     }

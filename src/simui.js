@@ -1,18 +1,32 @@
-// ===== Simulation workspace: linear static stress studies (voxel FEA) =====
+// ===== Simulation workspace: static stress, modal frequencies and steady-state thermal studies (voxel FEA) =====
 // doc.sim = { studies: [study], active }
-// study = { id, name, mats: { bodyId: materialName }, mesh: 'coarse'|'medium'|'fine', constraints: [bc], loads: [bc] }
-// bc = { id, name, type: 'fixed'|'force'|'pressure'|'gravity', faces: [{ body, sig }], value, dir, x, y, z }
+// study = { id, name, kind: 'static'|'modal'|'thermal', mats: { bodyId: materialName }, mesh: 'coarse'|'medium'|'fine', constraints: [bc], loads: [bc], modes }
+// bc = { id, name, type: 'fixed'|'force'|'pressure'|'gravity'|'temp'|'heat'|'conv', faces: [{ body, sig }], value, dir, x, y, z, ambient }
 const SIM_MATERIALS = {   // E (MPa), Poisson ratio, yield strength (MPa)
   'Aluminum 6061': [68900, 0.33, 276], 'Steel 1018': [205000, 0.29, 370], 'Stainless steel 304': [193000, 0.29, 215], 'Brass C360': [97000, 0.31, 310],
   'Copper C110': [115000, 0.33, 69], 'Titanium Ti-6Al-4V': [113800, 0.34, 880], 'ABS plastic': [2300, 0.35, 40], 'PLA plastic': [3500, 0.36, 50], 'Nylon PA12': [1700, 0.39, 48], 'Oak wood': [12000, 0.3, 40],
 };
+// thermal conductivity W/(m·K)
+const SIM_THERMAL = { 'Aluminum 6061': 167, 'Steel 1018': 51.9, 'Stainless steel 304': 16.2, 'Brass C360': 115, 'Copper C110': 388, 'Titanium Ti-6Al-4V': 6.7, 'ABS plastic': 0.17, 'PLA plastic': 0.13, 'Nylon PA12': 0.25, 'Oak wood': 0.17 };
+const SIM_KINDS = { static: ['Static Stress', 'STATIC STRESS', 'analysis'], modal: ['Modal Frequencies', 'MODAL FREQUENCIES', 'modes'], thermal: ['Thermal', 'THERMAL', 'thermo'] };
+const SIM_TABS = ['STATIC STRESS', 'MODAL FREQUENCIES', 'THERMAL'];
+const BC_LABEL = { fixed: 'Fixed', force: 'Force', pressure: 'Pressure', gravity: 'Gravity', temp: 'Temperature', heat: 'Heat Source', conv: 'Convection' };
 const MESH_TARGET = { coarse: 4000, medium: 12000, fine: 30000 };
 const SIM_DIRS = [['normal', 'Normal to face (into it)'], ['+X', '+X'], ['-X', '−X'], ['+Y', '+Y'], ['-Y', '−Y'], ['+Z', '+Z'], ['-Z', '−Z']];
 const simGroup = new THREE.Group(); scene.add(simGroup);
-let simRes = null, simPick = null, simView = { type: 'vm', scale: 'auto' }, simCancel = false;
+let simRes = null, simPick = null, simView = { type: 'vm', scale: 'auto', mode: 0, anim: false }, simCancel = false, simAnimId = 0;
 const sim = () => doc.sim || (doc.sim = { studies: [], active: null });
 const simStudy = () => { const S = sim(); return S.studies.find(s => s.id === S.active) || S.studies[0] || null; };
 const simMat = (st, id) => (st.mats && st.mats[id]) || bodyMaterial(id);
+const simKind = st => (st && st.kind) || 'static';
+const simTabName = () => SIM_KINDS[simKind(simStudy())][1];
+function newStudy(kind) {
+  const n = sim().studies.filter(s => simKind(s) === kind).length + 1;
+  const s = { id: uid(), name: SIM_KINDS[kind][0] + ' ' + n, kind, mats: {}, mesh: kind === 'modal' ? 'coarse' : 'medium', constraints: [], loads: [] };
+  if (kind === 'modal') s.modes = 8;
+  sim().studies.push(s); sim().active = s.id; return s;
+}
+function activateStudy(id) { stopSimAnim(); sim().active = id; simPick = null; const st = simStudy(); simView.type = simKind(st) === 'thermal' ? 'temp' : simKind(st) === 'modal' ? 'mode' : 'vm'; activeTab = simTabName(); renderRibbon(); renderBrowser(); drawSim2(); defaultHint(); }
 const simBodies = () => [...result.bodies.keys()].filter(id => !bodyHidden(id) && !isSurfBody(id) && result.bodies.get(id).shape);
 
 // ---- workspace ----
@@ -22,19 +36,20 @@ function enterSimulation() {
   if (workspace === 'drawing') exitDrawing(); if (workspace === 'manufacture') exitManufacture();
   if (mode === 'sketch') finishSketch(true); if (dlg) closeDialog(true);
   workspace = 'simulation'; document.body.classList.add('ws-simulation'); $('#wsBtn span').textContent = 'SIMULATION';
-  activeTab = 'STATIC STRESS';
-  if (!sim().studies.length) { const s = { id: uid(), name: 'Static Stress 1', mats: {}, mesh: 'medium', constraints: [], loads: [] }; sim().studies.push(s); sim().active = s.id; }
+  if (!sim().studies.length) newStudy('static');
+  activeTab = simTabName();
   renderRibbon(); renderBrowser(); drawSim2(); defaultHint();
 }
 function exitSimulation() {
   workspace = 'design'; document.body.classList.remove('ws-simulation'); $('#wsBtn span').textContent = 'DESIGN';
-  simPick = null; clearGroup(simGroup); $('#simLegend')?.remove(); for (const [, sb] of shownBodies) sb.mesh.visible = sb.edges.visible = !bodyHidden(sb.rec.id);
+  simPick = null; stopSimAnim(); clearGroup(simGroup); $('#simLegend')?.remove(); for (const [, sb] of shownBodies) sb.mesh.visible = sb.edges.visible = !bodyHidden(sb.rec.id);
   activeTab = 'SOLID'; renderRibbon(); renderBrowser(); updateScene(); defaultHint(); requestRender();
 }
 function simHint() {
   if (simPick) return 'Click faces on the model to add or remove them · OK when done';
-  if (simRes) return 'Results: ' + ({ vm: 'von Mises stress', disp: 'displacement', sf: 'safety factor' }[simView.type]) + '. Change the result or deformation scale in Results.';
-  return 'Set materials, add constraints and loads, then Solve.';
+  const k = simKind(simStudy());
+  if (simShowing()) return k === 'modal' ? `Mode ${simView.mode + 1}: ${fmt(simRes.freqs[simView.mode])} Hz. Pick another mode in the browser or animate it from Results.` : 'Results: ' + ({ vm: 'von Mises stress', disp: 'displacement', sf: 'safety factor', temp: 'temperature', flux: 'heat flux' }[simView.type]) + '. Change the result in Results.';
+  return k === 'modal' ? 'Set materials and (optionally) constraints, then Solve for the natural frequencies.' : k === 'thermal' ? 'Set materials, add temperatures, heat sources and convection, then Solve.' : 'Set materials, add constraints and loads, then Solve.';
 }
 // ---- face geometry in world coordinates ----
 function faceTris(f) {
@@ -75,16 +90,33 @@ function nodesOnFaces(M, surf, faces) {
       let bd = Infinity, bn = null; for (const t of tris) { const d = closestOnTri(p, t.a, t.b, t.c); if (d < bd) { bd = d; bn = t.n; } }
       if (bd <= tol * tol) out.push({ q, n: bn });
     }
-    if (out.length) return { nodes: out, area };
+    if (out.length) { faceWeights(M, out); return { nodes: out, area }; }
   }
   return { nodes: [], area };
 }
+// tributary weights (sum 1) from the exposed voxel faces whose four corners are all selected; uniform if there are none
+function faceWeights(M, nodes) {
+  const g = M.grid, { nx, ny, nz, solid, hs } = g, mark = new Uint8Array(M.nn), wq = new Float64Array(M.nn);
+  for (const n of nodes) mark[n.q] = 1;
+  const cell = (i, j, k) => i < 0 || j < 0 || k < 0 || i >= nx || j >= ny || k >= nz ? 0 : solid[(k * ny + j) * nx + i];
+  let tot = 0;
+  for (let k = 0; k < nz; k++) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+    if (!cell(i, j, k)) continue;
+    for (let ax = 0; ax < 3; ax++) for (const s of [0, 1]) {
+      const d = [0, 0, 0]; d[ax] = s ? 1 : -1;
+      if (cell(i + d[0], j + d[1], k + d[2])) continue;
+      const a1 = (ax + 1) % 3, a2 = (ax + 2) % 3, ids = [];
+      for (const u of [0, 1]) for (const v of [0, 1]) { const o = [i, j, k]; o[ax] += s; o[a1] += u; o[a2] += v; ids.push(M.nid(o[0], o[1], o[2])); }
+      if (!ids.every(q => mark[q])) continue;
+      const A = hs[a1] * hs[a2] / 4; for (const q of ids) wq[q] += A; tot += 4 * A;
+    }
+  }
+  for (const n of nodes) n.w = tot > 0 ? wq[n.q] / tot : 1 / nodes.length;
+}
 const DIRV = { '+X': [1, 0, 0], '-X': [-1, 0, 0], '+Y': [0, 1, 0], '-Y': [0, -1, 0], '+Z': [0, 0, 1], '-Z': [0, 0, -1] };
 // ---- solve ----
-async function solveStudy() {
-  const st = simStudy(); if (!st) return;
-  if (!st.constraints.length) { toast('Add a constraint first: the part needs to be held somewhere'); return; }
-  if (!st.loads.length) { toast('Add a load first'); return; }
+const simMatProps = mn => { const m = SIM_MATERIALS[mn] || SIM_MATERIALS['Steel 1018']; return { name: mn, E: m[0], nu: m[1], yield: m[2], density: MATERIALS[mn]?.density || 7.85, k: SIM_THERMAL[mn] ?? 50 }; };
+async function simMeshStudy(st, busy) {
   const ids = simBodies(), matNames = [], bodies = [];
   for (const id of ids) {
     const b = result.bodies.get(id), g = brepGeomNI(b), p = g.attributes.position.array, M = bodyXf(id), v = new THREE.Vector3(), t = new Float32Array(p.length);
@@ -95,38 +127,90 @@ async function solveStudy() {
   // bodies sharing a material are voxelised as one material slot; contact between bodies is bonded
   const groups = matNames.map((mn, mi) => ({ tris: concatF32(bodies.filter(b => b.mi === mi).map(b => b.tris)) }));
   const vol = ids.reduce((s, id) => s + brepProps(result.bodies.get(id)).volume, 0), h = Math.cbrt(vol / (MESH_TARGET[st.mesh] || 12000));
-  simCancel = false; const busy = $('#busy'); busy.hidden = false; busy.textContent = 'Meshing…'; await new Promise(r => setTimeout(r, 30));
+  busy.textContent = 'Meshing…'; await new Promise(r => setTimeout(r, 30));
+  const grid = voxelize(groups, h), mats = matNames.map(simMatProps);
+  const M = buildModel(grid, mats); if (!M.ne) throw new Error('The mesh is empty');
+  return { M, grid, mats, h, surf: surfaceNodes(M) };
+}
+const tick = () => new Promise(r => setTimeout(r, 0));
+async function solveStudy() {
+  const st = simStudy(); if (!st) return;
+  const kind = simKind(st);
+  if (kind === 'static') {
+    if (!st.constraints.length) { toast('Add a constraint first: the part needs to be held somewhere'); return; }
+    if (!st.loads.length) { toast('Add a load first'); return; }
+  }
+  if (kind === 'thermal' && !st.constraints.length && !st.loads.some(L => L.type === 'conv')) { toast('Add a temperature or a convection boundary first'); return; }
+  stopSimAnim();
+  simCancel = false; const busy = $('#busy'); busy.hidden = false;
   try {
-    const grid = voxelize(groups, h), mats = matNames.map(mn => { const m = SIM_MATERIALS[mn] || SIM_MATERIALS['Steel 1018']; return { name: mn, E: m[0], nu: m[1], yield: m[2], density: MATERIALS[mn]?.density || 7.85 }; });
-    const M = buildModel(grid, mats); if (!M.ne) throw new Error('The mesh is empty');
-    const surf = surfaceNodes(M), fixed = new Uint8Array(M.nn * 3), f = new Float64Array(M.nn * 3), warn = [];
-    for (const c of st.constraints) {
-      const r = nodesOnFaces(M, surf, c.faces); if (!r.nodes.length) { warn.push(`${c.name}: no mesh nodes on its faces`); continue; }
-      for (const { q } of r.nodes) { if (c.x !== false) fixed[3 * q] = 1; if (c.y !== false) fixed[3 * q + 1] = 1; if (c.z !== false) fixed[3 * q + 2] = 1; }
-    }
-    let applied = [0, 0, 0];
-    for (const L of st.loads) {
-      if (L.type === 'gravity') {
-        const d = DIRV[L.dir || '-Z'] || [0, 0, -1], gacc = (+L.value || 9.81);
-        for (let e = 0; e < M.ne; e++) { const m = mats[M.em[e]], w = m.density * grid.hs[0] * grid.hs[1] * grid.hs[2] * 1e-6 * gacc / 8; for (let a = 0; a < 8; a++) { const q = M.en[e * 8 + a]; for (let k = 0; k < 3; k++) { f[3 * q + k] += d[k] * w; applied[k] += d[k] * w; } } }
-        continue;
+    const { M, grid, mats, h, surf } = await simMeshStudy(st, busy), warn = [], t0 = performance.now();
+    const elems = M.ne.toLocaleString('en-US');
+    if (kind === 'modal') {
+      const fixed = new Uint8Array(M.nn * 3);
+      for (const c of st.constraints) {
+        const r = nodesOnFaces(M, surf, c.faces); if (!r.nodes.length) { warn.push(`${c.name}: no mesh nodes on its faces`); continue; }
+        for (const { q } of r.nodes) { if (c.x !== false) fixed[3 * q] = 1; if (c.y !== false) fixed[3 * q + 1] = 1; if (c.z !== false) fixed[3 * q + 2] = 1; }
       }
-      const r = nodesOnFaces(M, surf, L.faces); if (!r.nodes.length) { warn.push(`${L.name}: no mesh nodes on its faces`); continue; }
-      const total = L.type === 'pressure' ? (+L.value || 0) * r.area : (+L.value || 0), per = total / r.nodes.length;
-      for (const { q, n } of r.nodes) { const d = L.type === 'pressure' || (L.dir || 'normal') === 'normal' ? [-n[0], -n[1], -n[2]] : DIRV[L.dir]; for (let k = 0; k < 3; k++) { f[3 * q + k] += d[k] * per; applied[k] += d[k] * per; } }
+      const held = fixed.some(Boolean), nm = Math.max(1, Math.min(30, Math.round(+st.modes || 8))) + (held ? 0 : 6);
+      busy.textContent = 'Preparing the solver…'; await tick();
+      const R = await solveModal(M, fixed, { modes: nm, onProgress: async p => { busy.textContent = `Solving modes… ${elems} elements · iteration ${p.iter} · ${p.converged}/${p.of} converged (click to stop)`; await tick(); return simCancel; } });
+      if (!R || simCancel) { toast('Solve stopped'); return; }
+      if (!R.converged) warn.push('The eigen-solver stopped before every mode converged; the highest frequencies may be inaccurate.');
+      // a free part: list its six rigid-body modes separately
+      const rigid = held ? 0 : 6;
+      simRes = { kind, st: st.id, M, freqs: R.freqs.slice(rigid), modes: R.modes.slice(rigid), participation: R.participation.slice(rigid), rigid: held ? [] : R.freqs.slice(0, 6), mass: R.mass, iterations: R.iterations, warn, mats, seconds: (performance.now() - t0) / 1000, h, key: simKey(st), free: !held };
+      if (simView.mode >= simRes.freqs.length) simView.mode = 0;
+      simView.type = 'mode';
+    } else if (kind === 'thermal') {
+      const T = new Float64Array(M.nn).fill(NaN), q = new Float64Array(M.nn), hA = new Float64Array(M.nn), hT = new Float64Array(M.nn);
+      for (const c of st.constraints) { const r = nodesOnFaces(M, surf, c.faces); if (!r.nodes.length) { warn.push(`${c.name}: no mesh nodes on its faces`); continue; } for (const n of r.nodes) T[n.q] = +c.value || 0; }
+      let heatIn = 0;
+      for (const L of st.loads) {
+        const r = nodesOnFaces(M, surf, L.faces); if (!r.nodes.length) { warn.push(`${L.name}: no mesh nodes on its faces`); continue; }
+        if (L.type === 'heat') { for (const n of r.nodes) q[n.q] += (+L.value || 0) * n.w; heatIn += +L.value || 0; }
+        if (L.type === 'conv') { const tot = (+L.value || 0) * 1e-6 * r.area, Ta = +L.ambient || 0; for (const n of r.nodes) { hA[n.q] += tot * n.w; hT[n.q] += tot * n.w * Ta; } }
+      }
+      busy.textContent = 'Solving…'; await tick();
+      const R = await solveThermal(M, { T, q, hA, hT, onProgress: async (it, res) => { busy.textContent = `Solving… ${elems} elements · iteration ${it} · residual ${res.toExponential(1)} (click to stop)`; await tick(); return simCancel; } });
+      if (R.stopped || simCancel) { toast('Solve stopped'); return; }
+      const fluxN = nodalAverage(M, R.fluxMag);
+      let tmax = -Infinity, tmin = Infinity, tmaxQ = 0, tminQ = 0, fmax = 0, fmaxQ = 0;
+      for (let n = 0; n < M.nn; n++) if (M.nodeActive[n]) { const t = R.T[n]; if (t > tmax) { tmax = t; tmaxQ = n; } if (t < tmin) { tmin = t; tminQ = n; } if (fluxN[n] > fmax) { fmax = fluxN[n]; fmaxQ = n; } }
+      if (!R.converged) warn.push(`The solver stopped at a residual of ${R.residual.toExponential(1)}; results may be inaccurate.`);
+      simRes = { kind, st: st.id, M, R, T: R.T, fluxN, tmax, tmin, tmaxAt: nodePos(M, tmaxQ), tminAt: nodePos(M, tminQ), fmax, fmaxAt: nodePos(M, fmaxQ), heatIn, heatOut: R.heatConv, heatFixed: R.heatFixed, warn, mats, seconds: (performance.now() - t0) / 1000, h, key: simKey(st) };
+      if (!['temp', 'flux'].includes(simView.type)) simView.type = 'temp';
+    } else {
+      const fixed = new Uint8Array(M.nn * 3), f = new Float64Array(M.nn * 3);
+      for (const c of st.constraints) {
+        const r = nodesOnFaces(M, surf, c.faces); if (!r.nodes.length) { warn.push(`${c.name}: no mesh nodes on its faces`); continue; }
+        for (const { q } of r.nodes) { if (c.x !== false) fixed[3 * q] = 1; if (c.y !== false) fixed[3 * q + 1] = 1; if (c.z !== false) fixed[3 * q + 2] = 1; }
+      }
+      let applied = [0, 0, 0];
+      for (const L of st.loads) {
+        if (L.type === 'gravity') {
+          const d = DIRV[L.dir || '-Z'] || [0, 0, -1], gacc = (+L.value || 9.81);
+          for (let e = 0; e < M.ne; e++) { const m = mats[M.em[e]], w = m.density * grid.hs[0] * grid.hs[1] * grid.hs[2] * 1e-6 * gacc / 8; for (let a = 0; a < 8; a++) { const q = M.en[e * 8 + a]; for (let k = 0; k < 3; k++) { f[3 * q + k] += d[k] * w; applied[k] += d[k] * w; } } }
+          continue;
+        }
+        const r = nodesOnFaces(M, surf, L.faces); if (!r.nodes.length) { warn.push(`${L.name}: no mesh nodes on its faces`); continue; }
+        const total = L.type === 'pressure' ? (+L.value || 0) * r.area : (+L.value || 0);
+        for (const { q, n, w } of r.nodes) { const d = L.type === 'pressure' || (L.dir || 'normal') === 'normal' ? [-n[0], -n[1], -n[2]] : DIRV[L.dir], per = total * w; for (let k = 0; k < 3; k++) { f[3 * q + k] += d[k] * per; applied[k] += d[k] * per; } }
+      }
+      if (!fixed.some(Boolean)) throw new Error('The constraints did not catch any part of the mesh');
+      busy.textContent = 'Preparing the solver…'; await tick();
+      const R = await solveStatic(M, fixed, f, { tol: 1e-7, maxIter: 30000, onProgress: async (it, res) => { busy.textContent = `Solving… ${elems} elements · iteration ${it} · residual ${res.toExponential(1)} (click to stop)`; await tick(); return simCancel; } });
+      if (simCancel) { toast('Solve stopped'); return; }
+      const disp = new Float64Array(M.nn); for (let q = 0; q < M.nn; q++) disp[q] = Math.hypot(R.u[3 * q], R.u[3 * q + 1], R.u[3 * q + 2]);
+      const vmN = R.vmNode, yE = new Float64Array(M.ne); for (let e = 0; e < M.ne; e++) yE[e] = mats[M.em[e]].yield;
+      const yN = nodalAverage(M, yE), sfN = new Float64Array(M.nn); for (let q = 0; q < M.nn; q++) sfN[q] = vmN[q] > 1e-12 ? yN[q] / vmN[q] : 1e9;
+      let vmax = 0, vmaxQ = 0; for (let q = 0; q < M.nn; q++) if (M.nodeActive[q] && vmN[q] > vmax) { vmax = vmN[q]; vmaxQ = q; }
+      let dmax = 0, dmaxQ = 0; for (let q = 0; q < M.nn; q++) if (M.nodeActive[q] && disp[q] > dmax) { dmax = disp[q]; dmaxQ = q; }
+      let sfmin = Infinity; for (let q = 0; q < M.nn; q++) if (M.nodeActive[q]) sfmin = Math.min(sfmin, sfN[q]);
+      simRes = { kind, st: st.id, M, R, disp, vmN, sfN, vmax, vmaxAt: nodePos(M, vmaxQ), dmax, dmaxQ, dmaxAt: nodePos(M, dmaxQ), sfmin, applied, warn, mats, seconds: (performance.now() - t0) / 1000, h, key: simKey(st) };
+      if (!R.converged) warn.push(`The solver stopped at a residual of ${R.residual.toExponential(1)}; results may be inaccurate. Check that the constraints hold the part in every direction.`);
+      if (!['vm', 'disp', 'sf'].includes(simView.type)) simView.type = 'vm';
     }
-    if (!fixed.some(Boolean)) throw new Error('The constraints did not catch any part of the mesh');
-    const t0 = performance.now();
-    const R = await solveStatic(M, fixed, f, { tol: 1e-7, maxIter: 30000, onProgress: async (it, res) => { busy.textContent = `Solving… ${M.ne.toLocaleString('en-US')} elements · iteration ${it} · residual ${res.toExponential(1)} (click to stop)`; await new Promise(r => setTimeout(r, 0)); return simCancel; } });
-    if (simCancel) { toast('Solve stopped'); return; }
-    const disp = new Float64Array(M.nn); for (let q = 0; q < M.nn; q++) disp[q] = Math.hypot(R.u[3 * q], R.u[3 * q + 1], R.u[3 * q + 2]);
-    const vmN = R.vmNode, yE = new Float64Array(M.ne); for (let e = 0; e < M.ne; e++) yE[e] = mats[M.em[e]].yield;
-    const yN = nodalAverage(M, yE), sfN = new Float64Array(M.nn); for (let q = 0; q < M.nn; q++) sfN[q] = vmN[q] > 1e-12 ? yN[q] / vmN[q] : 1e9;
-    let vmax = 0, vmaxQ = 0; for (let q = 0; q < M.nn; q++) if (M.nodeActive[q] && vmN[q] > vmax) { vmax = vmN[q]; vmaxQ = q; }
-    let dmax = 0, dmaxQ = 0; for (let q = 0; q < M.nn; q++) if (M.nodeActive[q] && disp[q] > dmax) { dmax = disp[q]; dmaxQ = q; }
-    let sfmin = Infinity; for (let q = 0; q < M.nn; q++) if (M.nodeActive[q]) sfmin = Math.min(sfmin, sfN[q]);
-    simRes = { st: st.id, M, R, disp, vmN, sfN, vmax, vmaxAt: nodePos(M, vmaxQ), dmax, dmaxAt: nodePos(M, dmaxQ), sfmin, applied, warn, mats, seconds: (performance.now() - t0) / 1000, h, key: simKey(st) };
-    if (!R.converged) warn.push(`The solver stopped at a residual of ${R.residual.toExponential(1)}; results may be inaccurate. Check that the constraints hold the part in every direction.`);
     if (warn.length) toast(warn[0]);
     renderBrowser(); drawSim2(); defaultHint();
   } catch (e) { console.error(e); toast('Solve failed: ' + e.message); }
@@ -140,21 +224,25 @@ function heat(t) {   // blue → cyan → green → yellow → red
   const stops = [[0.15, 0.3, 0.85], [0.1, 0.75, 0.9], [0.25, 0.8, 0.3], [0.95, 0.85, 0.15], [0.9, 0.2, 0.15]], x = t * 4, i = Math.min(3, Math.floor(x)), u = x - i, a = stops[i], b = stops[i + 1];
   return [a[0] + (b[0] - a[0]) * u, a[1] + (b[1] - a[1]) * u, a[2] + (b[2] - a[2]) * u];
 }
+const simShowing = () => { const st = simStudy(); return !!(simRes && st && simRes.st === st.id && simRes.key === simKey(st)); };
 function drawSim2() {
   clearGroup(simGroup); $('#simLegend')?.remove();
   if (workspace !== 'simulation') { requestRender(); return; }
   const st = simStudy(); if (!st) return;
-  const showRes = simRes && simRes.st === st.id && simRes.key === simKey(st);
+  const showRes = simShowing();
+  if (!showRes) stopSimAnim();
   for (const [, sb] of shownBodies) { sb.mesh.visible = !showRes && !bodyHidden(sb.rec.id); sb.edges.visible = !bodyHidden(sb.rec.id) && !showRes; }
   if (showRes) drawResults(); else drawBCs(st);
   requestRender();
 }
+const BC_COLOR = { fixed: 0x2e86de, temp: 0x8e44ad, force: 0xc0392b, pressure: 0xe67e22, heat: 0xd35400, conv: 0x16a085 };
 function drawBCs(st) {
   const tint = (faces, col) => { for (const f of faces) { const t = faceTris(f); if (!t) continue; const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(t, 3)); const m = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.55, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, depthWrite: false, side: THREE.DoubleSide })); m.renderOrder = 8; simGroup.add(m); } };
-  for (const c of st.constraints) tint(c.faces, 0x2e86de);
+  for (const c of st.constraints) tint(c.faces, BC_COLOR[c.type] || 0x2e86de);
   for (const L of st.loads) {
     if (L.type === 'gravity') continue;
-    tint(L.faces, L.type === 'pressure' ? 0xe67e22 : 0xc0392b);
+    tint(L.faces, BC_COLOR[L.type] || 0xc0392b);
+    if (L.type !== 'force' && L.type !== 'pressure') continue;
     // arrows at face centres
     for (const f of L.faces) {
       const t = faceTris(f); if (!t?.length) continue; const c = [0, 0, 0]; for (let i = 0; i < t.length; i += 3) for (let k = 0; k < 3; k++) c[k] += t[i + k] / (t.length / 3);
@@ -166,62 +254,129 @@ function drawBCs(st) {
   if (simPick) { const it = simItem(simPick); if (it) tint(it.faces, 0xf1c40f); }
 }
 function placedSigSim(f) { const M = bodyXf(f.body); return M === IDENT ? f.sig : { ...f.sig, n: new THREE.Vector3(...f.sig.n).transformDirection(M).toArray() }; }
+const SIM_TITLES = { vm: 'Stress (von Mises) MPa', disp: 'Displacement mm', sf: 'Safety factor', mode: 'Relative displacement', temp: 'Temperature °C', flux: 'Heat flux W/m²' };
+function simModelDiag() { const b = new THREE.Box3(); for (const id of simBodies()) { const g = bodyGeomOf(result.bodies.get(id)); g.computeBoundingBox(); b.union(g.boundingBox.clone().applyMatrix4(bodyXf(id))); } return b.getSize(new THREE.Vector3()).length(); }
 function drawResults() {
-  const S = simRes, M = S.M, type = simView.type;
-  const field = type === 'disp' ? S.disp : type === 'sf' ? S.sfN : S.vmN;
+  const S = simRes, M = S.M, type = simView.type, diag = simModelDiag();
+  let field, U = null, k = 0, unit = 1;
+  if (S.kind === 'modal') {
+    const v = S.modes[simView.mode] || S.modes[0]; U = v; field = new Float64Array(M.nn); for (let q = 0; q < M.nn; q++) field[q] = Math.hypot(v[3 * q], v[3 * q + 1], v[3 * q + 2]);
+    k = simView.scale === 'none' ? 0 : diag * 0.08;
+  } else if (S.kind === 'thermal') { field = type === 'flux' ? S.fluxN : S.T; if (type === 'flux') unit = 1e6; }
+  else {
+    field = type === 'disp' ? S.disp : type === 'sf' ? S.sfN : S.vmN; U = S.R.u;
+    k = simView.scale === 'actual' ? 1 : simView.scale === 'none' ? 0 : S.dmax > 1e-12 ? diag * 0.05 / S.dmax : 0;
+  }
   let lo = Infinity, hi = -Infinity;
   for (let q = 0; q < M.nn; q++) if (M.nodeActive[q]) { lo = Math.min(lo, field[q]); hi = Math.max(hi, field[q]); }
   if (type === 'sf') { lo = 0; hi = Math.min(Math.max(1, S.sfmin * 3), 15); }
-  const diag = (() => { let b = new THREE.Box3(); for (const id of simBodies()) { const g = bodyGeomOf(result.bodies.get(id)); g.computeBoundingBox(); b.union(g.boundingBox.clone().applyMatrix4(bodyXf(id))); } return b.getSize(new THREE.Vector3()).length(); })();
-  const k = simView.scale === 'actual' ? 1 : simView.scale === 'none' ? 0 : S.dmax > 1e-12 ? diag * 0.05 / S.dmax : 0;
+  if (S.kind === 'modal') { lo = 0; hi = 1; }
   S.scale = k;
+  const anim = [];
   for (const id of simBodies()) {
     const b = result.bodies.get(id), m = brepMeshOf(b), src = m.display, P = src.attributes.position.array, Mx = bodyXf(id), n = P.length / 3;
-    const pos = new Float32Array(P.length), col = new Float32Array(P.length), v = new THREE.Vector3();
+    const base = new Float32Array(P.length), du = new Float32Array(P.length), col = new Float32Array(P.length), v = new THREE.Vector3();
     for (let i = 0; i < n; i++) {
       v.set(P[3 * i], P[3 * i + 1], P[3 * i + 2]).applyMatrix4(Mx); const p = [v.x, v.y, v.z];
-      const val = sampleNodal(M, field, p), u = [0, 1, 2].map(c => sampleNodal(M, S.R.u, p, 3, c));
-      pos[3 * i] = p[0] + k * u[0]; pos[3 * i + 1] = p[1] + k * u[1]; pos[3 * i + 2] = p[2] + k * u[2];
+      const val = sampleNodal(M, field, p);
+      base[3 * i] = p[0]; base[3 * i + 1] = p[1]; base[3 * i + 2] = p[2];
+      if (U && k) for (let c = 0; c < 3; c++) du[3 * i + c] = k * sampleNodal(M, U, p, 3, c);
       const t = hi > lo ? (val - lo) / (hi - lo) : 0, c = heat(type === 'sf' ? 1 - t : t); col.set(c, 3 * i);
     }
+    const pos = new Float32Array(P.length); for (let i = 0; i < pos.length; i++) pos[i] = base[i] + du[i];
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(col, 3)); g.setIndex(src.index.clone()); g.computeVertexNormals();
     simGroup.add(new THREE.Mesh(g, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.7, metalness: 0.0 })));
+    anim.push({ g, base, du });
     if (k > 0) { const ghost = new THREE.LineSegments(m.edgeGeom, new THREE.LineBasicMaterial({ color: 0x777777, transparent: true, opacity: 0.35 })); ghost.matrixAutoUpdate = false; ghost.matrix.copy(Mx); simGroup.add(ghost); }
   }
+  S.anim = anim;
   // max markers
   const mark = (p, label) => { const s = new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.6, diag * 0.008), 12, 8), new THREE.MeshBasicMaterial({ color: 0x111111, depthTest: false })); s.position.set(...p); s.renderOrder = 20; simGroup.add(s); const o = new CSS2DObject(h('div', { class: 'combtag' }, label)); o.position.set(...p); simGroup.add(o); };
-  if (type === 'vm') mark(S.vmaxAt, 'Max ' + fmt(S.vmax) + ' MPa'); else if (type === 'disp') mark(S.dmaxAt.map((x, i) => x + k * S.R.u[3 * simResMaxQ(S) + i]), 'Max ' + fmt(S.dmax) + ' mm'); else mark(S.vmaxAt, 'Min ' + fmt(S.sfmin));
+  if (S.kind === 'static') {
+    if (type === 'vm') mark(S.vmaxAt, 'Max ' + fmt(S.vmax) + ' MPa'); else if (type === 'disp') mark(S.dmaxAt.map((x, i) => x + k * S.R.u[3 * S.dmaxQ + i]), 'Max ' + fmt(S.dmax) + ' mm'); else mark(S.vmaxAt, 'Min ' + fmt(S.sfmin));
+  } else if (S.kind === 'thermal') {
+    if (type === 'temp') { mark(S.tmaxAt, 'Max ' + fmt(S.tmax) + ' °C'); if (S.tmax - S.tmin > 1e-6) mark(S.tminAt, 'Min ' + fmt(S.tmin) + ' °C'); } else mark(S.fmaxAt, 'Max ' + fmtSig(S.fmax * 1e6) + ' W/m²');
+  }
   // legend
-  const title = { vm: 'Stress (von Mises) MPa', disp: 'Displacement mm', sf: 'Safety factor' }[type], stops = [];
+  const stops = [];
   for (let i = 0; i <= 10; i++) { const c = heat(type === 'sf' ? 1 - i / 10 : i / 10); stops.push(`rgb(${c.map(x => Math.round(x * 255)).join(',')}) ${i * 10}%`); }
-  const lg = h('div', { id: 'simLegend', class: 'simlegend' }, h('div', { class: 'lt' }, title), h('div', { class: 'lbar', style: `background:linear-gradient(to top, ${stops.join(',')})` }),
-    h('div', { class: 'lmax' }, (type === 'sf' && hi >= 15 ? '≥ ' : '') + fmtSig(hi)), h('div', { class: 'lmin' }, fmtSig(lo)),
-    h('div', { class: 'lnote' }, k > 0 ? `Deformation ×${fmtSig(k)}` : 'Undeformed'));
+  const note = S.kind === 'modal' ? `Mode ${simView.mode + 1} · ${fmt(S.freqs[simView.mode])} Hz` : S.kind === 'thermal' ? 'Steady state' : (k > 0 ? `Deformation ×${fmtSig(k)}` : 'Undeformed');
+  const lg = h('div', { id: 'simLegend', class: 'simlegend' }, h('div', { class: 'lt' }, SIM_TITLES[type] || ''), h('div', { class: 'lbar', style: `background:linear-gradient(to top, ${stops.join(',')})` }),
+    h('div', { class: 'lmax' }, (type === 'sf' && hi >= 15 ? '≥ ' : '') + fmtSig(hi * unit)), h('div', { class: 'lmin' }, fmtSig(lo * unit)),
+    h('div', { class: 'lnote' }, note));
   $('#stage').append(lg);
+  if (S.kind === 'modal' && simView.anim) startSimAnim();
 }
-const simResMaxQ = S => { let b = 0, bd = -1; for (let q = 0; q < S.M.nn; q++) if (S.M.nodeActive[q] && S.disp[q] > bd) { bd = S.disp[q]; b = q; } return b; };
+// mode-shape animation: positions swing between ±shape
+function startSimAnim() {
+  if (simAnimId) return;
+  const t0 = performance.now();
+  const step = now => {
+    const S = simRes; if (!S || !S.anim || workspace !== 'simulation' || !simView.anim) { simAnimId = 0; return; }
+    const s = Math.sin((now - t0) / 1000 * Math.PI * 2 * 0.8);
+    for (const a of S.anim) { const p = a.g.attributes.position.array; for (let i = 0; i < p.length; i++) p[i] = a.base[i] + s * a.du[i]; a.g.attributes.position.needsUpdate = true; }
+    requestRender(); simAnimId = requestAnimationFrame(step);
+  };
+  simAnimId = requestAnimationFrame(step);
+}
+function stopSimAnim() { if (simAnimId) cancelAnimationFrame(simAnimId); simAnimId = 0; }
 const fmtSig = v => !Number.isFinite(v) ? '—' : Math.abs(v) >= 1000 || Math.abs(v) < 0.01 && v !== 0 ? v.toExponential(2) : (+v.toPrecision(3)).toString();
 // ---- browser ----
+const bcSub = b => ({ fixed: () => `${b.faces.length} face${b.faces.length === 1 ? '' : 's'}`, temp: () => `${b.value} °C`, gravity: () => `${b.value} m/s² ${b.dir}`, pressure: () => `${b.value} MPa`, force: () => `${b.value} N`, heat: () => `${b.value} W`, conv: () => `${b.value} W/m²K · ${b.ambient ?? 20} °C` }[b.type] || (() => ''))();
+const BC_ICON = { fixed: 'fix', temp: 'thermo', gravity: 'com', force: 'move', pressure: 'presspull', heat: 'heat', conv: 'conv' };
 function renderSimBrowser(add) {
   const S = sim(), st = simStudy(); if (!st) return;
-  if (!add(0, { key: 'simroot', icon: 'analysis', label: st.name, sub: 'Static stress' })) return;
+  const kind = simKind(st);
+  const menu = () => [{ head: 'Studies' }, ...S.studies.map(x => ({ label: x.name, icon: SIM_KINDS[simKind(x)][2], checked: x.id === st.id ? true : null, action: () => activateStudy(x.id) })), '-',
+    { label: 'Rename study…', icon: 'params', action: () => renameStudy() }, { label: 'Delete study', icon: 'delete', action: () => deleteStudy() }];
+  if (!add(0, { key: 'simroot', icon: SIM_KINDS[kind][2], label: st.name, sub: SIM_KINDS[kind][0] + (S.studies.length > 1 ? ` · ${S.studies.length} studies` : ''), menu, onDbl: () => renameStudy() })) return;
   if (add(1, { key: 'simmat', icon: 'material', label: 'Materials' })) for (const id of simBodies()) add(2, { icon: 'bodyi', label: bodyName(id), sub: simMat(st, id), onDbl: () => openSimMaterials(), onClick: () => openSimMaterials() });
-  if (add(1, { key: 'simbc', icon: 'folder', label: 'Constraints', sub: String(st.constraints.length) })) for (const c of st.constraints) add(2, { icon: 'fix', label: c.name, sub: `${c.faces.length} face${c.faces.length === 1 ? '' : 's'}`, onDbl: () => editBC(c.id), onClick: () => editBC(c.id), menu: () => [{ label: 'Edit', icon: 'params', action: () => editBC(c.id) }, { label: 'Delete', icon: 'delete', action: () => deleteBC(c.id) }] });
-  if (add(1, { key: 'simld', icon: 'folder', label: 'Loads', sub: String(st.loads.length) })) for (const L of st.loads) add(2, { icon: L.type === 'gravity' ? 'com' : 'move', label: L.name, sub: L.type === 'gravity' ? `${L.value} m/s² ${L.dir}` : L.type === 'pressure' ? `${L.value} MPa` : `${L.value} N`, onDbl: () => editBC(L.id), onClick: () => editBC(L.id), menu: () => [{ label: 'Edit', icon: 'params', action: () => editBC(L.id) }, { label: 'Delete', icon: 'delete', action: () => deleteBC(L.id) }] });
+  const item = (b) => add(2, { icon: BC_ICON[b.type] || 'fix', label: b.name, sub: bcSub(b), onDbl: () => editBC(b.id), onClick: () => editBC(b.id), menu: () => [{ label: 'Edit', icon: 'params', action: () => editBC(b.id) }, { label: 'Delete', icon: 'delete', action: () => deleteBC(b.id) }] });
+  if (add(1, { key: 'simbc', icon: 'folder', label: kind === 'thermal' ? 'Temperatures' : 'Constraints', sub: String(st.constraints.length) })) st.constraints.forEach(item);
+  if (kind !== 'modal' && add(1, { key: 'simld', icon: 'folder', label: kind === 'thermal' ? 'Thermal loads' : 'Loads', sub: String(st.loads.length) })) st.loads.forEach(item);
   add(1, { icon: 'remesh', label: 'Mesh', sub: st.mesh + ` (~${(MESH_TARGET[st.mesh] / 1000) | 0}k elements)`, onClick: () => openSimMesh() });
-  if (simRes && simRes.st === st.id && simRes.key === simKey(st) && add(1, { key: 'simres', icon: 'analysis', label: 'Results' })) {
-    add(2, { icon: 'analysis', label: 'Stress (von Mises)', sub: 'max ' + fmt(simRes.vmax) + ' MPa', sel: simView.type === 'vm', onClick: () => { simView.type = 'vm'; drawSim2(); renderBrowser(); } });
-    add(2, { icon: 'move', label: 'Displacement', sub: 'max ' + fmt(simRes.dmax) + ' mm', sel: simView.type === 'disp', onClick: () => { simView.type = 'disp'; drawSim2(); renderBrowser(); } });
-    add(2, { icon: 'fix', label: 'Safety factor', sub: 'min ' + (simRes.sfmin > 1e6 ? '—' : fmt(simRes.sfmin)), sel: simView.type === 'sf', err: simRes.sfmin < 1, onClick: () => { simView.type = 'sf'; drawSim2(); renderBrowser(); } });
+  if (kind === 'modal') add(1, { icon: 'modes', label: 'Modes to find', sub: String(st.modes || 8), onClick: () => openSimMesh() });
+  const sel = (t, extra = {}) => ({ sel: simView.type === t, onClick: () => { simView.type = t; drawSim2(); renderBrowser(); defaultHint(); }, ...extra });
+  if (simShowing() && add(1, { key: 'simres', icon: 'analysis', label: 'Results' })) {
+    if (simRes.kind === 'static') {
+      add(2, { icon: 'analysis', label: 'Stress (von Mises)', sub: 'max ' + fmt(simRes.vmax) + ' MPa', ...sel('vm') });
+      add(2, { icon: 'move', label: 'Displacement', sub: 'max ' + fmt(simRes.dmax) + ' mm', ...sel('disp') });
+      add(2, { icon: 'fix', label: 'Safety factor', sub: 'min ' + (simRes.sfmin > 1e6 ? '—' : fmt(simRes.sfmin)), err: simRes.sfmin < 1, ...sel('sf') });
+    } else if (simRes.kind === 'thermal') {
+      add(2, { icon: 'thermo', label: 'Temperature', sub: fmt(simRes.tmin) + ' – ' + fmt(simRes.tmax) + ' °C', ...sel('temp') });
+      add(2, { icon: 'heat', label: 'Heat flux', sub: 'max ' + fmtSig(simRes.fmax * 1e6) + ' W/m²', ...sel('flux') });
+    } else {
+      simRes.freqs.forEach((f, i) => add(2, { icon: 'modes', label: `Mode ${i + 1}`, sub: fmt(f) + ' Hz', sel: simView.mode === i, onClick: () => { simView.mode = i; drawSim2(); renderBrowser(); defaultHint(); } }));
+    }
   } else if (simRes && simRes.st === st.id) add(1, { icon: 'analysis', label: 'Results out of date', sub: 'Solve again', dim: true, onClick: () => solveStudy() });
+}
+function renameStudy() {
+  const st = simStudy(); if (!st) return;
+  const i = h('input', { type: 'text', id: 'study-name', value: st.name }); i.addEventListener('keydown', e => e.stopPropagation());
+  openModal('Rename Study', 'params', h('div', {}, row('Name', i, 'study-name')), [h('button', { class: 'btn ok', onclick: () => { checkpoint(); st.name = i.value.trim() || st.name; persist(); closeModal(); renderBrowser(); } }, 'OK'), h('button', { class: 'btn', onclick: closeModal }, 'Cancel')]);
+}
+function deleteStudy() {
+  const S = sim(), st = simStudy(); if (!st) return;
+  checkpoint(); S.studies = S.studies.filter(x => x.id !== st.id); if (simRes?.st === st.id) simRes = null;
+  if (!S.studies.length) newStudy('static');
+  S.active = S.studies[0].id; persist(); activateStudy(S.active);
+}
+function openNewStudy() {
+  const card = (kind, text) => h('button', { class: 'studycard', type: 'button', 'data-kind': kind, onclick: () => { checkpoint(); newStudy(kind); persist(); closeModal(); activateStudy(sim().active); } }, h('span', { html: icon(SIM_KINDS[kind][2]) }), h('b', {}, SIM_KINDS[kind][0]), h('small', {}, text));
+  openModal('New Study', 'analysis', h('div', { class: 'studycards' },
+    card('static', 'Stress, displacement and safety factor under loads and supports.'),
+    card('modal', 'Natural frequencies and mode shapes, with or without supports.'),
+    card('thermal', 'Steady-state temperatures from fixed temperatures, heat sources and convection.')),
+    [h('button', { class: 'btn', onclick: closeModal }, 'Cancel')]);
 }
 // ---- dialogs ----
 const simItem = id => { const st = simStudy(); return st && ([...st.constraints, ...st.loads].find(x => x.id === id) || null); };
 function deleteBC(id) { const st = simStudy(); checkpoint(); st.constraints = st.constraints.filter(x => x.id !== id); st.loads = st.loads.filter(x => x.id !== id); persist(); renderBrowser(); drawSim2(); }
 function newBC(type) {
   const st = simStudy(); if (!st) return;
-  const list = type === 'fixed' ? st.constraints : st.loads, label = { fixed: 'Fixed', force: 'Force', pressure: 'Pressure', gravity: 'Gravity' }[type];
-  const it = { id: uid(), name: label + ' ' + (list.filter(x => x.type === type).length + 1), type, faces: [], value: type === 'force' ? 100 : type === 'pressure' ? 1 : 9.81, dir: type === 'gravity' ? '-Z' : 'normal', x: true, y: true, z: true };
+  const list = type === 'fixed' || type === 'temp' ? st.constraints : st.loads, label = BC_LABEL[type];
+  const it = { id: uid(), name: label + ' ' + (list.filter(x => x.type === type).length + 1), type, faces: [], value: { force: 100, pressure: 1, gravity: 9.81, temp: 100, heat: 10, conv: 10 }[type] ?? 0, dir: type === 'gravity' ? '-Z' : 'normal', x: true, y: true, z: true };
+  if (type === 'conv') it.ambient = 20;
   const snap = JSON.stringify(doc.sim); checkpoint(); list.push(it); persist();
   editBC(it.id, snap, true);
 }
@@ -235,12 +390,15 @@ function editBC(id, snap = JSON.stringify(doc.sim), isNew = false) {
     if (it.type === 'fixed') out.push(section_('Fixed directions', chkField('X', it, 'x', { after: live }), chkField('Y', it, 'y', { after: live }), chkField('Z', it, 'z', { after: live }), h('p', { class: 'note' }, 'Untick a direction to let the faces slide that way (for example a frictionless support).')));
     if (it.type === 'force') out.push(section_('Force', exField('Magnitude (total)', it, 'value', 'N', { after: live, id: 'sb-value' }), selField('Direction', it, 'dir', SIM_DIRS, { after: live })));
     if (it.type === 'pressure') out.push(section_('Pressure', exField('Pressure', it, 'value', 'MPa', { after: live, id: 'sb-value' }), h('p', { class: 'note' }, '1 MPa = 1 N/mm². Positive pushes into the faces.')));
+    if (it.type === 'temp') out.push(section_('Temperature', exField('Temperature', it, 'value', '°C', { after: live, id: 'sb-value' }), h('p', { class: 'note' }, 'The faces are held at this temperature (for example a heat sink or a water-cooled surface).')));
+    if (it.type === 'heat') out.push(section_('Heat source', exField('Power (total)', it, 'value', 'W', { after: live, id: 'sb-value' }), h('p', { class: 'note' }, 'Heat flowing into the part through the faces, spread evenly over them.')));
+    if (it.type === 'conv') out.push(section_('Convection', exField('Film coefficient', it, 'value', 'W/(m²·K)', { after: live, id: 'sb-value' }), exField('Ambient temperature', it, 'ambient', '°C', { after: live, id: 'sb-ambient' }), h('p', { class: 'note' }, 'Typical values: still air 5–10, forced air 25–250, water 500–10 000 W/(m²·K).')));
     if (it.type === 'gravity') out.push(section_('Gravity', exField('Acceleration', it, 'value', 'm/s²', { after: live, id: 'sb-value' }), selField('Direction', it, 'dir', SIM_DIRS.slice(1), { after: live })));
     out.push(section_(null, row('Name', (() => { const i = h('input', { type: 'text', id: 'sb-name', value: it.name }); i.addEventListener('input', () => { it.name = i.value; renderBrowser(); }); i.addEventListener('keydown', e => e.stopPropagation()); return i; })(), 'sb-name')));
     return out;
   };
-  openPanelDialog({ title: { fixed: 'Fixed Constraint', force: 'Force', pressure: 'Pressure', gravity: 'Gravity' }[it.type], icon: it.type === 'fixed' ? 'fix' : 'move', okLabel: 'OK', body,
-    help: it.type === 'fixed' ? 'Fixed faces cannot move. Every study needs at least one.' : 'The load is spread evenly over the selected faces.',
+  openPanelDialog({ title: it.type === 'fixed' ? 'Fixed Constraint' : BC_LABEL[it.type], icon: BC_ICON[it.type] || 'fix', okLabel: 'OK', body,
+    help: it.type === 'fixed' ? (simKind(simStudy()) === 'modal' ? 'Fixed faces cannot move. Without any, the part vibrates freely.' : 'Fixed faces cannot move. Every static study needs at least one.') : it.type === 'temp' ? 'Prescribed temperature on the selected faces.' : it.type === 'conv' ? 'Heat exchange with the surrounding fluid: q = h (T − T∞).' : 'The load is spread evenly over the selected faces.',
     onOK: () => { simPick = null; const now = JSON.stringify(doc.sim); doc.sim = JSON.parse(snap); if (!isNew) checkpoint(); doc.sim = JSON.parse(now); persist(); renderBrowser(); drawSim2(); defaultHint(); },
     onCancel: () => { simPick = null; doc.sim = JSON.parse(snap); renderBrowser(); drawSim2(); defaultHint(); } });
   defaultHint();
@@ -260,55 +418,81 @@ function openSimMaterials() {
   const rows = simBodies().map(id => {
     const s = h('select', { 'aria-label': 'Material of ' + bodyName(id), id: 'sm-' + id.replace(/\W/g, '_') }, ...Object.keys(SIM_MATERIALS).map(m => h('option', { value: m, selected: (work[id] || bodyMaterial(id)) === m }, m)));
     s.addEventListener('change', () => { work[id] = s.value; });
-    const p = SIM_MATERIALS[work[id] || bodyMaterial(id)] || [];
-    return h('tr', {}, h('td', {}, bodyName(id)), h('td', {}, s), h('td', { class: 'num' }, p[0] ? fmt(p[0] / 1000) + ' GPa' : ''), h('td', { class: 'num' }, p[2] ? p[2] + ' MPa' : ''));
+    const mn = work[id] || bodyMaterial(id), p = SIM_MATERIALS[mn] || [], kind = simKind(st);
+    const c3 = kind === 'thermal' ? (SIM_THERMAL[mn] != null ? SIM_THERMAL[mn] + ' W/(m·K)' : '') : p[0] ? fmt(p[0] / 1000) + ' GPa' : '';
+    const c4 = kind === 'static' ? (p[2] ? p[2] + ' MPa' : '') : kind === 'modal' ? fmt(MATERIALS[mn]?.density || 7.85) + ' g/cm³' : '';
+    return h('tr', {}, h('td', {}, bodyName(id)), h('td', {}, s), h('td', { class: 'num' }, c3), h('td', { class: 'num' }, c4));
   });
-  openModal('Study Materials', 'material', h('div', { class: 'tablewrap' }, h('table', { class: 'grid' }, h('thead', {}, h('tr', {}, ...['Body', 'Material', 'Young’s modulus', 'Yield'].map(t => h('th', {}, t)))), h('tbody', {}, rows)),
-    h('p', { class: 'note' }, 'Linear elastic, isotropic. Bodies that touch are treated as bonded.')),
+  const kind = simKind(st), heads = ['Body', 'Material', kind === 'thermal' ? 'Conductivity' : 'Young’s modulus', kind === 'static' ? 'Yield' : kind === 'modal' ? 'Density' : ''];
+  openModal('Study Materials', 'material', h('div', { class: 'tablewrap' }, h('table', { class: 'grid' }, h('thead', {}, h('tr', {}, ...heads.map(t => h('th', {}, t)))), h('tbody', {}, rows)),
+    h('p', { class: 'note' }, kind === 'thermal' ? 'Isotropic conduction. Bodies that touch exchange heat as if bonded.' : 'Linear elastic, isotropic. Bodies that touch are treated as bonded.')),
     [h('button', { class: 'btn ok', onclick: () => { checkpoint(); st.mats = work; persist(); closeModal(); renderBrowser(); drawSim2(); } }, 'OK'), h('button', { class: 'btn', onclick: closeModal }, 'Cancel')]);
 }
 function openSimMesh() {
   const st = simStudy(); if (!st) return; const snap = JSON.stringify(doc.sim);
   openPanelDialog({ title: 'Mesh', icon: 'remesh', okLabel: 'OK', help: 'Finer meshes are more accurate near small features but take longer to solve.',
-    body: () => [section_('Mesh', segField('Size', st, 'mesh', [['coarse', 'Coarse'], ['medium', 'Medium'], ['fine', 'Fine']], { after: renderBrowser }), h('p', { class: 'note' }, 'Cube elements (8-node with bending modes) sized to the volume: about 4k, 12k or 30k elements.'))],
+    body: () => [section_('Mesh', segField('Size', st, 'mesh', [['coarse', 'Coarse'], ['medium', 'Medium'], ['fine', 'Fine']], { after: renderBrowser }), h('p', { class: 'note' }, 'Cube elements (8-node with bending modes) sized to the volume: about 4k, 12k or 30k elements.')),
+      ...(simKind(st) === 'modal' ? [section_('Modes', exField('Number of modes', st, 'modes', '', { min: 1, max: 30, after: renderBrowser, id: 'sim-modes' }))] : [])],
     onOK: () => { const now = JSON.stringify(doc.sim); doc.sim = JSON.parse(snap); checkpoint(); doc.sim = JSON.parse(now); persist(); renderBrowser(); drawSim2(); }, onCancel: () => { doc.sim = JSON.parse(snap); renderBrowser(); } });
 }
 function openSimResults() {
-  if (!simRes) { toast('Solve the study first'); return; }
-  openPanelDialog({ title: 'Results', icon: 'analysis', okLabel: 'Close', help: 'Stress concentrates at sharp inside corners and at the edges of fixed faces; refine the mesh to check such peaks.',
-    body: () => [section_('Show', segField('Result', simView, 'type', [['vm', 'Stress'], ['disp', 'Displacement'], ['sf', 'Safety factor']], { after: () => { drawSim2(); renderBrowser(); } }),
-      segField('Deformation', simView, 'scale', [['auto', 'Exaggerated'], ['actual', 'Actual'], ['none', 'None']], { after: drawSim2 })),
+  if (!simShowing()) { toast('Solve the study first'); return; }
+  const S = simRes, upd = () => { drawSim2(); renderBrowser(); defaultHint(); };
+  let show;
+  if (S.kind === 'modal') {
+    const tbl = h('table', { class: 'grid', id: 'sim-modes-table' }, h('thead', {}, h('tr', {}, ...['Mode', 'Frequency', 'Mass X', 'Mass Y', 'Mass Z'].map(t => h('th', {}, t)))),
+      h('tbody', {}, ...S.freqs.map((f, i) => { const tr = h('tr', { class: simView.mode === i ? 'sel' : '', style: 'cursor:pointer', onclick: () => { simView.mode = i; upd(); rerenderDialog(); } }, h('td', {}, String(i + 1)), h('td', { class: 'num' }, fmt(f) + ' Hz'), ...S.participation[i].map(v => h('td', { class: 'num' }, (v * 100).toFixed(1) + ' %'))); return tr; })));
+    show = section_('Mode shapes', h('div', { class: 'tablewrap' }, tbl), chkField('Animate', simView, 'anim', { after: () => { if (simView.anim) startSimAnim(); else { stopSimAnim(); drawSim2(); } } }),
+      segField('Deformation', simView, 'scale', [['auto', 'Shown'], ['none', 'None']], { after: drawSim2 }),
+      h('p', { class: 'note' }, 'Mode shapes have no absolute size: colours show relative motion. Mass columns are the effective mass fractions in each direction.'));
+  } else if (S.kind === 'thermal') show = section_('Show', segField('Result', simView, 'type', [['temp', 'Temperature'], ['flux', 'Heat flux']], { after: upd }));
+  else show = section_('Show', segField('Result', simView, 'type', [['vm', 'Stress'], ['disp', 'Displacement'], ['sf', 'Safety factor']], { after: upd }),
+    segField('Deformation', simView, 'scale', [['auto', 'Exaggerated'], ['actual', 'Actual'], ['none', 'None']], { after: drawSim2 }));
+  openPanelDialog({ title: 'Results', icon: 'analysis', okLabel: 'Close', help: S.kind === 'static' ? 'Stress concentrates at sharp inside corners and at the edges of fixed faces; refine the mesh to check such peaks.' : S.kind === 'modal' ? 'Keep operating and excitation frequencies away from the natural frequencies.' : 'Steady state: the temperatures once the heat flows have settled.',
+    body: () => [show,
       section_('Summary', h('dl', { class: 'stat' }, ...simSummary().flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]))),
       h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn', type: 'button', id: 'sim-report', onclick: () => simReport() }, 'Save report (.zip)'))],
     onOK: () => {}, onCancel: () => {} });
 }
 function simSummary() {
-  const S = simRes;
+  const S = simRes, mesh = ['Mesh', `${S.M.ne.toLocaleString('en-US')} elements of ${fmt(S.h)} mm`];
+  if (S.kind === 'modal') return [['Mode 1', fmt(S.freqs[0]) + ' Hz'], ...(S.freqs.length > 1 ? [['Highest mode', `${S.freqs.length}: ${fmt(S.freqs.at(-1))} Hz`]] : []), ['Mass', fmt(S.mass * 1000) + ' g'], ['Supports', S.free ? 'none (free vibration; 6 rigid-body modes skipped)' : 'fixed faces'], mesh, ['Solver', `${S.iterations} iterations · ${fmt(S.seconds)} s`]];
+  if (S.kind === 'thermal') return [['Max temperature', fmt(S.tmax) + ' °C'], ['Min temperature', fmt(S.tmin) + ' °C'], ['Max heat flux', fmtSig(S.fmax * 1e6) + ' W/m²'], ['Heat in (sources)', fmt(S.heatIn) + ' W'], ['Heat out (convection)', fmt(S.heatOut) + ' W'], ['Heat in (fixed temperatures)', fmt(S.heatFixed) + ' W'], mesh, ['Solver', `${S.R.iterations} iterations · ${fmt(S.seconds)} s`]];
   return [['Max stress', fmt(S.vmax) + ' MPa'], ['Max displacement', fmt(S.dmax) + ' mm'], ['Min safety factor', S.sfmin > 1e6 ? '—' : fmt(S.sfmin)], ['Applied load', S.applied.map(v => fmt(v)).join(', ') + ' N'], ['Reaction', S.R.reaction.map(v => fmt(v)).join(', ') + ' N'],
-    ['Mesh', `${S.M.ne.toLocaleString('en-US')} elements of ${fmt(S.h)} mm`], ['Solver', `${S.R.iterations} iterations · ${fmt(S.seconds)} s`]];
+    mesh, ['Solver', `${S.R.iterations} iterations · ${fmt(S.seconds)} s`]];
 }
 function simReport() {
-  const S = simRes, st = simStudy(), esc = x => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const S = simRes, st = simStudy(), esc = x => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;'), kind = S.kind;
   renderer.render(scene, camera); let img = ''; try { img = renderer.domElement.toDataURL('image/png'); } catch (e) { }
+  const what = { static: 'Linear static stress', modal: 'Natural frequencies (modal analysis)', thermal: 'Steady-state heat transfer' }[kind];
+  const modeTable = kind === 'modal' ? `<h2>Modes</h2><table><tr><th>Mode</th><th>Frequency (Hz)</th><th>Mass X</th><th>Mass Y</th><th>Mass Z</th></tr>${S.freqs.map((f, i) => `<tr><td>${i + 1}</td><td>${fmt(f)}</td>${S.participation[i].map(v => `<td>${(v * 100).toFixed(1)} %</td>`).join('')}</tr>`).join('')}</table>` : '';
+  const matHead = kind === 'thermal' ? '<th>k (W/m·K)</th>' : kind === 'modal' ? '<th>E (MPa)</th><th>ν</th><th>Density (g/cm³)</th>' : '<th>E (MPa)</th><th>ν</th><th>Yield (MPa)</th>';
+  const matRow = m => { const p = SIM_MATERIALS[m] || []; return kind === 'thermal' ? `<td>${SIM_THERMAL[m] ?? ''}</td>` : kind === 'modal' ? `<td>${p[0]}</td><td>${p[1]}</td><td>${MATERIALS[m]?.density || 7.85}</td>` : `<td>${p[0]}</td><td>${p[1]}</td><td>${p[2]}</td>`; };
+  const val = b => b.type === 'fixed' ? ['x', 'y', 'z'].filter(k => b[k] !== false).join(' ').toUpperCase() : bcSub(b);
   const html = `<!doctype html><meta charset="utf-8"><title>${esc(doc.name)} – ${esc(st.name)}</title><style>body{font:13px system-ui,sans-serif;margin:24px;color:#222;max-width:900px}table{border-collapse:collapse;margin:8px 0 18px}td,th{border:1px solid #bbb;padding:4px 8px;text-align:left}th{background:#eee}img{max-width:100%;border:1px solid #ccc}</style>
-<h1>${esc(doc.name)} — ${esc(st.name)}</h1><p>Linear static stress, voxel finite elements. ${new Date().toISOString().slice(0, 10)}</p>
+<h1>${esc(doc.name)} — ${esc(st.name)}</h1><p>${what}, voxel finite elements. ${new Date().toISOString().slice(0, 10)}</p>
 ${img ? `<img src="${img}" alt="Result plot">` : ''}
-<h2>Results</h2><table>${simSummary().map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>
-<h2>Materials</h2><table><tr><th>Body</th><th>Material</th><th>E (MPa)</th><th>ν</th><th>Yield (MPa)</th></tr>${simBodies().map(id => { const m = simMat(st, id), p = SIM_MATERIALS[m] || []; return `<tr><td>${esc(bodyName(id))}</td><td>${esc(m)}</td><td>${p[0]}</td><td>${p[1]}</td><td>${p[2]}</td></tr>`; }).join('')}</table>
-<h2>Constraints and loads</h2><table><tr><th>Name</th><th>Type</th><th>Value</th><th>Faces</th></tr>${[...st.constraints, ...st.loads].map(b => `<tr><td>${esc(b.name)}</td><td>${b.type}</td><td>${b.type === 'fixed' ? ['x', 'y', 'z'].filter(k => b[k] !== false).join(' ').toUpperCase() : b.value + (b.type === 'force' ? ' N ' + b.dir : b.type === 'pressure' ? ' MPa' : ' m/s² ' + b.dir)}</td><td>${b.faces?.length || '—'}</td></tr>`).join('')}</table>
-<p>Results are linear elastic: stresses above the yield strength mean the part would deform permanently and the numbers there are no longer valid. Peaks at sharp corners and at fixed edges depend on the mesh.</p>`;
+<h2>Results</h2><table>${simSummary().map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>${modeTable}
+<h2>Materials</h2><table><tr><th>Body</th><th>Material</th>${matHead}</tr>${simBodies().map(id => { const m = simMat(st, id); return `<tr><td>${esc(bodyName(id))}</td><td>${esc(m)}</td>${matRow(m)}</tr>`; }).join('')}</table>
+<h2>Boundary conditions</h2><table><tr><th>Name</th><th>Type</th><th>Value</th><th>Faces</th></tr>${[...st.constraints, ...(kind === 'modal' ? [] : st.loads)].map(b => `<tr><td>${esc(b.name)}</td><td>${BC_LABEL[b.type]}</td><td>${esc(val(b))}</td><td>${b.faces?.length || '—'}</td></tr>`).join('')}</table>
+<p>${kind === 'static' ? 'Results are linear elastic: stresses above the yield strength mean the part would deform permanently and the numbers there are no longer valid. Peaks at sharp corners and at fixed edges depend on the mesh.' : kind === 'modal' ? 'Frequencies assume small, undamped vibration. Lumped mass; bodies that touch are bonded.' : 'Constant material properties; radiation is not modelled.'}</p>`;
   saveFile(slug() + '-simulation.zip', makeZip([{ name: slug() + '-simulation.html', data: html }]), 'application/zip');
 }
 // ribbon commands
-cmd('sim.study', 'New Study', 'analysis', { run: () => { checkpoint(); const s = { id: uid(), name: 'Static Stress ' + (sim().studies.length + 1), mats: {}, mesh: 'medium', constraints: [], loads: [] }; sim().studies.push(s); sim().active = s.id; simRes = null; persist(); renderBrowser(); drawSim2(); } });
+cmd('sim.study', 'New Study', 'analysis', { run: () => openNewStudy() });
+cmd('sim.studies', 'Switch Study', 'folder', { run: () => { const b = document.querySelector('.rbtn[aria-label^="Switch Study"]') || $('#wsBtn'), S = sim(), st = simStudy(); openMenu(b, [{ head: 'Studies' }, ...S.studies.map(x => ({ label: x.name, icon: SIM_KINDS[simKind(x)][2], checked: x.id === st?.id ? true : null, action: () => activateStudy(x.id) }))]); } });
 cmd('sim.mats', 'Study Materials', 'material', { run: () => openSimMaterials() });
 cmd('sim.fixed', 'Fixed', 'fix', { run: () => newBC('fixed') });
 cmd('sim.force', 'Force', 'move', { run: () => newBC('force') });
 cmd('sim.pressure', 'Pressure', 'presspull', { run: () => newBC('pressure') });
 cmd('sim.gravity', 'Gravity', 'com', { run: () => newBC('gravity') });
+cmd('sim.temp', 'Temperature', 'thermo', { run: () => newBC('temp') });
+cmd('sim.heat', 'Heat Source', 'heat', { run: () => newBC('heat') });
+cmd('sim.conv', 'Convection', 'conv', { run: () => newBC('conv') });
 cmd('sim.mesh', 'Mesh Settings', 'remesh', { run: () => openSimMesh() });
 cmd('sim.solve', 'Solve', 'start', { run: () => solveStudy() });
 cmd('sim.results', 'Results', 'analysis', { run: () => openSimResults() });
-cmd('sim.report', 'Report', 'exportstl', { run: () => simRes ? simReport() : toast('Solve the study first') });
+cmd('sim.animate', 'Animate Mode', 'modes', { run: () => { if (!simShowing() || simRes.kind !== 'modal') { toast('Solve the modal study first'); return; } simView.anim = !simView.anim; if (simView.anim) startSimAnim(); else { stopSimAnim(); drawSim2(); } } });
+cmd('sim.report', 'Report', 'exportstl', { run: () => simShowing() ? simReport() : toast('Solve the study first') });
 
 $('#busy').addEventListener('click', () => { simCancel = true; });

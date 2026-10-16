@@ -354,3 +354,10 @@ pre.gcode { max-height: 260px; overflow: auto; background: var(--bg); border: 1p
 .simlegend .lmax { position: absolute; left: 38px; top: 28px; } .simlegend .lmin { position: absolute; left: 38px; top: 182px; }
 .simlegend .lnote { position: absolute; left: 10px; bottom: 8px; color: var(--muted, #888); }
 .busy { cursor: pointer; }
+.studycards { display: grid; gap: 8px; min-width: 340px; }
+.studycard { display: grid; grid-template-columns: 28px 1fr; grid-template-rows: auto auto; column-gap: 10px; text-align: left; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel2, transparent); color: inherit; cursor: pointer; font: inherit; }
+.studycard:hover, .studycard:focus-visible { border-color: var(--accent); outline: none; }
+.studycard span { grid-row: 1 / 3; align-self: center; }
+.studycard span .ico { width: 24px; height: 24px; }
+.studycard small { color: var(--muted); }
+table.grid tr.sel td { background: color-mix(in srgb, var(--accent) 22%, transparent); }
