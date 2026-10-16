@@ -449,7 +449,7 @@ $('#fileInput').addEventListener('change', e => {
   const file = e.target.files?.[0]; if (!file) return;
   const rd = new FileReader();
   rd.onload = () => {
-    try { const d = upgradeDoc(JSON.parse(rd.result)); if (!d) throw new Error('bad'); loadDoc(d, 'Opened ' + file.name); }
+    try { const d = upgradeDoc(JSON.parse(rd.result)); if (!d) throw new Error('bad'); openInTab(d, { msg: 'Opened ' + file.name }); }
     catch (err) { toast('That file is not a Draftwork project'); }
   };
   rd.readAsText(file); e.target.value = '';
@@ -754,7 +754,7 @@ function renderNavbar() {
 window.addEventListener('keydown', e => {
   const tag = e.target.tagName, typing = tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA';
   const k = e.key.toLowerCase();
-  if ((e.ctrlKey || e.metaKey) && k === 's') { e.preventDefault(); saveProject(); return; }
+  if ((e.ctrlKey || e.metaKey) && k === 's') { e.preventDefault(); saveCmd(); return; }
   if ((e.ctrlKey || e.metaKey) && (k === 'z' || k === 'y')) { if (typing) return; e.preventDefault(); (k === 'y' || e.shiftKey) ? redo() : undo(); return; }
   if (e.key === 'Escape') {
     if ($('#menus').children.length) return closeMenus();
@@ -795,13 +795,10 @@ window.addEventListener('keydown', e => {
 });
 
 // ---------- chrome wiring ----------
-$('#abData').innerHTML = icon('apps'); $('#abData').addEventListener('click', () => toast('The data panel for cloud projects is planned for Phase 2. Use Project files for now.'));
 $('#abFile').innerHTML = icon('file') + icon('caret'); $('#abFile').addEventListener('click', e => { e.stopPropagation(); openFileMenu(); });
-$('#abSave').innerHTML = icon('save'); $('#abSave').addEventListener('click', saveProject);
 $('#abUndo').innerHTML = icon('undo'); $('#abUndo').addEventListener('click', undo);
 $('#abRedo').innerHTML = icon('redo'); $('#abRedo').addEventListener('click', redo);
 $('#abHelp').innerHTML = icon('help'); $('#abHelp').addEventListener('click', openHelpModal);
-$('#docIco').innerHTML = icon('doc');
 $('#wsBtn').insertAdjacentHTML('beforeend', icon('caret')); $('#wsBtn').addEventListener('click', e => { e.stopPropagation(); openWorkspaceMenu(); });
 $('#bMin').addEventListener('click', () => { const b = $('#browser'); b.classList.toggle('min'); $('#bMin').setAttribute('aria-expanded', String(!b.classList.contains('min'))); $('#bMin').textContent = b.classList.contains('min') ? '+' : '–'; });
 for (const [id, ic, fn] of [['#tlStart', 'start', () => setRollback(-1)], ['#tlPrev', 'prev', () => stepMarker(-1)], ['#tlNext', 'next', () => stepMarker(1)], ['#tlEnd', 'end', () => setRollback(null)]]) { $(id).innerHTML = icon(ic); $(id).addEventListener('click', fn); }
@@ -862,6 +859,10 @@ if (location.hostname === 'localhost') window.__dw = {
   camDbg: () => { const st = camSetup(), o = st.ops.find(x => x.type === 'pocket'), r = camCache.get(o.id)?.res, m = r.moves.filter(q => q[0] !== 0); return { n: m.length, zmin: Math.min(...m.map(q => q[3])), x: [Math.min(...m.map(q => q[1])), Math.max(...m.map(q => q[1]))], y: [Math.min(...m.map(q => q[2])), Math.max(...m.map(q => q[2]))], floors: floorsOf(o, camContext(st)), ops: camSim?.ops.map(q => q.name + ':' + q.moves.length), seq: camSim && [...new Set(camSim.moves.map(q => q[4]))] }; },
   print: () => printCache && { layers: printCache.sl.layers.length, minutes: printCache.stats.minutes, grams: printCache.stats.grams, size: printCache.size, shown: printGroup.children.length },
   view: name => setView(name, true),
+  run: id => runCmd(id),
+  mark: () => checkpoint(),
+  tabs: () => ({ active: tabIdx, list: tabs.map((t, i) => { const d = i === tabIdx ? doc : t.doc; return { name: d.name, type: d.meta?.type || 'hybrid', id: d.meta?.id || null, version: d.meta?.version || 0, pn: d.meta?.partNumber || null, features: d.features.length, dirty: i === tabIdx ? dirty : !!t.dirty }; }) }),
+  lib: async () => ({ projects: (await libProjects()).map(p => ({ name: p.name, folders: p.folders.map(f => f.name) })), designs: (await libAll('designs')).map(d => ({ name: d.name, type: d.type, version: d.version, pn: d.partNumber, folder: d.folder })) }),
   simSample: (x, y, z, f) => simRes ? sampleNodal(simRes.M, simRes[f || 'vmN'], [x, y, z]) : null,
   simBC: () => { const st = simStudy(), M = simRes?.M; if (!st || !M) return null; const surf = surfaceNodes(M); return [...st.constraints, ...st.loads].filter(b => b.faces?.length).map(b => { const r = nodesOnFaces(M, surf, b.faces); return { type: b.type, area: r.area, nodes: r.nodes.length, hs: M.grid.hs }; }); },
   simInfo: () => ({ study: !!simStudy(), bcs: simStudy() && [...simStudy().constraints, ...simStudy().loads].map(b => b.type + ':' + b.faces.length), kind: simStudy() && simKind(simStudy()), studies: sim().studies.length, tab: activeTab, anim: !!simAnimId, res: simRes && (simRes.kind === 'buckling' ? { kind: 'buckling', factors: simRes.factors, applied: simRes.applied, vmax: simRes.vmax, ne: simRes.M.ne, it: simRes.iterations, warn: simRes.warn } : simRes.kind === 'thermalstress' ? { kind: 'thermalstress', vmax: simRes.vmax, dmax: simRes.dmax, sfmin: simRes.sfmin, tmax: simRes.tmax, tmin: simRes.tmin, reaction: simRes.R.reaction, ne: simRes.M.ne, converged: simRes.R.converged, warn: simRes.warn } : simRes.kind === 'modal' ? { kind: 'modal', freqs: simRes.freqs, part: simRes.participation, rigid: simRes.rigid, ne: simRes.M.ne, it: simRes.iterations, mass: simRes.mass, warn: simRes.warn } : simRes.kind === 'thermal' ? { kind: 'thermal', tmax: simRes.tmax, tmin: simRes.tmin, fmax: simRes.fmax, heatIn: simRes.heatIn, heatOut: simRes.heatOut, heatFixed: simRes.heatFixed, ne: simRes.M.ne, it: simRes.RT.iterations, converged: simRes.RT.converged, warn: simRes.warn } : { kind: 'static', vmax: simRes.vmax, dmax: simRes.dmax, sfmin: simRes.sfmin, reaction: simRes.R.reaction, ne: simRes.M.ne, it: simRes.R.iterations, converged: simRes.R.converged, warn: simRes.warn }) }),

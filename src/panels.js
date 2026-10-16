@@ -33,8 +33,8 @@ function renderBrowser() {
   const add = (lvl, o) => { t.append(node(lvl, o)); return expanded.has(o.key); };
   if (workspace === 'manufacture') { expanded.add('camroot'); renderCamBrowser(add); return; }
   if (workspace === 'simulation') { for (const k of ['simroot', 'simbc', 'simld', 'simres']) if (!expanded.has('x' + k)) { expanded.add(k); expanded.add('x' + k); } renderSimBrowser(add); return; }
-  if (!add(0, { key: 'root', icon: 'doc', label: doc.name, renameKey: 'doc', onRename: v => { checkpoint(); doc.name = v; $('#docTitle').textContent = v; }, onDbl: () => { renaming = 'doc'; renderBrowser(); },
-    menu: () => [{ label: 'Rename', icon: 'params', action: () => { renaming = 'doc'; renderBrowser(); } }] })) return;
+  if (!add(0, { key: 'root', icon: (typeof DESIGN_TYPES !== 'undefined' && DESIGN_TYPES && DESIGN_TYPES[designType()]?.icon) || 'doc', label: doc.name, sub: typeof DESIGN_TYPES !== 'undefined' && DESIGN_TYPES ? designTypeLabel() + (doc.meta?.version ? ' · v' + doc.meta.version : '') + (doc.meta?.partNumber ? ' · ' + doc.meta.partNumber : '') : '', renameKey: 'doc', onRename: v => { checkpoint(); doc.name = v; $('#docTitle').textContent = v; renderTabs(); }, onDbl: () => { renaming = 'doc'; renderBrowser(); },
+    menu: () => [{ label: 'Rename', icon: 'params', action: () => { renaming = 'doc'; renderBrowser(); } }, { label: 'Save', icon: 'save', action: () => saveCmd() }, { label: 'Save As…', icon: 'save', action: () => saveAsCmd() }, { label: 'Versions…', icon: 'history', action: () => openCurrentVersions() }] })) return;
   if (add(1, { key: 'settings', icon: 'gear', label: 'Document Settings' })) {
     add(2, { icon: 'ruler', label: 'Units: mm, g', onClick: () => toast('Units are millimeters and grams in this version') });
   }
@@ -61,6 +61,7 @@ function renderBrowser() {
         onRename: v => { checkpoint(); c.name = v.trim() || c.name; persist(); }, onDbl: () => { renaming = 'c:' + c.id; renderBrowser(); },
         menu: () => [{ label: 'Rename', icon: 'params', action: () => { renaming = 'c:' + c.id; renderBrowser(); } },
           { label: c.grounded ? 'Unground' : 'Ground', icon: 'component', action: () => toggleGround(c.id) },
+          { label: 'Save Copy As…', icon: 'save', action: () => saveComponentCopy(c.id) },
           '-', { label: 'Dissolve (bodies return to the fixed set)', icon: 'delete', action: () => dissolveComponent(c.id) }] }))
         for (const b of own) bodyNode(3, b);
     }

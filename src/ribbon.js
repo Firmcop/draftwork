@@ -247,6 +247,7 @@ const WORKSPACES = [['Design', null], ['Generative Design', P5], ['Render', P2],
 function runCmd(id) {
   const c = CMD[id]; if (!c) return;
   closeMenus();
+  { const blk = typeof designBlock === 'function' ? designBlock(id) : null; if (blk) { toast(blk); return; } }
   if (!c.run) { toast(`${c.label} is planned for ${c.phase}${c.note ? '. ' + c.note : ''}`); return; }
   if (mode === 'sketch' && !id.startsWith('k.') && !['measure', 'section', 'com', 'params', 'properties', 'bom', 'exportstl', 'make3d', 'select'].includes(id)) finishSketch(true);
   c.run();
@@ -323,11 +324,17 @@ function openWorkspaceMenu() {
 }
 function openFileMenu() {
   openMenu($('#abFile'), [
-    { label: 'New design', icon: 'doc', action: () => loadDoc(blankDoc(), 'New design. Undo brings the previous one back.') },
-    { label: 'Open sample: bearing bracket', icon: 'bodyi', action: () => loadDoc(sampleDoc(), 'Sample bracket opened') },
+    { label: 'New Design', icon: 'doc', action: () => newDesign('hybrid') },
+    { label: 'New Part, Assembly or Hybrid…', icon: 'plus', action: () => openNewDesignDialog() },
+    { label: 'Open…', icon: 'apps', action: () => toggleDataPanel(true) },
+    { label: 'Open sample: bearing bracket', icon: 'bodyi', action: () => openInTab(sampleDoc(), { msg: 'Sample bracket opened' }) },
     '-',
-    { label: 'Open project (.json)…', icon: 'file', action: () => $('#fileInput').click() },
-    { label: 'Save project (.json)', icon: 'save', key: 'Ctrl S', action: () => saveProject() },
+    { label: 'Save', icon: 'save', key: 'Ctrl S', action: () => saveCmd() },
+    { label: 'Save As…', icon: 'save', action: () => saveAsCmd() },
+    { label: 'Versions…', icon: 'history', action: () => openCurrentVersions() },
+    '-',
+    { label: 'Open file (.json)…', icon: 'file', action: () => $('#fileInput').click() },
+    { label: 'Download file (.json)', icon: 'exportstl', action: () => saveProject() },
     { label: 'Import STEP…', icon: 'insertmesh', action: () => startImportSTEP() },
     { label: 'Export STEP / STL (.zip)…', icon: 'exportstl', action: () => openExportDialog() },
     '-',

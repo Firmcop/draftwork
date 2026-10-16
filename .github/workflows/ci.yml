@@ -33,6 +33,7 @@ jobs:
       - run: node tests/e2e-sim.mjs
       - run: node tests/e2e-sim2.mjs
       - run: node tests/e2e-sim3.mjs
+      - run: node tests/e2e-library.mjs
       - run: ENGINE_INLINE=1 node tests/e2e.mjs
       - uses: actions/upload-artifact@v4
         with:

@@ -611,7 +611,7 @@ function finishRegen() {
 const STORE_KEY = 'draftwork.doc.v2';
 let persistTimer = null;
 let persistWarned = false;
-function persist() { clearTimeout(persistTimer); persistTimer = setTimeout(() => { try { localStorage.setItem(STORE_KEY, JSON.stringify(doc)); } catch (e) { if (!persistWarned) { persistWarned = true; toast('This design is too large to keep in the browser. Save the project file to keep your work.'); } } }, 500); }
+function persist() { clearTimeout(persistTimer); persistTimer = setTimeout(() => { if (typeof persistSession === 'function') persistSession(); try { localStorage.setItem(STORE_KEY, JSON.stringify(doc)); } catch (e) { if (!persistWarned) { persistWarned = true; toast('This design is too large to keep in the browser. Save the project file to keep your work.'); } } }, 500); }
 function loadStored() { try { return upgradeDoc(JSON.parse(localStorage.getItem(STORE_KEY) || 'null')); } catch (e) { return null; } }
 
 let toastTimer = null;

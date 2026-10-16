@@ -35,10 +35,14 @@ Done
 - [x] Plastic: rules, boss, snap fit, lip/groove, rest, rib/web
 - [x] Sheet metal: rules, base/edge/contour flanges, unfold/refold, flat pattern + DXF (bend allowance from K-factor)
 - [x] Surface bodies and tools: extrude/revolve/sweep/loft surface, patch, offset, ruled, trim, untrim, extend, delete face, stitch to solid, unstitch, reverse normal, thicken
+- [x] Designs (v0.30): design types (Part standard/sheet metal, Assembly, Hybrid), design tabs, a local design library (projects, folders, data panel, upload), Save with part numbers and version descriptions, Save As (with or without drawings), Save Copy As for components, version history with open and promote
 
 Next
 - [ ] Spline handles (tangent direction and weight); extend for splines
 - [ ] Press Pull on edges (fillet) and fillet faces (change radius); offset faces that meet neighbours at an angle; sweep with guide rails/twist
+- [ ] v0.31 Extents: extrude/revolve/hole extent types (to object, all, two sides), taper, start offset, thin extrude; countersink and tapped holes
+- [ ] v0.32 Shape control: sweep guide rails and orientation; loft rails, centre line and end conditions; full round and variable fillets; chamfer types; offset face; silhouette split
+- [ ] v0.33 Interface: canvas marking menu, preferences (up direction, units, default material), Create Drawing from the browser, job status
 - [ ] Desktop packaging (Tauri)
 
 ## Phase 2 — Drawings, assemblies, animation *(started)*
