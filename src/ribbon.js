@@ -26,6 +26,9 @@ cmd('thicken', 'Thicken', 'thicken', { run: () => newEdgeFeature('thicken') }); 
 // solid › modify
 cmd('presspull', 'Press Pull', 'presspull', { key: 'Q', run: () => newEdgeFeature('presspull') });
 cmd('fillet', 'Fillet', 'fillet', { key: 'F', run: () => newEdgeFeature('fillet') });
+cmd('fullround', 'Full Round Fillet', 'fillet', { run: () => newEdgeFeature('fullround') });
+cmd('offsetface', 'Offset Face', 'presspull', { run: () => newEdgeFeature('offsetface') });
+cmd('silsplit', 'Silhouette Split', 'splitbody', { run: () => { if (!bodiesAtInsert().length) { toast('There is no body yet'); return; } newModify('silsplit', { body: lastBodyId(), dir: 'XY', mode: 'body' }); } });
 cmd('chamfer', 'Chamfer', 'chamfer', { run: () => newEdgeFeature('chamfer') }); cmd('shell', 'Shell', 'shell', { run: () => newEdgeFeature('shell') }); cmd('draft', 'Draft', 'draft', { run: () => newEdgeFeature('draft') }); cmd('scale', 'Scale', 'scale', { run: () => startScale() });
 cmd('combine', 'Combine', 'combine', { run: () => newCombine() });
 cmd('replaceface', 'Replace Face', 'replaceface', { run: () => newEdgeFeature('replaceface') }); cmd('splitface', 'Split Face', 'splitface', { run: () => newEdgeFeature('splitface') }); cmd('splitbody', 'Split Body', 'splitbody', { run: () => startSplitBody() });
@@ -186,7 +189,7 @@ const TABS = {
   ],
   SOLID: [
     { name: 'CREATE', bar: ['sketch', 'extrude', 'revolve', 'sweep', 'loft', 'hole', 'box', 'patrect', 'mirror'], menu: ['sketch', 'form', 'derive', '-', 'extrude', 'revolve', 'sweep', 'loft', 'rib', 'web', 'emboss', '-', 'hole', 'thread', '-', 'box', 'cylinder', 'sphere', 'torus', 'coil', 'pipe', '-', { sub: 'Pattern', icon: 'patrect', items: ['patrect', 'patcirc', 'patpath'] }, 'mirror', '-', 'thicken', 'boundary'] },
-    { name: 'MODIFY', bar: ['presspull', 'fillet', 'chamfer', 'shell', 'draft', 'combine', 'move', 'params'], menu: ['presspull', 'fillet', 'chamfer', 'shell', 'draft', 'scale', 'combine', '-', 'replaceface', 'splitface', 'splitbody', '-', 'move', 'align', 'delete', '-', 'material', 'appearance', '-', 'params'] },
+    { name: 'MODIFY', bar: ['presspull', 'fillet', 'chamfer', 'shell', 'draft', 'combine', 'move', 'params'], menu: ['presspull', 'fillet', 'fullround', 'chamfer', 'shell', 'draft', 'scale', 'combine', '-', 'offsetface', 'replaceface', 'splitface', 'splitbody', 'silsplit', '-', 'move', 'align', 'delete', '-', 'material', 'appearance', '-', 'params'] },
     { name: 'CONFIGURE', bar: ['cfgtable'], menu: ['cfgtable', 'cfgrules'] },
     { name: 'CONSTRUCT', bar: ['offsetplane', 'planeangle', 'axiscyl'], menu: ['offsetplane', 'planeangle', 'midplane', 'planetangent', 'plane3p', '-', 'axiscyl', 'axisedge', 'axis2p', 'axis2planes', '-', 'pointv', 'pointc', 'pointxyz'] },
     { name: 'INSPECT', bar: ['measure', 'section', 'com'], menu: ['measure', 'interference', '-', 'curvature', 'zebra', '-', 'section', 'com', '-', 'properties'] },

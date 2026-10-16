@@ -41,7 +41,8 @@ Next
 - [ ] Spline handles (tangent direction and weight); extend for splines
 - [ ] Press Pull on edges (fillet) and fillet faces (change radius); offset faces that meet neighbours at an angle; sweep with guide rails/twist
 - [x] v0.31 Extents: extrude (distance, two sides, to object, all; start offset, taper, thin walls), revolve (angle, two sides, full; symmetric/flipped), hole (simple, counterbore, countersink; tapped metric coarse, cosmetic or modeled thread; distance, to object, through all)
-- [ ] v0.32 Shape control: sweep guide rails and orientation; loft rails, centre line and end conditions; full round and variable fillets; chamfer types; offset face; silhouette split
+- [x] v0.32 Shape control: chamfer (equal, two distances, distance + angle), variable-radius and full round fillets, Offset Face (neighbouring flat faces extend), Silhouette Split (body or faces), sweep guide rail and end scale, loft along a centre line and to a start/end point
+- [ ] Loft rails and tangent/curvature end conditions; sweep twist
 - [ ] v0.33 Interface: canvas marking menu, preferences (up direction, units, default material), Create Drawing from the browser, job status
 - [ ] Desktop packaging (Tauri)
 

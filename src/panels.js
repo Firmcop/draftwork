@@ -423,7 +423,7 @@ function featureFields(f, idx) {
       out.push(section_('Result', segField('Operation', f, 'op', [['join', 'Join'], ['cut', 'Cut'], ['intersect', 'Intersect']]), chkField('Keep tool bodies', f, 'keep')));
       break;
     }
-    case 'splitbody': case 'scale': case 'align': case 'patpath': case 'boundary':
+    case 'silsplit': case 'splitbody': case 'scale': case 'align': case 'patpath': case 'boundary':
       modifyDialog(f, idx, out);
       break;
     case 'sextrude': case 'srevolve': case 'patch': case 'soffset': case 'sloft': case 'ssweep': case 'ruled': case 'trim': case 'untrim': case 'sextend': case 'stitch': case 'unstitch': case 'reverse': case 'deleteface':
@@ -447,9 +447,9 @@ function featureFields(f, idx) {
     case 'coil': case 'rib': case 'web':
       createDialog2(f, idx, out, placement);
       break;
-    case 'fillet': case 'chamfer': case 'shell': case 'draft': case 'presspull': case 'thicken': case 'replaceface': case 'thread': case 'emboss': case 'splitface': case 'lip': {
+    case 'fullround': case 'offsetface': case 'fillet': case 'chamfer': case 'shell': case 'draft': case 'presspull': case 'thicken': case 'replaceface': case 'thread': case 'emboss': case 'splitface': case 'lip': {
       const n = (f.edges || []).length, what = FACE_PICK.has(f.type) ? 'face' : 'edge';
-      out.push(section_(f.type === 'presspull' || f.type === 'thicken' ? 'Faces' : f.type === 'replaceface' ? 'Face to replace' : f.type === 'thread' ? 'Cylindrical faces' : f.type === 'splitface' ? 'Faces to split' : f.type === 'lip' ? 'Rim face' : f.type === 'emboss' ? 'Target face' : f.type === 'shell' ? 'Faces to remove' : f.type === 'draft' ? 'Faces to taper' : 'Edges',
+      out.push(section_(f.type === 'presspull' || f.type === 'thicken' || f.type === 'offsetface' ? 'Faces' : f.type === 'fullround' ? 'Center face' : f.type === 'replaceface' ? 'Face to replace' : f.type === 'thread' ? 'Cylindrical faces' : f.type === 'splitface' ? 'Faces to split' : f.type === 'lip' ? 'Rim face' : f.type === 'emboss' ? 'Target face' : f.type === 'shell' ? 'Faces to remove' : f.type === 'draft' ? 'Faces to taper' : 'Edges',
         h('p', { class: 'note' }, n ? `${n} ${what}${n > 1 ? 's' : ''} selected. Click on the model to add or remove ${what}s.` : `Click the ${what}s on the model.`),
         h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn', type: 'button', disabled: !n, onclick: () => { checkpoint(); f.edges = []; rerenderDialog(); scheduleRegen(0); drawToolsOverlay(); } }, 'Clear selection'))));
       if (modifyDialog(f, idx, out) || createDialog2(f, idx, out, placement) || plasticDialog(f, idx, out, placement)) break;
@@ -462,7 +462,23 @@ function featureFields(f, idx) {
           h('p', { class: 'note' }, 'Faces stay put where they cross the neutral plane and tilt away from it.')));
         break;
       }
-      out.push(section_('Size', f.type === 'fillet' ? exField('Radius', f, 'radius', 'mm', { min: 0.001 }) : f.type === 'chamfer' ? exField('Distance', f, 'distance', 'mm', { min: 0.001, id: 'dx-chdist' }) : exField('Thickness', f, 'thickness', 'mm', { min: 0.001 })));
+      if (f.type === 'offsetface') { out.push(section_('Offset', exField('Distance', f, 'distance', 'mm', { id: 'dx-ofdist' }), h('p', { class: 'note' }, 'Flat faces move along their normal and the flat faces around them extend or trim to meet them. Positive moves out of the body.'))); break; }
+      if (f.type === 'fullround') { out.push(section_(null, h('p', { class: 'note' }, 'The picked face is replaced by a half-round between the two parallel side faces next to it. The radius is half the distance between them.'))); break; }
+      if (f.type === 'fillet') {
+        out.push(section_('Size', segField('Type', f, 'filletType', [['constant', 'Constant'], ['variable', 'Variable']], { rerender: true, after: () => { if (f.filletType === 'variable') f.radius2 ??= (+f.radius || 2) * 2; } }),
+          exField(f.filletType === 'variable' ? 'Start radius' : 'Radius', f, 'radius', 'mm', { min: 0.001 }),
+          ...(f.filletType === 'variable' ? [exField('End radius', f, 'radius2', 'mm', { min: 0.001 }), h('p', { class: 'note' }, 'The radius changes linearly along each edge.')] : [])));
+        break;
+      }
+      if (f.type === 'chamfer') {
+        const ct = f.chamferType || 'equal';
+        out.push(section_('Size', segField('Type', f, 'chamferType', [['equal', 'Equal distance'], ['two', 'Two distances'], ['angle', 'Distance and angle']], { rerender: true, after: () => { if (f.chamferType === 'two') f.distance2 ??= (+f.distance || 1) * 2; if (f.chamferType === 'angle') f.chamferAngle ??= 30; } }),
+          exField(ct === 'equal' ? 'Distance' : 'Distance 1', f, 'distance', 'mm', { min: 0.001, id: 'dx-chdist' }),
+          ...(ct === 'two' ? [exField('Distance 2', f, 'distance2', 'mm', { min: 0.001 })] : ct === 'angle' ? [exField('Angle', f, 'chamferAngle', '°', { min: 0.1, max: 89.9 })] : []),
+          ...(ct !== 'equal' ? [chkField('Flip (measure the first distance on the other face)', f, 'flipSide')] : [])));
+        break;
+      }
+      out.push(section_('Size', exField('Thickness', f, 'thickness', 'mm', { min: 0.001 })));
       break;
     }
     case 'loft': {
@@ -474,7 +490,11 @@ function featureFields(f, idx) {
         c.addEventListener('change', () => { checkpoint(); const set = new Set(f.sketches || []); c.checked ? set.add(s.id) : set.delete(s.id); f.sketches = sks.map(x => x.id).filter(id => set.has(id)); scheduleRegen(0); });
         list.append(h('label', { class: 'chk', for: cid }, c, s.name, h('span', { class: 'note', style: 'margin:0 0 0 auto' }, profCount(s) + ' profile' + (profCount(s) === 1 ? '' : 's'))));
       }
-      out.push(section_('Profiles', h('p', { class: 'note' }, 'Pick two or more sketches, one closed profile each. They are joined in timeline order.'), list, chkField('Straight (ruled) sides', f, 'ruled')));
+      out.push(section_('Profiles', h('p', { class: 'note' }, 'Pick two or more sketches, one closed profile each (or one sketch and an end point). They are joined in timeline order.'), list, chkField('Straight (ruled) sides', f, 'ruled')));
+      { const pathSks = sks.filter(s => sketchPathCount(s)), pts = doc.features.slice(0, idx).filter(g => g.type === 'point');
+        out.push(section_('Guide', selField('Centre line', f, 'centerline', [['', 'None'], ...pathSks.map(s => [s.id, s.name])], { id: 'ds-centerline' }),
+          selField('Start at point', f, 'startPoint', [['', 'None'], ...pts.map(p => [p.id, p.name])], { id: 'ds-startpt' }), selField('End at point', f, 'endPoint', [['', 'None'], ...pts.map(p => [p.id, p.name])], { id: 'ds-endpt' }),
+          h('p', { class: 'note' }, 'A centre line carries the sections along a path. A start or end point closes the loft to a tip (create the point with Construct › Point).'))); }
       out.push(section_('Result', ...opsSection()));
       break;
     }
@@ -485,6 +505,8 @@ function featureFields(f, idx) {
       const np = sketchPathCount(featById(f.path));
       if (np > 1) kids.push(selField('Which chain', f, 'pathIndex', Array.from({ length: np }, (_, i) => [i, 'Chain ' + (i + 1)]), { numeric: true, id: 'ds-pidx' }));
       out.push(section_('Path', ...kids, h('p', { class: 'note' }, 'The profile is placed at the start of the path, square to it.')));
+      out.push(section_('Orientation and size', selField('Guide rail', f, 'guide', [['', 'None (follow the path)'], ...pathSks.filter(s => s.id !== f.path).map(s => [s.id, s.name])], { id: 'ds-guide' }),
+        exField('End scale', f, 'scaleEnd', '×', { min: 0.01, id: 'dx-scaleEnd' }), h('p', { class: 'note' }, 'A guide rail sets how the profile turns along the path. End scale grows or shrinks the profile evenly to the end of the path (1 = unchanged).')));
       const prof = [segField('Profile', f, 'profileKind', [['circle', 'Circle'], ['sketch', 'From sketch']], { rerender: true })];
       if ((f.profileKind || 'circle') === 'circle') prof.push(exField('Diameter', f, 'diameter', 'mm', { min: 0.001 }), exField('Wall thickness', f, 'wall', 'mm', { min: 0, id: 'dx-wall' }), h('p', { class: 'note' }, 'Wall 0 makes a solid rod; a wall makes a tube.'));
       else { const ps = sks.filter(s => s.id !== f.path && profCount(s) >= 1); prof.push(selField('Profile sketch', f, 'profile', ps.length ? ps.map(s => [s.id, s.name]) : [['', 'No other sketch with a profile']], { id: 'ds-prof' }), h('p', { class: 'note' }, 'Its sketch origin lands on the path start.')); }

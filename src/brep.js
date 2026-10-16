@@ -406,6 +406,8 @@ function edgeFeature(f, out) {
   const refs = f.edges || [];
   const faces = FACE_PICK.has(f.type);
   if (f.type === 'presspull') return pressPull(f, out);
+  if (f.type === 'fullround') return fullRound(f, out);
+  if (f.type === 'offsetface') return offsetFaces(f, out);
   if (!refs.length) throw new Error(f.type === 'shell' ? 'Click the faces to remove on the model' : f.type === 'draft' ? 'Click the faces to taper on the model' : 'Click the edges to round on the model');
   const amount = f.type === 'fillet' ? +f.radius : f.type === 'chamfer' ? +f.distance : f.type === 'draft' ? +f.angle : +f.thickness;
   if (f.type === 'draft') { if (!(Math.abs(amount) > 0 && Math.abs(amount) < 60)) throw new Error('Draft angle must be between 0° and 60°'); }
@@ -429,12 +431,158 @@ function edgeFeature(f, out) {
       edges.forEach(x => x.delete?.());
       if (!hs.size) continue;
       matched += hs.size;
-      const fn = e => hs.has(e.hashCode) ? amount : null;
-      bReplace(out, id, T(f.type === 'fillet' ? b.shape.clone().fillet(fn) : b.shape.clone().chamfer(fn)));
+      if (f.type === 'fillet') {
+        let rad = amount;
+        if (f.filletType === 'variable') { const r2 = +f.radius2; if (!(r2 > 0)) throw new Error('End radius must be greater than 0 mm'); rad = [amount, r2]; }
+        bReplace(out, id, T(b.shape.clone().fillet(e => hs.has(e.hashCode) ? rad : null)));
+      } else if ((f.chamferType || 'equal') === 'equal') bReplace(out, id, T(b.shape.clone().chamfer(e => hs.has(e.hashCode) ? amount : null)));
+      else bReplace(out, id, T(chamferSided(b.shape, hs, f, amount)));
     }
   }
   if (!matched) throw new Error('The picked ' + (faces ? 'faces' : 'edges') + ' no longer exist. Edit this feature and pick them again.');
   return matched;
+}
+
+// chamfer with two distances or a distance and an angle; the first distance is measured on one face next to each edge (flip swaps)
+function chamferSided(shape, hs, f, d1) {
+  const oc = RC.getOC(), builder = new oc.BRepFilletAPI_MakeChamfer(shape.wrapped), faces = shape.faces;
+  const two = f.chamferType === 'two', d2 = +f.distance2, ang = +f.chamferAngle;
+  if (two && !(d2 > 0)) throw new Error('The second distance must be greater than 0 mm');
+  if (!two && !(ang > 0 && ang < 90)) throw new Error('The angle must be between 0° and 90°');
+  let n = 0;
+  try {
+    for (const e of shape.edges) {
+      if (!hs.has(e.hashCode)) continue;
+      const adj = faces.filter(fc => { const es = fc.edges, hit = es.some(x => x.hashCode === e.hashCode); es.forEach(x => x.delete?.()); return hit; });
+      const fc = adj[f.flipSide ? 1 : 0] || adj[0]; if (!fc) continue;
+      if (two) builder.Add(d1, d2, e.wrapped, fc.wrapped); else builder.AddDA(d1, ang * Math.PI / 180, e.wrapped, fc.wrapped);
+      n++;
+    }
+    if (!n) throw new Error('No edge to chamfer');
+    return RC.cast(builder.Shape());
+  } catch (e) { if (e instanceof Error && /edge|angle|distance/i.test(e.message)) throw e; throw new Error('The chamfer could not be built; try smaller distances'); }
+  finally { faces.forEach(x => x.delete?.()); }
+}
+// full round fillet: the picked face is replaced by a round between its two opposite side faces
+function fullRound(f, out) {
+  const refs = f.edges || []; if (!refs.length) throw new Error('Click the face to round over (for example the top of a rib)');
+  let matched = 0;
+  for (const [id, b] of [...out.bodies]) {
+    if (f.body && f.body !== id) continue;
+    const faces = b.shape.faces, hs = matchRefs(faces, refs, faceSig, 'c'), picked = faces.filter(x => hs.has(x.hashCode));
+    try {
+      if (!picked.length) continue;
+      let shape = b.shape.clone();
+      for (const pf of picked) {
+        const cur = shape.faces, mid = cur.find(x => x.isSame ? x.isSame(pf) : x.hashCode === pf.hashCode) || cur.find(x => d3(faceSig(x).c, faceSig(pf).c) < 1e-6);
+        if (!mid) continue;
+        const midEdges = mid.edges, sides = [];
+        for (const e of midEdges) {
+          const other = cur.find(fc => fc !== mid && fc.hashCode !== mid.hashCode && fc.edges.some(x => x.hashCode === e.hashCode));
+          if (other && other.geomType === 'PLANE') sides.push({ e, face: other, sig: faceSig(other), len: RC.measureLength ? RC.measureLength(e) : 1 });
+        }
+        // the opposite pair: antiparallel normals, longest shared edges
+        let best = null;
+        for (let i = 0; i < sides.length; i++) for (let j = i + 1; j < sides.length; j++) {
+          const A = sides[i].sig, B = sides[j].sig, dot = A.n[0] * B.n[0] + A.n[1] * B.n[1] + A.n[2] * B.n[2];
+          if (dot > -1 + 1e-6) continue;
+          const score = sides[i].len + sides[j].len; if (!best || score > best.score) best = { a: sides[i], b: sides[j], score };
+        }
+        if (!best) throw new Error('Full round needs two parallel side faces on either side of the picked face');
+        const A = best.a.sig, B = best.b.sig, w = Math.abs((A.c[0] - B.c[0]) * A.n[0] + (A.c[1] - B.c[1]) * A.n[1] + (A.c[2] - B.c[2]) * A.n[2]);
+        const ha = best.a.e.hashCode, hb = best.b.e.hashCode;
+        let done = null;
+        for (const k of [1, 0.9995, 0.995]) { try { done = shape.fillet(e => e.hashCode === ha || e.hashCode === hb ? w / 2 * k : null); break; } catch (e) { done = null; } }
+        if (!done) throw new Error('The full round could not be built on this face');
+        shape = T(done);
+      }
+      matched += picked.length;
+      bReplace(out, id, T(shape));
+    } finally { faces.forEach(x => x.delete?.()); }
+  }
+  if (!matched) throw new Error('The picked face no longer exists. Edit this feature and pick it again.');
+  return matched;
+}
+// offset faces: a flat face with flat neighbours moves along its normal while the neighbours extend or trim to meet it;
+// other faces offset like Press Pull
+function offsetFaces(f, out) {
+  const refs = f.edges || []; if (!refs.length) throw new Error('Click the faces to offset');
+  const d = +f.distance; if (!(Math.abs(d) > 1e-6)) throw new Error('Distance must not be 0 mm');
+  let matched = 0;
+  for (const [id, b] of [...out.bodies]) {
+    if (f.body && f.body !== id) continue;
+    const list = b.shape.faces, hs = matchRefs(list, refs, faceSig, 'c'), picked = list.filter(x => hs.has(x.hashCode));
+    try {
+      if (!picked.length) continue;
+      let shape = b.shape.clone();
+      for (const face of picked) {
+        const tool = face.geomType === 'PLANE' ? (neighbourPrism(face, list, d) || (() => { const n = face.normalAt(), v = n.multiply(d / Math.hypot(n.x, n.y, n.z)); return RC.basicFaceExtrusion(face, v); })()) : offsetSlab(face, d);
+        const next = d > 0 ? shape.fuse(tool) : shape.cut(tool); shape.delete?.(); shape = next;
+      }
+      matched += picked.length;
+      bReplace(out, id, T(shape.simplify ? shape.simplify() : shape));
+    } finally { list.forEach(x => x.delete?.()); }
+  }
+  if (!matched) throw new Error('The picked faces no longer exist. Edit this feature and pick them again.');
+  return matched;
+}
+// ruled solid between a flat polygonal face and its offset copy whose corners slide along the neighbouring face planes
+function neighbourPrism(face, allFaces, d) {
+  try {
+    if ([...RC.iterTopo(face.wrapped, 'wire')].length !== 1) return null;   // holes in the face: plain offset
+    const nv = face.normalAt(), n = new THREE.Vector3(nv.x, nv.y, nv.z).normalize(); nv.delete?.();
+    const edges = face.edges; if (edges.length < 3) return null;
+    const P = q => new THREE.Vector3(q.x, q.y, q.z);
+    // order corners by chaining edge end points
+    const segs = edges.map(e => { if (e.geomType !== 'LINE') throw 0; return { a: P(e.startPoint), b: P(e.endPoint), h: e.hashCode }; });
+    const chain = [segs.shift()];
+    while (segs.length) { const last = chain[chain.length - 1].b; const i = segs.findIndex(s => s.a.distanceTo(last) < 1e-6 || s.b.distanceTo(last) < 1e-6); if (i < 0) return null; const s = segs.splice(i, 1)[0]; if (s.a.distanceTo(last) >= 1e-6) [s.a, s.b] = [s.b, s.a]; chain.push(s); }
+    // the neighbour plane across each edge
+    const planes = chain.map(s => {
+      const nb = allFaces.find(fc => fc.hashCode !== face.hashCode && fc.edges.some(x => x.hashCode === s.h));
+      if (!nb || nb.geomType !== 'PLANE') throw 0;
+      const q = nb.normalAt(), m = new THREE.Vector3(q.x, q.y, q.z).normalize(); q.delete?.();
+      return { m, k: m.dot(s.a) };
+    });
+    const k0 = n.dot(chain[0].a) + d, top = [];
+    for (let i = 0; i < chain.length; i++) {
+      const A = planes[(i - 1 + chain.length) % chain.length], B = planes[i];
+      // intersect planes n·x = k0, A, B (3x3 by Cramer)
+      const M = new THREE.Matrix3().set(n.x, n.y, n.z, A.m.x, A.m.y, A.m.z, B.m.x, B.m.y, B.m.z), det = M.determinant();
+      if (Math.abs(det) < 1e-9) return null;
+      const inv = M.clone().invert(), v = new THREE.Vector3(k0, A.k, B.k).applyMatrix3(inv);
+      top.push(v);
+    }
+    const bot = chain.map(s => s.a), arr = v => [v.x, v.y, v.z];
+    const w1 = RC.makePolygon(bot.map(arr)).outerWire(), w2 = RC.makePolygon(top.map(arr)).outerWire();
+    return T(RC.loft([w1, w2], { ruled: true }));
+  } catch (e) { if (globalThis.process?.env?.BREP_STACK) console.log('neighbourPrism', e?.stack || e); return null; }
+}
+// silhouette of curved faces seen along direction dir: where the face normal is perpendicular to dir.
+// Returns plane offsets (along dir) per face for silhouettes that lie in a plane perpendicular to dir.
+function silhouettePlanes(shape, dir) {
+  const out = [], skipped = [];
+  for (const fc of shape.faces) {
+    if (fc.geomType === 'PLANE') { fc.delete?.(); continue; }
+    const N = 28, g = [], pts = [];
+    for (let i = 0; i <= N; i++) for (let j = 0; j <= N; j++) {
+      try { const p = fc.pointOnSurface(i / N, j / N), q = fc.normalAt(p), l = Math.hypot(q.x, q.y, q.z) || 1; g.push((q.x * dir.x + q.y * dir.y + q.z * dir.z) / l); pts.push(new THREE.Vector3(p.x, p.y, p.z)); p.delete?.(); q.delete?.(); }
+      catch (e) { g.push(NaN); pts.push(null); }
+    }
+    const at = (i, j) => i * (N + 1) + j, zs = [];
+    for (let i = 0; i <= N; i++) for (let j = 0; j <= N; j++) for (const [di, dj] of [[1, 0], [0, 1]]) {
+      if (i + di > N || j + dj > N) continue;
+      const a = at(i, j), b = at(i + di, j + dj), ga = g[a], gb = g[b];
+      if (!(Number.isFinite(ga) && Number.isFinite(gb)) || ga * gb > 0 || ga === gb) continue;
+      const t = ga / (ga - gb); zs.push(pts[a].clone().lerp(pts[b], t).dot(dir));
+    }
+    if (zs.length >= 4) {
+      const mean = zs.reduce((x, y) => x + y, 0) / zs.length, dev = Math.max(...zs.map(z => Math.abs(z - mean)));
+      const [lo, hi] = fc.boundingBox.bounds, size = Math.hypot(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
+      if (dev < 1e-3 * Math.max(1, size)) out.push({ face: fc, z: Math.round(mean * 1e6) / 1e6 }); else { skipped.push(fc); }
+    } else fc.delete?.();
+  }
+  return { planes: out, skipped };
 }
 
 // Smallest radius of curvature on the face, separately for directions that curve toward the outward
@@ -497,7 +645,7 @@ function pressPull(f, out) {
   return matched;
 }
 // ---- solid modify tools: split body, scale, thicken, replace face, align, pattern on path, boundary fill ----
-const MODIFY_TYPES = new Set(['splitface', 'splitbody', 'scale', 'thicken', 'replaceface', 'align', 'patpath', 'boundary']);
+const MODIFY_TYPES = new Set(['silsplit', 'splitface', 'splitbody', 'scale', 'thicken', 'replaceface', 'align', 'patpath', 'boundary']);
 // place a shape by a rigid THREE.Matrix4 (rotation about the origin, then translation)
 function placeShape(shape, M) {
   const p = new THREE.Vector3(), q = new THREE.Quaternion(), sc = new THREE.Vector3(); M.decompose(p, q, sc);
@@ -521,6 +669,37 @@ function sigFrame(sig) {
   return new THREE.Matrix4().makeBasis(x, z.clone().cross(x), z).setPosition(o);
 }
 function facesOf(shape, refs) { const list = shape.faces, hs = matchRefs(list, refs, faceSig, 'c'); const picked = list.filter(x => hs.has(x.hashCode)); return { list, picked }; }
+// split the faces matching sigs with the plane of frame M; other faces crossed by the plane are merged back. null if nothing split.
+function splitFacesByPlane(shape, sigs, M) {
+  const list = shape.faces, hs = matchRefs(list, sigs, faceSig, 'c'), picked = list.filter(x => hs.has(x.hashCode));
+  try {
+    if (!picked.length) return null;
+    const oc = RC.getOC(), e = M.elements, n = [e[8], e[9], e[10]], o = [e[12], e[13], e[14]];
+    const nl = Math.hypot(...n); n.forEach((v, i) => n[i] = v / nl);
+    const tool = new oc.BRepBuilderAPI_MakeFace(RC.makePln(o, n)).Face();
+    const args = new oc.NCollection_List_TopoDS_Shape(), tools = new oc.NCollection_List_TopoDS_Shape();
+    for (const sh of RC.iterTopo(shape.wrapped, 'shell')) args.Append(sh);
+    tools.Append(tool);
+    const sp = new oc.BRepAlgoAPI_Splitter(); sp.SetArguments(args); sp.SetTools(tools); sp.Build();
+    if (sp.HasErrors()) return null;
+    let solid = RC.makeSolid([...RC.iterTopo(sp.Shape(), 'shell')].map(s => RC.cast(s)));
+    const dist = p => (p[0] - o[0]) * n[0] + (p[1] - o[1]) * n[1] + (p[2] - o[2]) * n[2];
+    const u = new oc.ShapeUpgrade_UnifySameDomain(solid.wrapped, true, true, false);
+    let freed = 0;
+    for (const ed of solid.edges) {
+      const P = q => [q.x, q.y, q.z], mid = P(ed.pointAt(0.5));
+      if (Math.abs(dist(mid)) < 1e-6 && Math.abs(dist(P(ed.startPoint))) < 1e-6) {
+        const v = RC.makeVertex(mid);
+        if (!picked.some(fc => RC.measureDistanceBetween(fc, v) < 1e-6)) { freed++; continue; }
+      }
+      u.KeepShape(ed.wrapped);
+    }
+    if (freed) { u.Build(); solid = RC.cast(u.Shape()); }
+    if (solid.faces.length <= list.length) return null;
+    return solid;
+  } finally { list.forEach(x => x.delete?.()); }
+}
+
 function modifyStep(f, out) {
   const body = () => {
     if (!f.body && (f.edges || []).length) for (const b of out.bodies.values()) { const l = b.shape.faces, hs = matchRefs(l, f.edges, faceSig, 'c'); l.forEach(x => x.delete?.()); if (hs.size) return b; }   // the body the picked faces are on
@@ -557,6 +736,33 @@ function modifyStep(f, out) {
       if (solid.faces.length <= list.length) throw new Error('The plane does not cross the picked faces');
       bReplace(out, b.id, T(solid));
     } finally { list.forEach(x => x.delete?.()); }
+    return;
+  }
+  if (f.type === 'silsplit') {
+    const b = body(), M = planeFrameOf(f.dir || 'XY', out), e = M.elements, dir = new THREE.Vector3(e[8], e[9], e[10]).normalize();
+    const { planes, skipped } = silhouettePlanes(b.shape, dir);
+    skipped.forEach(x => x.delete?.());
+    if (!planes.length) throw new Error('No curved face has a silhouette in this direction (or it is not flat)');
+    const zs = [...new Set(planes.map(p => p.z))];
+    const frameAt = z => { const o = dir.clone().multiplyScalar(z), m = M.clone(); m.setPosition(o.x, o.y, o.z); return m; };
+    if ((f.mode || 'body') === 'body') {
+      planes.forEach(p => p.face.delete?.());
+      if (zs.length > 1) throw new Error('The silhouette lies at several heights; use Split faces instead');
+      const box = shapesBox([b.shape]), up = halfSpace(frameAt(zs[0]), box.size), A = T(b.shape.clone().intersect(up)), B = T(b.shape.clone().cut(up));
+      let va = 0, vb = 0; try { va = RC.measureVolume(A); vb = RC.measureVolume(B); } catch (x) { }
+      if (va < 1e-9 || vb < 1e-9) throw new Error('The silhouette is already on the edges of the body');
+      bReplace(out, b.id, A); bNew(out, b.id + ':sil', B, f.id);
+      return;
+    }
+    let shape = b.shape, changed = 0;
+    for (const z of zs) {
+      const faceSigs = planes.filter(p => p.z === z).map(p => faceSig(p.face));
+      const r = splitFacesByPlane(shape, faceSigs, frameAt(z));
+      if (r) { shape = r; changed++; }
+    }
+    planes.forEach(p => p.face.delete?.());
+    if (!changed) throw new Error('The silhouette is already on the edges of the faces');
+    bReplace(out, b.id, T(shape));
     return;
   }
   if (f.type === 'splitbody') {
@@ -845,8 +1051,8 @@ function regenerateBrep(features, upto = null, cache = null) {
   }
   return out;
 }
-const EDGE_TYPES = new Set(['fillet', 'chamfer', 'shell', 'draft', 'presspull']);
-const FACE_PICK = new Set(['shell', 'draft', 'presspull', 'thicken', 'replaceface', 'thread', 'emboss', 'splitface', 'lip']);
+const EDGE_TYPES = new Set(['fillet', 'chamfer', 'shell', 'draft', 'presspull', 'fullround', 'offsetface']);
+const FACE_PICK = new Set(['shell', 'draft', 'presspull', 'thicken', 'replaceface', 'thread', 'emboss', 'splitface', 'lip', 'fullround', 'offsetface']);
 // Imported STEP shapes, parsed once per file (async) and reused by every rebuild: fileId -> Shape3D[]
 const importShapes = new Map();
 function brepStep(f, out) {
@@ -866,13 +1072,28 @@ function brepStep(f, out) {
       out.tools.set(f.id, { shape: tool, ...res, op });
     } else if (f.type === 'loft') {
       const ids = (f.sketches || []).filter(id => out.sketches.has(id));
-      if (ids.length < 2) throw new Error('Choose at least two sketches to loft between');
+      if (ids.length < 2 && !(ids.length === 1 && (f.endPoint || f.startPoint))) throw new Error('Choose at least two sketches to loft between (or one sketch and an end point)');
       const parts = ids.map(id => {
         const sk = out.sketches.get(id), pi = placementInfo(sk.feature, out);
         const s = singleAreaDrawing(sk.feature, null, 'loft').sketchOnPlane(brepPlane(pi.base, pi.offset, pi.flip).plane);
         return asSketches(s)[0];
       });
-      const tool = T(parts[0].loftWith(parts.slice(1), { ruled: !!f.ruled }));
+      let tool;
+      if (f.centerline) {   // sections swept along a centre line
+        const cs = out.sketches.get(f.centerline); if (!cs) throw new Error('Choose the centre line sketch');
+        const cg = cs.feature.geo, csol = cg?.curves?.length ? solveSketch(cg) : null; if (!csol?.ok) throw new Error('The centre line sketch has no usable lines');
+        const cp = geoPaths(cg, csol).paths; if (!cp?.length) throw new Error('The centre line sketch has no chain of lines or arcs');
+        const cpi = placementInfo(cs.feature, out), spine = segsPen(cp[0].segs, cp[0].closed).sketchOnPlane(brepPlane(cpi.base, cpi.offset, cpi.flip).plane).wire;
+        const oc = RC.getOC(), mk = new oc.BRepOffsetAPI_MakePipeShell(spine.wrapped);
+        mk.SetMode(false);
+        for (const p of parts) mk.Add(p.wire.wrapped, false, false);
+        try { mk.Build(); mk.MakeSolid(); tool = T(RC.cast(mk.Shape())); } catch (e) { throw new Error('The loft could not follow the centre line; check that the sections sit on it in order'); }
+      } else {
+        const cfg = { ruled: !!f.ruled };
+        const endPt = f.endPoint && out.points?.get(f.endPoint)?.p, startPt = f.startPoint && out.points?.get(f.startPoint)?.p;
+        if (endPt) cfg.endPoint = endPt; if (startPt) cfg.startPoint = startPt;
+        tool = T(parts.length > 1 ? parts[0].loftWith(parts.slice(1), cfg) : parts[0].loftWith([], cfg));
+      }
       const res = bApply(out, f, tool, f.op || 'new', f.target);
       out.tools.set(f.id, { shape: tool, ...res, op: f.op || 'new' });
     } else if (f.type === 'sweep') {
@@ -944,7 +1165,7 @@ function brepStep(f, out) {
     }
     out.status.set(f.id, { state: 'ok' });
   } catch (e) {
-    out.status.set(f.id, { state: 'error', msg: occMsg(e) });
+    if (globalThis.process?.env?.BREP_STACK) console.log(e.stack); out.status.set(f.id, { state: 'error', msg: occMsg(e) });
   }
 }
 // Frees OCC shapes that no cached step or current result still uses.
@@ -1067,7 +1288,22 @@ function sweepTool(f, out) {
     else { const r0 = legacy.regions[0]; outer = profileDrawing(use.profiles[r0.index]); holes = r0.holes.map(hp => profileDrawing(use.profiles[legacy.polys.indexOf(hp)])); }
   }
   const cfg = { forceProfileSpineOthogonality: true, frenet: true };
-  const sweepOne = d => RC.genericSweep(d.sketchOnPlane(frame(), sp).wire, spine.wire, cfg);
+  if (f.guide) {   // guide rail: the profile turns to follow it
+    const gs = out.sketches.get(f.guide); if (!gs) throw new Error('Choose the guide rail sketch');
+    const gg = gs.feature.geo; if (!gg?.curves?.length) throw new Error('The guide rail sketch has no lines');
+    const gsol = solveSketch(gg); if (!gsol.ok) throw new Error('The guide rail sketch constraints conflict');
+    const gp = geoPaths(gg, gsol).paths; if (!gp?.length) throw new Error('The guide rail sketch has no chain of lines or arcs');
+    const gpi = placementInfo(gs.feature, out);
+    cfg.auxiliarySpine = segsPen(gp[0].segs, gp[0].closed).sketchOnPlane(brepPlane(gpi.base, gpi.offset, gpi.flip).plane).wire;
+    cfg.frenet = false;
+  }
+  const scaleEnd = f.scaleEnd === '' || f.scaleEnd == null ? 1 : +f.scaleEnd;
+  if (!(scaleEnd > 0)) throw new Error('End scale must be greater than 0');
+  if (Math.abs(scaleEnd - 1) > 1e-9) {
+    const oc = RC.getOC(), L = RC.measureLength(spine.wire), law = new oc.Law_Linear();
+    law.Set(0, 1, L, scaleEnd); cfg.law = law.Trim(0, L, 1e-6);
+  }
+  const sweepOne = d => { try { return RC.genericSweep(d.sketchOnPlane(frame(), sp).wire, spine.wire, cfg); } catch (e) { throw new Error(f.guide ? 'The sweep could not follow the guide rail' : 'The sweep could not be built along this path'); } };
   let solid = T(sweepOne(outer));
   for (const hd of holes) solid = T(solid.cut(T(sweepOne(hd))));
   return solid;

@@ -35,6 +35,12 @@ function modifyDialog(f, idx, out) {
   const bodies = [['', 'Last body'], ...bodiesBefore(f.id)];
   const planesWithPick = cur => { const o = planeOptions(idx, cur); return o; };
   switch (f.type) {
+    case 'silsplit':
+      out.push(section_('Silhouette', selField('Body', f, 'body', bodies), selField('View direction (normal of)', f, 'dir', planesWithPick(f.dir), { id: 'ds-dir' }),
+        h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn', type: 'button', onclick: () => startPick({ prompt: 'Select the plane or flat face to look along', planes: true, faces: true, then: c => { checkpoint(); f.dir = pickToPlaneRef(c); rerenderDialog(); scheduleRegen(0); } }) }, 'Pick plane or face')),
+        segField('Result', f, 'mode', [['body', 'Split body'], ['faces', 'Split faces']], { id: 'sg-mode' }),
+        h('p', { class: 'note' }, 'Splits along the outline of the curved faces seen along the normal of the chosen plane — the parting line for a two-part mould. Split body needs the outline to lie in one plane.')));
+      return true;
     case 'splitbody':
       out.push(section_('Split', selField('Body', f, 'body', bodies), selField('Splitting tool', f, 'tool', planesWithPick(f.tool)),
         h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn', type: 'button', onclick: () => startPick({ prompt: 'Select the plane or flat face to split with', planes: true, faces: true, then: c => { checkpoint(); f.tool = pickToPlaneRef(c); rerenderDialog(); scheduleRegen(0); } }) }, 'Pick plane or face')),
