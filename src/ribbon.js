@@ -152,6 +152,24 @@ const TABS = {
     { name: 'SOLVE', bar: ['sim.solve'], menu: ['sim.solve'] },
     { name: 'RESULTS', bar: ['sim.results', 'sim.report'], menu: ['sim.results', 'sim.report'] },
   ],
+  'THERMAL STRESS': [
+    { name: 'STUDY', bar: ['sim.study', 'sim.studies'], menu: ['sim.study', 'sim.studies'] },
+    { name: 'MATERIALS', bar: ['sim.mats'], menu: ['sim.mats'] },
+    { name: 'CONSTRAINTS', bar: ['sim.fixed', 'sim.temp'], menu: ['sim.fixed', 'sim.temp'] },
+    { name: 'LOADS', bar: ['sim.force', 'sim.pressure', 'sim.gravity', 'sim.heat', 'sim.conv'], menu: ['sim.force', 'sim.pressure', 'sim.gravity', 'sim.heat', 'sim.conv'] },
+    { name: 'SETTINGS', bar: ['sim.mesh'], menu: ['sim.mesh'] },
+    { name: 'SOLVE', bar: ['sim.solve'], menu: ['sim.solve'] },
+    { name: 'RESULTS', bar: ['sim.results', 'sim.report'], menu: ['sim.results', 'sim.report'] },
+  ],
+  'LINEAR BUCKLING': [
+    { name: 'STUDY', bar: ['sim.study', 'sim.studies'], menu: ['sim.study', 'sim.studies'] },
+    { name: 'MATERIALS', bar: ['sim.mats'], menu: ['sim.mats'] },
+    { name: 'CONSTRAINTS', bar: ['sim.fixed'], menu: ['sim.fixed'] },
+    { name: 'LOADS', bar: ['sim.force', 'sim.pressure', 'sim.gravity'], menu: ['sim.force', 'sim.pressure', 'sim.gravity'] },
+    { name: 'SETTINGS', bar: ['sim.mesh'], menu: ['sim.mesh'] },
+    { name: 'SOLVE', bar: ['sim.solve'], menu: ['sim.solve'] },
+    { name: 'RESULTS', bar: ['sim.results', 'sim.animate', 'sim.report'], menu: ['sim.results', 'sim.animate', 'sim.report'] },
+  ],
   ADDITIVE: [
     { name: 'SETUP', bar: ['am.setup'], menu: ['am.setup'] },
     { name: 'NEST', bar: ['nest'], menu: ['nest'] },
@@ -237,7 +255,7 @@ function tip(c) { return c.label + (c.key ? ` (${c.key})` : '') + (c.phase ? ` Â
 
 function renderRibbon() {
   const tabs = $('#rtabs'); tabs.replaceChildren();
-  const names = workspace === 'drawing' ? ['DRAWING'] : workspace === 'manufacture' ? ['MILLING', 'ADDITIVE'] : workspace === 'simulation' ? [simTabName()] : Object.keys(TABS).filter(t => !['SKETCH', 'DRAWING', 'MILLING', 'ADDITIVE', 'STATIC STRESS', 'MODAL FREQUENCIES', 'THERMAL'].includes(t));
+  const names = workspace === 'drawing' ? ['DRAWING'] : workspace === 'manufacture' ? ['MILLING', 'ADDITIVE'] : workspace === 'simulation' ? [simTabName()] : Object.keys(TABS).filter(t => !['SKETCH', 'DRAWING', 'MILLING', 'ADDITIVE', 'STATIC STRESS', 'MODAL FREQUENCIES', 'THERMAL', 'THERMAL STRESS', 'LINEAR BUCKLING'].includes(t));
   if (mode === 'sketch' && workspace !== 'drawing') names.push('SKETCH');
   if (mode !== 'sketch' && activeTab === 'SKETCH') activeTab = 'SOLID';
   if (!names.includes(activeTab)) activeTab = names[0];

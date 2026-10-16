@@ -134,8 +134,19 @@ function applyK(M, Ks, x, y) {
   }
 }
 // fixed: Uint8Array(nn*3) of constrained dofs; f: Float64Array(nn*3) nodal forces
+// o.dT: Float64Array(ne) temperature change per element (thermal strain α·ΔT with mats[k].alpha in 1/K)
 export async function solveStatic(M, fixed, f, o = {}) {
   const n = M.nn * 3, hs = M.grid.hs;
+  const Bc = centreStrainB(hs), Ds = M.mats.map(m => Dmat(m.nu).map(row => row.map(v => v * m.E))), Vc = hs[0] * hs[1] * hs[2];
+  const eth = new Float64Array(M.ne);   // isotropic thermal strain per element
+  if (o.dT) {
+    f = Float64Array.from(f);
+    for (let e = 0; e < M.ne; e++) {
+      const a = (M.mats[M.em[e]].alpha || 0) * o.dT[e]; eth[e] = a; if (!a) continue;
+      const D = Ds[M.em[e]], st = [0, 1, 2, 3, 4, 5].map(r => (D[r][0] + D[r][1] + D[r][2]) * a * Vc);   // V · D ε_th
+      for (let c = 0; c < 24; c++) { let v = 0; for (let r = 0; r < 6; r++) v += Bc[r][c] * st[r]; f[M.en[e * 8 + (c / 3 | 0)] * 3 + (c % 3)] += v; }
+    }
+  }
   const Ks = M.mats.map(m => { const K = hexStiffness(m.nu, hs), s = m.E, out = new Float64Array(576); for (let i = 0; i < 576; i++) out[i] = K[i] * s; return out; });
   const free = new Uint8Array(n); for (let q = 0; q < M.nn; q++) if (M.nodeActive[q]) for (let d = 0; d < 3; d++) free[3 * q + d] = fixed[3 * q + d] ? 0 : 1;
   const x = new Float64Array(n), b = new Float64Array(n); for (let i = 0; i < n; i++) b[i] = free[i] ? f[i] : 0;
@@ -146,10 +157,9 @@ export async function solveStatic(M, fixed, f, o = {}) {
   const cg = await pcg(n, (v, y) => applyK(M, Ks, v, y), prec, free, b, x, { tol, maxIter: maxIt, every: o.multigrid === false ? 25 : 1, onProgress: o.onProgress });
   const it = cg.it, res = cg.res;
   // stresses at element centres
-  const Bc = centreStrainB(hs), vm = new Float64Array(M.ne), sig = new Float64Array(M.ne * 6);
-  const Ds = M.mats.map(m => Dmat(m.nu).map(row => row.map(v => v * m.E)));
+  const vm = new Float64Array(M.ne), sig = new Float64Array(M.ne * 6);
   for (let e = 0; e < M.ne; e++) {
-    const eps = new Array(6).fill(0);
+    const eps = [-eth[e], -eth[e], -eth[e], 0, 0, 0];
     for (let a = 0; a < 8; a++) { const q = M.en[e * 8 + a] * 3; for (let d = 0; d < 3; d++) { const u = x[q + d]; if (!u) continue; for (let s = 0; s < 6; s++) eps[s] += Bc[s][3 * a + d] * u; } }
     const D = Ds[M.em[e]], sg = D.map(row => row.reduce((s, v, k) => s + v * eps[k], 0));
     sig.set(sg, e * 6);
@@ -163,7 +173,7 @@ export async function solveStatic(M, fixed, f, o = {}) {
     for (let k = 0; k < 9; k++) { let s = 0; for (let c = 0; c < 24; c++) s -= X[k][c] * ue[c]; ue[24 + k] = s; }
     for (let a = 0; a < 8; a++) {
       const B = CB[a], eps = [0, 0, 0, 0, 0, 0];
-      for (let s = 0; s < 6; s++) { let v = 0; const row = B[s]; for (let c = 0; c < 33; c++) if (row[c]) v += row[c] * ue[c]; eps[s] = v; }
+      for (let s = 0; s < 6; s++) { let v = 0; const row = B[s]; for (let c = 0; c < 33; c++) if (row[c]) v += row[c] * ue[c]; eps[s] = v - (s < 3 ? eth[e] : 0); }
       const q = M.en[e * 8 + a]; cN[q]++;
       for (let s = 0; s < 6; s++) { let v = 0; for (let k = 0; k < 6; k++) v += D[s][k] * eps[k]; sN[q * 6 + s] += v; }
     }
@@ -516,4 +526,84 @@ export function buildMG(M, Ks, free, o = {}) {
   const prec = (r, z) => vcycle(0, r, z);
   prec.levels = levels.map(L => ({ ne: L.ne, dofs: L.n, active: activeCount(L) }));
   return prec;
+}
+
+// ---- linear buckling: K φ = λ (−K_G(σ)) φ, σ from a static solve; λ = critical load factor ----
+// gradient-product integrals I[i][j][a*8+b] = ∫ ∂N_a/∂x_i ∂N_b/∂x_j dV over one cell
+const gpCache = new Map();
+function gradProducts(hs) {
+  const ck = hs.join(','); if (gpCache.has(ck)) return gpCache.get(ck);
+  const I = [0, 1, 2].map(() => [0, 1, 2].map(() => new Float64Array(64))), detJ = hs[0] * hs[1] * hs[2] / 8;
+  for (const a of GP) for (const b of GP) for (const c of GP) {
+    const xi = [a, b, c], G = NODES.map(N => [0, 1, 2].map(d => (2 / hs[d]) * (N[d] / 8) * (1 + N[(d + 1) % 3] * xi[(d + 1) % 3]) * (1 + N[(d + 2) % 3] * xi[(d + 2) % 3])));
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) for (let p = 0; p < 8; p++) for (let q = 0; q < 8; q++) I[i][j][p * 8 + q] += G[p][i] * G[q][j] * detJ;
+  }
+  gpCache.set(ck, I); return I;
+}
+// geometric stiffness apply: y += K_G x with element centre stresses sig (ne*6: xx yy zz xy yz zx)
+function geomOps(M, sig) {
+  const I = gradProducts(M.grid.hs), H = new Float64Array(M.ne * 64);
+  for (let e = 0; e < M.ne; e++) {
+    const s = sig.subarray(e * 6, e * 6 + 6), S = [[s[0], s[3], s[5]], [s[3], s[1], s[4]], [s[5], s[4], s[2]]], o = e * 64;
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) { const v = S[i][j]; if (!v) continue; const Ii = I[i][j]; for (let k = 0; k < 64; k++) H[o + k] += v * Ii[k]; }
+  }
+  return (x, y) => {
+    y.fill(0);
+    for (let e = 0; e < M.ne; e++) {
+      const o = e * 64, b = e * 8;
+      for (let p = 0; p < 8; p++) {
+        const qa = M.en[b + p] * 3; let y0 = 0, y1 = 0, y2 = 0;
+        for (let q = 0; q < 8; q++) { const h = H[o + p * 8 + q]; if (!h) continue; const qb = M.en[b + q] * 3; y0 += h * x[qb]; y1 += h * x[qb + 1]; y2 += h * x[qb + 2]; }
+        y[qa] += y0; y[qa + 1] += y1; y[qa + 2] += y2;
+      }
+    }
+  };
+}
+// returns { factors: [λ ascending, positive only], modes: [Float64Array(nn*3) unit max], iterations }
+export async function solveBuckling(M, fixed, sig, o = {}) {
+  const n = M.nn * 3, hs = M.grid.hs, nm = Math.max(1, o.modes || 4), qv = nm + Math.max(4, nm);
+  const Ks = M.mats.map(m => { const K = hexStiffness(m.nu, hs), out = new Float64Array(576); for (let i = 0; i < 576; i++) out[i] = K[i] * m.E; return out; });
+  const free = new Uint8Array(n); for (let q = 0; q < M.nn; q++) if (M.nodeActive[q]) for (let d = 0; d < 3; d++) free[3 * q + d] = fixed[3 * q + d] ? 0 : 1;
+  const KG = geomOps(M, sig), G = (x, y) => { KG(x, y); for (let i = 0; i < n; i++) y[i] = free[i] ? -y[i] : 0; };
+  const applyKf = (x, y) => { applyK(M, Ks, x, y); for (let i = 0; i < n; i++) if (!free[i]) y[i] = 0; };
+  const mg = buildMG(M, Ks, free);
+  const dot = (a, b) => { let s = 0; for (let i = 0; i < n; i++) s += a[i] * b[i]; return s; };
+  let seed = 4242; const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648 - 0.5;
+  let X = []; for (let j = 0; j < qv; j++) { const v = new Float64Array(n); for (let i = 0; i < n; i++) if (free[i]) v[i] = rnd(); X.push(v); }
+  let mu = [], prev = null, iter = 0;
+  const maxIter = o.maxIter || 40, tol = o.tol || 1e-5;
+  for (; iter < maxIter; iter++) {
+    const GX = X.map(x => { const y = new Float64Array(n); G(x, y); return y; });
+    const Y = [];
+    for (let j = 0; j < qv; j++) {
+      const y = new Float64Array(n);
+      const r = await pcg(n, applyKf, mg, free, GX[j], y, { tol: 1e-8, maxIter: 2000, onProgress: o.onProgress ? (it, res) => o.onProgress({ iter, vec: j, of: qv }) : null, every: 5 });
+      if (r.stopped) return null;
+      Y.push(y);
+    }
+    const GY = Y.map(y => { const z = new Float64Array(n); G(y, z); return z; });
+    const k = Y.length, Kr = Array.from({ length: k }, () => new Array(k)), Gr = Array.from({ length: k }, () => new Array(k));
+    for (let a = 0; a < k; a++) for (let b = a; b < k; b++) { Kr[a][b] = Kr[b][a] = (dot(Y[a], GX[b]) + dot(Y[b], GX[a])) / 2; Gr[a][b] = Gr[b][a] = (dot(Y[a], GY[b]) + dot(Y[b], GY[a])) / 2; }
+    // K-orthonormal basis of span(Y): T = U θ^-1/2
+    const EK = jacobiEigen(Kr), top = Math.max(...EK.val), keep = EK.val.map((v, i) => i).filter(i => EK.val[i] > 1e-12 * top);
+    const T = Array.from({ length: k }, (_, r) => keep.map(i => EK.vec[i][r] / Math.sqrt(EK.val[i])));
+    const m = keep.length, C = Array.from({ length: m }, () => new Array(m).fill(0));
+    for (let a = 0; a < m; a++) for (let b = 0; b < m; b++) { let s = 0; for (let p = 0; p < k; p++) for (let q = 0; q < k; q++) s += T[p][a] * Gr[p][q] * T[q][b]; C[a][b] = s; }
+    for (let a = 0; a < m; a++) for (let b = 0; b < a; b++) C[a][b] = C[b][a] = (C[a][b] + C[b][a]) / 2;
+    const EC = jacobiEigen(C), order = EC.val.map((v, i) => i).sort((a, b) => EC.val[b] - EC.val[a]);   // largest μ = 1/λ first
+    mu = order.map(i => EC.val[i]);
+    X = order.map(i => { const z = T.map(row => row.reduce((s, t, c) => s + t * EC.vec[i][c], 0)), v = new Float64Array(n); for (let p = 0; p < k; p++) { const c = z[p]; if (c) for (let t = 0; t < n; t++) v[t] += c * Y[p][t]; } return v; });
+    while (X.length < qv) { const v = new Float64Array(n); for (let i = 0; i < n; i++) if (free[i]) v[i] = rnd(); X.push(v); }
+    const lam = mu.slice(0, nm);
+    if (prev && lam.every((l, i) => Math.abs(l - prev[i]) <= tol * Math.abs(lam[0]))) { iter++; break; }
+    prev = lam;
+  }
+  const factors = [], modes = [];
+  for (let i = 0; i < nm && i < mu.length; i++) {
+    if (!(mu[i] > 1e-12 * Math.abs(mu[0] || 1))) break;
+    factors.push(1 / mu[i]);
+    const v = X[i]; let mx = 0, sg = 1; for (let q = 0; q < M.nn; q++) { const a = Math.hypot(v[3 * q], v[3 * q + 1], v[3 * q + 2]); if (a > mx) { mx = a; sg = Math.sign(v[3 * q] + v[3 * q + 1] + v[3 * q + 2]) || 1; } }
+    modes.push(v.map(t => t * sg / (mx || 1)));
+  }
+  return { factors, modes, iterations: iter, converged: iter < maxIter };
 }

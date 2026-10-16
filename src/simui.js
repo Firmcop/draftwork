@@ -8,8 +8,13 @@ const SIM_MATERIALS = {   // E (MPa), Poisson ratio, yield strength (MPa)
 };
 // thermal conductivity W/(m·K)
 const SIM_THERMAL = { 'Aluminum 6061': 167, 'Steel 1018': 51.9, 'Stainless steel 304': 16.2, 'Brass C360': 115, 'Copper C110': 388, 'Titanium Ti-6Al-4V': 6.7, 'ABS plastic': 0.17, 'PLA plastic': 0.13, 'Nylon PA12': 0.25, 'Oak wood': 0.17 };
-const SIM_KINDS = { static: ['Static Stress', 'STATIC STRESS', 'analysis'], modal: ['Modal Frequencies', 'MODAL FREQUENCIES', 'modes'], thermal: ['Thermal', 'THERMAL', 'thermo'] };
-const SIM_TABS = ['STATIC STRESS', 'MODAL FREQUENCIES', 'THERMAL'];
+// thermal expansion 1/K
+const SIM_ALPHA = { 'Aluminum 6061': 23.6e-6, 'Steel 1018': 12.0e-6, 'Stainless steel 304': 17.3e-6, 'Brass C360': 20.5e-6, 'Copper C110': 17.0e-6, 'Titanium Ti-6Al-4V': 8.6e-6, 'ABS plastic': 90e-6, 'PLA plastic': 68e-6, 'Nylon PA12': 110e-6, 'Oak wood': 5e-6 };
+const SIM_KINDS = { static: ['Static Stress', 'STATIC STRESS', 'analysis'], modal: ['Modal Frequencies', 'MODAL FREQUENCIES', 'modes'], thermal: ['Thermal', 'THERMAL', 'thermo'], thermalstress: ['Thermal Stress', 'THERMAL STRESS', 'heat'], buckling: ['Linear Buckling', 'LINEAR BUCKLING', 'buckle'] };
+const SIM_TABS = Object.values(SIM_KINDS).map(k => k[1]);
+const isStructural = k => k === 'static' || k === 'thermalstress' || k === 'buckling';
+const hasThermal = k => k === 'thermal' || k === 'thermalstress';
+const isModeKind = k => k === 'modal' || k === 'buckling';
 const BC_LABEL = { fixed: 'Fixed', force: 'Force', pressure: 'Pressure', gravity: 'Gravity', temp: 'Temperature', heat: 'Heat Source', conv: 'Convection' };
 const MESH_TARGET = { coarse: 4000, medium: 12000, fine: 30000 };
 const SIM_DIRS = [['normal', 'Normal to face (into it)'], ['+X', '+X'], ['-X', '−X'], ['+Y', '+Y'], ['-Y', '−Y'], ['+Z', '+Z'], ['-Z', '−Z']];
@@ -24,9 +29,11 @@ function newStudy(kind) {
   const n = sim().studies.filter(s => simKind(s) === kind).length + 1;
   const s = { id: uid(), name: SIM_KINDS[kind][0] + ' ' + n, kind, mats: {}, mesh: kind === 'modal' ? 'coarse' : 'medium', constraints: [], loads: [] };
   if (kind === 'modal') s.modes = 8;
+  if (kind === 'buckling') s.modes = 4;
+  if (kind === 'thermalstress') s.refTemp = 20;
   sim().studies.push(s); sim().active = s.id; return s;
 }
-function activateStudy(id) { stopSimAnim(); sim().active = id; simPick = null; const st = simStudy(); simView.type = simKind(st) === 'thermal' ? 'temp' : simKind(st) === 'modal' ? 'mode' : 'vm'; activeTab = simTabName(); renderRibbon(); renderBrowser(); drawSim2(); defaultHint(); }
+function activateStudy(id) { stopSimAnim(); sim().active = id; simPick = null; const st = simStudy(); simView.type = simKind(st) === 'thermal' ? 'temp' : isModeKind(simKind(st)) ? 'mode' : 'vm'; activeTab = simTabName(); renderRibbon(); renderBrowser(); drawSim2(); defaultHint(); }
 const simBodies = () => [...result.bodies.keys()].filter(id => !bodyHidden(id) && !isSurfBody(id) && result.bodies.get(id).shape);
 
 // ---- workspace ----
@@ -48,8 +55,8 @@ function exitSimulation() {
 function simHint() {
   if (simPick) return 'Click faces on the model to add or remove them · OK when done';
   const k = simKind(simStudy());
-  if (simShowing()) return k === 'modal' ? `Mode ${simView.mode + 1}: ${fmt(simRes.freqs[simView.mode])} Hz. Pick another mode in the browser or animate it from Results.` : 'Results: ' + ({ vm: 'von Mises stress', disp: 'displacement', sf: 'safety factor', temp: 'temperature', flux: 'heat flux' }[simView.type]) + '. Change the result in Results.';
-  return k === 'modal' ? 'Set materials and (optionally) constraints, then Solve for the natural frequencies.' : k === 'thermal' ? 'Set materials, add temperatures, heat sources and convection, then Solve.' : 'Set materials, add constraints and loads, then Solve.';
+  if (simShowing()) return k === 'modal' ? `Mode ${simView.mode + 1}: ${fmt(simRes.freqs[simView.mode])} Hz. Pick another mode in the browser or animate it from Results.` : k === 'buckling' ? `Buckling mode ${simView.mode + 1}: load factor ${fmt(simRes.factors[simView.mode])}. The part buckles at this multiple of the applied loads.` : 'Results: ' + ({ vm: 'von Mises stress', disp: 'displacement', sf: 'safety factor', temp: 'temperature', flux: 'heat flux' }[simView.type]) + '. Change the result in Results.';
+  return { modal: 'Set materials and (optionally) constraints, then Solve for the natural frequencies.', thermal: 'Set materials, add temperatures, heat sources and convection, then Solve.', thermalstress: 'Add temperatures, heat sources or convection for the temperature field, constraints and any loads, then Solve.', buckling: 'Add constraints and the compressive loads, then Solve for the buckling load factors.' }[k] || 'Set materials, add constraints and loads, then Solve.';
 }
 // ---- face geometry in world coordinates ----
 function faceTris(f) {
@@ -115,7 +122,7 @@ function faceWeights(M, nodes) {
 }
 const DIRV = { '+X': [1, 0, 0], '-X': [-1, 0, 0], '+Y': [0, 1, 0], '-Y': [0, -1, 0], '+Z': [0, 0, 1], '-Z': [0, 0, -1] };
 // ---- solve ----
-const simMatProps = mn => { const m = SIM_MATERIALS[mn] || SIM_MATERIALS['Steel 1018']; return { name: mn, E: m[0], nu: m[1], yield: m[2], density: MATERIALS[mn]?.density || 7.85, k: SIM_THERMAL[mn] ?? 50 }; };
+const simMatProps = mn => { const m = SIM_MATERIALS[mn] || SIM_MATERIALS['Steel 1018']; return { name: mn, E: m[0], nu: m[1], yield: m[2], density: MATERIALS[mn]?.density || 7.85, k: SIM_THERMAL[mn] ?? 50, alpha: SIM_ALPHA[mn] ?? 12e-6 }; };
 async function simMeshStudy(st, busy) {
   const ids = simBodies(), matNames = [], bodies = [];
   for (const id of ids) {
@@ -133,84 +140,121 @@ async function simMeshStudy(st, busy) {
   return { M, grid, mats, h, surf: surfaceNodes(M) };
 }
 const tick = () => new Promise(r => setTimeout(r, 0));
+// structural boundary conditions → fixed dofs and nodal forces
+function structuralBCs(st, M, grid, mats, surf, warn) {
+  const fixed = new Uint8Array(M.nn * 3), f = new Float64Array(M.nn * 3), applied = [0, 0, 0];
+  for (const c of st.constraints) {
+    if (c.type !== 'fixed') continue;
+    const r = nodesOnFaces(M, surf, c.faces); if (!r.nodes.length) { warn.push(`${c.name}: no mesh nodes on its faces`); continue; }
+    for (const { q } of r.nodes) { if (c.x !== false) fixed[3 * q] = 1; if (c.y !== false) fixed[3 * q + 1] = 1; if (c.z !== false) fixed[3 * q + 2] = 1; }
+  }
+  for (const L of st.loads) {
+    if (L.type === 'gravity') {
+      const d = DIRV[L.dir || '-Z'] || [0, 0, -1], gacc = (+L.value || 9.81);
+      for (let e = 0; e < M.ne; e++) { const m = mats[M.em[e]], w = m.density * grid.hs[0] * grid.hs[1] * grid.hs[2] * 1e-6 * gacc / 8; for (let a = 0; a < 8; a++) { const q = M.en[e * 8 + a]; for (let k = 0; k < 3; k++) { f[3 * q + k] += d[k] * w; applied[k] += d[k] * w; } } }
+      continue;
+    }
+    if (L.type !== 'force' && L.type !== 'pressure') continue;
+    const r = nodesOnFaces(M, surf, L.faces); if (!r.nodes.length) { warn.push(`${L.name}: no mesh nodes on its faces`); continue; }
+    const total = L.type === 'pressure' ? (+L.value || 0) * r.area : (+L.value || 0);
+    for (const { q, n, w } of r.nodes) { const d = L.type === 'pressure' || (L.dir || 'normal') === 'normal' ? [-n[0], -n[1], -n[2]] : DIRV[L.dir], per = total * w; for (let k = 0; k < 3; k++) { f[3 * q + k] += d[k] * per; applied[k] += d[k] * per; } }
+  }
+  return { fixed, f, applied };
+}
+// thermal boundary conditions → prescribed temperatures, heat input, convection
+function thermalBCs(st, M, surf, warn) {
+  const T = new Float64Array(M.nn).fill(NaN), q = new Float64Array(M.nn), hA = new Float64Array(M.nn), hT = new Float64Array(M.nn);
+  let heatIn = 0;
+  for (const c of st.constraints) { if (c.type !== 'temp') continue; const r = nodesOnFaces(M, surf, c.faces); if (!r.nodes.length) { warn.push(`${c.name}: no mesh nodes on its faces`); continue; } for (const n of r.nodes) T[n.q] = +c.value || 0; }
+  for (const L of st.loads) {
+    if (L.type !== 'heat' && L.type !== 'conv') continue;
+    const r = nodesOnFaces(M, surf, L.faces); if (!r.nodes.length) { warn.push(`${L.name}: no mesh nodes on its faces`); continue; }
+    if (L.type === 'heat') { for (const n of r.nodes) q[n.q] += (+L.value || 0) * n.w; heatIn += +L.value || 0; }
+    else { const tot = (+L.value || 0) * 1e-6 * r.area, Ta = +L.ambient || 0; for (const n of r.nodes) { hA[n.q] += tot * n.w; hT[n.q] += tot * n.w * Ta; } }
+  }
+  return { T, q, hA, hT, heatIn };
+}
+// static solve plus derived result fields (stress, displacement, safety factor)
+async function runStatic(M, mats, fixed, f, applied, warn, busy, elems, dT) {
+  busy.textContent = 'Preparing the solver…'; await tick();
+  const R = await solveStatic(M, fixed, f, { tol: 1e-7, maxIter: 30000, dT, onProgress: async (it, res) => { busy.textContent = `Solving stress… ${elems} elements · iteration ${it} · residual ${res.toExponential(1)} (click to stop)`; await tick(); return simCancel; } });
+  if (simCancel) return null;
+  const disp = new Float64Array(M.nn); for (let q = 0; q < M.nn; q++) disp[q] = Math.hypot(R.u[3 * q], R.u[3 * q + 1], R.u[3 * q + 2]);
+  const vmN = R.vmNode, yE = new Float64Array(M.ne); for (let e = 0; e < M.ne; e++) yE[e] = mats[M.em[e]].yield;
+  const yN = nodalAverage(M, yE), sfN = new Float64Array(M.nn); for (let q = 0; q < M.nn; q++) sfN[q] = vmN[q] > 1e-12 ? yN[q] / vmN[q] : 1e9;
+  let vmax = 0, vmaxQ = 0; for (let q = 0; q < M.nn; q++) if (M.nodeActive[q] && vmN[q] > vmax) { vmax = vmN[q]; vmaxQ = q; }
+  let dmax = 0, dmaxQ = 0; for (let q = 0; q < M.nn; q++) if (M.nodeActive[q] && disp[q] > dmax) { dmax = disp[q]; dmaxQ = q; }
+  let sfmin = Infinity; for (let q = 0; q < M.nn; q++) if (M.nodeActive[q]) sfmin = Math.min(sfmin, sfN[q]);
+  if (!R.converged) warn.push(`The solver stopped at a residual of ${R.residual.toExponential(1)}; results may be inaccurate. Check that the constraints hold the part in every direction.`);
+  return { R, disp, vmN, sfN, vmax, vmaxAt: nodePos(M, vmaxQ), dmax, dmaxQ, dmaxAt: nodePos(M, dmaxQ), sfmin, applied };
+}
+async function runThermal(M, bc, warn, busy, elems) {
+  busy.textContent = 'Solving temperatures…'; await tick();
+  const R = await solveThermal(M, { T: bc.T, q: bc.q, hA: bc.hA, hT: bc.hT, onProgress: async (it, res) => { busy.textContent = `Solving temperatures… ${elems} elements · iteration ${it} · residual ${res.toExponential(1)} (click to stop)`; await tick(); return simCancel; } });
+  if (R.stopped || simCancel) return null;
+  const fluxN = nodalAverage(M, R.fluxMag);
+  let tmax = -Infinity, tmin = Infinity, tmaxQ = 0, tminQ = 0, fmax = 0, fmaxQ = 0;
+  for (let n = 0; n < M.nn; n++) if (M.nodeActive[n]) { const t = R.T[n]; if (t > tmax) { tmax = t; tmaxQ = n; } if (t < tmin) { tmin = t; tminQ = n; } if (fluxN[n] > fmax) { fmax = fluxN[n]; fmaxQ = n; } }
+  if (!R.converged) warn.push(`The temperature solver stopped at a residual of ${R.residual.toExponential(1)}; results may be inaccurate.`);
+  return { RT: R, T: R.T, fluxN, tmax, tmin, tmaxAt: nodePos(M, tmaxQ), tminAt: nodePos(M, tminQ), fmax, fmaxAt: nodePos(M, fmaxQ), heatIn: bc.heatIn, heatOut: R.heatConv, heatFixed: R.heatFixed };
+}
 async function solveStudy() {
   const st = simStudy(); if (!st) return;
   const kind = simKind(st);
-  if (kind === 'static') {
-    if (!st.constraints.length) { toast('Add a constraint first: the part needs to be held somewhere'); return; }
-    if (!st.loads.length) { toast('Add a load first'); return; }
-  }
-  if (kind === 'thermal' && !st.constraints.length && !st.loads.some(L => L.type === 'conv')) { toast('Add a temperature or a convection boundary first'); return; }
+  const hasFixed = st.constraints.some(c => c.type === 'fixed'), hasLoad = st.loads.some(L => ['force', 'pressure', 'gravity'].includes(L.type));
+  const hasTherm = st.constraints.some(c => c.type === 'temp') || st.loads.some(L => L.type === 'conv');
+  if (isStructural(kind) && !hasFixed) { toast('Add a constraint first: the part needs to be held somewhere'); return; }
+  if ((kind === 'static' || kind === 'buckling') && !hasLoad) { toast('Add a load first'); return; }
+  if (hasThermal(kind) && !hasTherm) { toast('Add a temperature or a convection boundary first'); return; }
   stopSimAnim();
   simCancel = false; const busy = $('#busy'); busy.hidden = false;
   try {
     const { M, grid, mats, h, surf } = await simMeshStudy(st, busy), warn = [], t0 = performance.now();
-    const elems = M.ne.toLocaleString('en-US');
+    const elems = M.ne.toLocaleString('en-US'), base = { kind, st: st.id, M, warn, mats, h, key: simKey(st) };
+    let res = null;
     if (kind === 'modal') {
-      const fixed = new Uint8Array(M.nn * 3);
-      for (const c of st.constraints) {
-        const r = nodesOnFaces(M, surf, c.faces); if (!r.nodes.length) { warn.push(`${c.name}: no mesh nodes on its faces`); continue; }
-        for (const { q } of r.nodes) { if (c.x !== false) fixed[3 * q] = 1; if (c.y !== false) fixed[3 * q + 1] = 1; if (c.z !== false) fixed[3 * q + 2] = 1; }
-      }
+      const { fixed } = structuralBCs({ constraints: st.constraints, loads: [] }, M, grid, mats, surf, warn);
       const held = fixed.some(Boolean), nm = Math.max(1, Math.min(30, Math.round(+st.modes || 8))) + (held ? 0 : 6);
       busy.textContent = 'Preparing the solver…'; await tick();
       const R = await solveModal(M, fixed, { modes: nm, onProgress: async p => { busy.textContent = `Solving modes… ${elems} elements · iteration ${p.iter} · ${p.converged}/${p.of} converged (click to stop)`; await tick(); return simCancel; } });
       if (!R || simCancel) { toast('Solve stopped'); return; }
       if (!R.converged) warn.push('The eigen-solver stopped before every mode converged; the highest frequencies may be inaccurate.');
-      // a free part: list its six rigid-body modes separately
-      const rigid = held ? 0 : 6;
-      simRes = { kind, st: st.id, M, freqs: R.freqs.slice(rigid), modes: R.modes.slice(rigid), participation: R.participation.slice(rigid), rigid: held ? [] : R.freqs.slice(0, 6), mass: R.mass, iterations: R.iterations, warn, mats, seconds: (performance.now() - t0) / 1000, h, key: simKey(st), free: !held };
-      if (simView.mode >= simRes.freqs.length) simView.mode = 0;
+      const rigid = held ? 0 : 6;   // a free part: list its six rigid-body modes separately
+      res = { freqs: R.freqs.slice(rigid), modes: R.modes.slice(rigid), participation: R.participation.slice(rigid), rigid: held ? [] : R.freqs.slice(0, 6), mass: R.mass, iterations: R.iterations, free: !held };
+      if (simView.mode >= res.freqs.length) simView.mode = 0;
       simView.type = 'mode';
     } else if (kind === 'thermal') {
-      const T = new Float64Array(M.nn).fill(NaN), q = new Float64Array(M.nn), hA = new Float64Array(M.nn), hT = new Float64Array(M.nn);
-      for (const c of st.constraints) { const r = nodesOnFaces(M, surf, c.faces); if (!r.nodes.length) { warn.push(`${c.name}: no mesh nodes on its faces`); continue; } for (const n of r.nodes) T[n.q] = +c.value || 0; }
-      let heatIn = 0;
-      for (const L of st.loads) {
-        const r = nodesOnFaces(M, surf, L.faces); if (!r.nodes.length) { warn.push(`${L.name}: no mesh nodes on its faces`); continue; }
-        if (L.type === 'heat') { for (const n of r.nodes) q[n.q] += (+L.value || 0) * n.w; heatIn += +L.value || 0; }
-        if (L.type === 'conv') { const tot = (+L.value || 0) * 1e-6 * r.area, Ta = +L.ambient || 0; for (const n of r.nodes) { hA[n.q] += tot * n.w; hT[n.q] += tot * n.w * Ta; } }
-      }
-      busy.textContent = 'Solving…'; await tick();
-      const R = await solveThermal(M, { T, q, hA, hT, onProgress: async (it, res) => { busy.textContent = `Solving… ${elems} elements · iteration ${it} · residual ${res.toExponential(1)} (click to stop)`; await tick(); return simCancel; } });
-      if (R.stopped || simCancel) { toast('Solve stopped'); return; }
-      const fluxN = nodalAverage(M, R.fluxMag);
-      let tmax = -Infinity, tmin = Infinity, tmaxQ = 0, tminQ = 0, fmax = 0, fmaxQ = 0;
-      for (let n = 0; n < M.nn; n++) if (M.nodeActive[n]) { const t = R.T[n]; if (t > tmax) { tmax = t; tmaxQ = n; } if (t < tmin) { tmin = t; tminQ = n; } if (fluxN[n] > fmax) { fmax = fluxN[n]; fmaxQ = n; } }
-      if (!R.converged) warn.push(`The solver stopped at a residual of ${R.residual.toExponential(1)}; results may be inaccurate.`);
-      simRes = { kind, st: st.id, M, R, T: R.T, fluxN, tmax, tmin, tmaxAt: nodePos(M, tmaxQ), tminAt: nodePos(M, tminQ), fmax, fmaxAt: nodePos(M, fmaxQ), heatIn, heatOut: R.heatConv, heatFixed: R.heatFixed, warn, mats, seconds: (performance.now() - t0) / 1000, h, key: simKey(st) };
+      res = await runThermal(M, thermalBCs(st, M, surf, warn), warn, busy, elems); if (!res) { toast('Solve stopped'); return; }
       if (!['temp', 'flux'].includes(simView.type)) simView.type = 'temp';
-    } else {
-      const fixed = new Uint8Array(M.nn * 3), f = new Float64Array(M.nn * 3);
-      for (const c of st.constraints) {
-        const r = nodesOnFaces(M, surf, c.faces); if (!r.nodes.length) { warn.push(`${c.name}: no mesh nodes on its faces`); continue; }
-        for (const { q } of r.nodes) { if (c.x !== false) fixed[3 * q] = 1; if (c.y !== false) fixed[3 * q + 1] = 1; if (c.z !== false) fixed[3 * q + 2] = 1; }
-      }
-      let applied = [0, 0, 0];
-      for (const L of st.loads) {
-        if (L.type === 'gravity') {
-          const d = DIRV[L.dir || '-Z'] || [0, 0, -1], gacc = (+L.value || 9.81);
-          for (let e = 0; e < M.ne; e++) { const m = mats[M.em[e]], w = m.density * grid.hs[0] * grid.hs[1] * grid.hs[2] * 1e-6 * gacc / 8; for (let a = 0; a < 8; a++) { const q = M.en[e * 8 + a]; for (let k = 0; k < 3; k++) { f[3 * q + k] += d[k] * w; applied[k] += d[k] * w; } } }
-          continue;
-        }
-        const r = nodesOnFaces(M, surf, L.faces); if (!r.nodes.length) { warn.push(`${L.name}: no mesh nodes on its faces`); continue; }
-        const total = L.type === 'pressure' ? (+L.value || 0) * r.area : (+L.value || 0);
-        for (const { q, n, w } of r.nodes) { const d = L.type === 'pressure' || (L.dir || 'normal') === 'normal' ? [-n[0], -n[1], -n[2]] : DIRV[L.dir], per = total * w; for (let k = 0; k < 3; k++) { f[3 * q + k] += d[k] * per; applied[k] += d[k] * per; } }
-      }
+    } else if (kind === 'thermalstress') {
+      const th = await runThermal(M, thermalBCs(st, M, surf, warn), warn, busy, elems); if (!th) { toast('Solve stopped'); return; }
+      const ref = Number.isFinite(+st.refTemp) ? +st.refTemp : 20, dT = new Float64Array(M.ne);
+      for (let e = 0; e < M.ne; e++) { let s = 0; for (let a = 0; a < 8; a++) s += th.T[M.en[e * 8 + a]]; dT[e] = s / 8 - ref; }
+      const { fixed, f, applied } = structuralBCs(st, M, grid, mats, surf, warn);
       if (!fixed.some(Boolean)) throw new Error('The constraints did not catch any part of the mesh');
-      busy.textContent = 'Preparing the solver…'; await tick();
-      const R = await solveStatic(M, fixed, f, { tol: 1e-7, maxIter: 30000, onProgress: async (it, res) => { busy.textContent = `Solving… ${elems} elements · iteration ${it} · residual ${res.toExponential(1)} (click to stop)`; await tick(); return simCancel; } });
-      if (simCancel) { toast('Solve stopped'); return; }
-      const disp = new Float64Array(M.nn); for (let q = 0; q < M.nn; q++) disp[q] = Math.hypot(R.u[3 * q], R.u[3 * q + 1], R.u[3 * q + 2]);
-      const vmN = R.vmNode, yE = new Float64Array(M.ne); for (let e = 0; e < M.ne; e++) yE[e] = mats[M.em[e]].yield;
-      const yN = nodalAverage(M, yE), sfN = new Float64Array(M.nn); for (let q = 0; q < M.nn; q++) sfN[q] = vmN[q] > 1e-12 ? yN[q] / vmN[q] : 1e9;
-      let vmax = 0, vmaxQ = 0; for (let q = 0; q < M.nn; q++) if (M.nodeActive[q] && vmN[q] > vmax) { vmax = vmN[q]; vmaxQ = q; }
-      let dmax = 0, dmaxQ = 0; for (let q = 0; q < M.nn; q++) if (M.nodeActive[q] && disp[q] > dmax) { dmax = disp[q]; dmaxQ = q; }
-      let sfmin = Infinity; for (let q = 0; q < M.nn; q++) if (M.nodeActive[q]) sfmin = Math.min(sfmin, sfN[q]);
-      simRes = { kind, st: st.id, M, R, disp, vmN, sfN, vmax, vmaxAt: nodePos(M, vmaxQ), dmax, dmaxQ, dmaxAt: nodePos(M, dmaxQ), sfmin, applied, warn, mats, seconds: (performance.now() - t0) / 1000, h, key: simKey(st) };
-      if (!R.converged) warn.push(`The solver stopped at a residual of ${R.residual.toExponential(1)}; results may be inaccurate. Check that the constraints hold the part in every direction.`);
+      const sr = await runStatic(M, mats, fixed, f, applied, warn, busy, elems, dT); if (!sr) { toast('Solve stopped'); return; }
+      res = { ...th, ...sr, refTemp: ref };
+      if (!['vm', 'disp', 'sf', 'temp'].includes(simView.type)) simView.type = 'vm';
+    } else if (kind === 'buckling') {
+      const { fixed, f, applied } = structuralBCs(st, M, grid, mats, surf, warn);
+      if (!fixed.some(Boolean)) throw new Error('The constraints did not catch any part of the mesh');
+      const sr = await runStatic(M, mats, fixed, f, applied, warn, busy, elems); if (!sr) { toast('Solve stopped'); return; }
+      busy.textContent = 'Solving buckling modes…'; await tick();
+      const nm = Math.max(1, Math.min(12, Math.round(+st.modes || 4)));
+      const B = await solveBuckling(M, fixed, sr.R.sig, { modes: nm, onProgress: async p => { busy.textContent = `Solving buckling modes… ${elems} elements · pass ${p.iter + 1} · vector ${p.vec + 1}/${p.of} (click to stop)`; await tick(); return simCancel; } });
+      if (!B || simCancel) { toast('Solve stopped'); return; }
+      if (!B.factors.length) warn.push('No buckling: the loads put the part in tension.');
+      else if (B.factors[0] < 1) warn.push(`The part buckles below the applied load (load factor ${fmt(B.factors[0])}).`);
+      res = { ...sr, factors: B.factors, modes: B.modes, iterations: B.iterations };
+      if (simView.mode >= res.factors.length) simView.mode = 0;
+      simView.type = 'mode';
+    } else {
+      const { fixed, f, applied } = structuralBCs(st, M, grid, mats, surf, warn);
+      if (!fixed.some(Boolean)) throw new Error('The constraints did not catch any part of the mesh');
+      res = await runStatic(M, mats, fixed, f, applied, warn, busy, elems); if (!res) { toast('Solve stopped'); return; }
       if (!['vm', 'disp', 'sf'].includes(simView.type)) simView.type = 'vm';
     }
+    simRes = { ...base, ...res, seconds: (performance.now() - t0) / 1000 };
     if (warn.length) toast(warn[0]);
     renderBrowser(); drawSim2(); defaultHint();
   } catch (e) { console.error(e); toast('Solve failed: ' + e.message); }
@@ -259,10 +303,10 @@ function simModelDiag() { const b = new THREE.Box3(); for (const id of simBodies
 function drawResults() {
   const S = simRes, M = S.M, type = simView.type, diag = simModelDiag();
   let field, U = null, k = 0, unit = 1;
-  if (S.kind === 'modal') {
+  if (isModeKind(S.kind)) {
     const v = S.modes[simView.mode] || S.modes[0]; U = v; field = new Float64Array(M.nn); for (let q = 0; q < M.nn; q++) field[q] = Math.hypot(v[3 * q], v[3 * q + 1], v[3 * q + 2]);
     k = simView.scale === 'none' ? 0 : diag * 0.08;
-  } else if (S.kind === 'thermal') { field = type === 'flux' ? S.fluxN : S.T; if (type === 'flux') unit = 1e6; }
+  } else if (S.kind === 'thermal' || type === 'temp') { field = type === 'flux' ? S.fluxN : S.T; if (type === 'flux') unit = 1e6; }
   else {
     field = type === 'disp' ? S.disp : type === 'sf' ? S.sfN : S.vmN; U = S.R.u;
     k = simView.scale === 'actual' ? 1 : simView.scale === 'none' ? 0 : S.dmax > 1e-12 ? diag * 0.05 / S.dmax : 0;
@@ -270,7 +314,7 @@ function drawResults() {
   let lo = Infinity, hi = -Infinity;
   for (let q = 0; q < M.nn; q++) if (M.nodeActive[q]) { lo = Math.min(lo, field[q]); hi = Math.max(hi, field[q]); }
   if (type === 'sf') { lo = 0; hi = Math.min(Math.max(1, S.sfmin * 3), 15); }
-  if (S.kind === 'modal') { lo = 0; hi = 1; }
+  if (isModeKind(S.kind)) { lo = 0; hi = 1; }
   S.scale = k;
   const anim = [];
   for (const id of simBodies()) {
@@ -292,20 +336,21 @@ function drawResults() {
   S.anim = anim;
   // max markers
   const mark = (p, label) => { const s = new THREE.Mesh(new THREE.SphereGeometry(Math.max(0.6, diag * 0.008), 12, 8), new THREE.MeshBasicMaterial({ color: 0x111111, depthTest: false })); s.position.set(...p); s.renderOrder = 20; simGroup.add(s); const o = new CSS2DObject(h('div', { class: 'combtag' }, label)); o.position.set(...p); simGroup.add(o); };
-  if (S.kind === 'static') {
+  if (isModeKind(S.kind)) { /* no markers on mode shapes */ }
+  else if (S.kind !== 'thermal' && type !== 'temp') {
     if (type === 'vm') mark(S.vmaxAt, 'Max ' + fmt(S.vmax) + ' MPa'); else if (type === 'disp') mark(S.dmaxAt.map((x, i) => x + k * S.R.u[3 * S.dmaxQ + i]), 'Max ' + fmt(S.dmax) + ' mm'); else mark(S.vmaxAt, 'Min ' + fmt(S.sfmin));
-  } else if (S.kind === 'thermal') {
+  } else {
     if (type === 'temp') { mark(S.tmaxAt, 'Max ' + fmt(S.tmax) + ' °C'); if (S.tmax - S.tmin > 1e-6) mark(S.tminAt, 'Min ' + fmt(S.tmin) + ' °C'); } else mark(S.fmaxAt, 'Max ' + fmtSig(S.fmax * 1e6) + ' W/m²');
   }
   // legend
   const stops = [];
   for (let i = 0; i <= 10; i++) { const c = heat(type === 'sf' ? 1 - i / 10 : i / 10); stops.push(`rgb(${c.map(x => Math.round(x * 255)).join(',')}) ${i * 10}%`); }
-  const note = S.kind === 'modal' ? `Mode ${simView.mode + 1} · ${fmt(S.freqs[simView.mode])} Hz` : S.kind === 'thermal' ? 'Steady state' : (k > 0 ? `Deformation ×${fmtSig(k)}` : 'Undeformed');
+  const note = S.kind === 'modal' ? `Mode ${simView.mode + 1} · ${fmt(S.freqs[simView.mode])} Hz` : S.kind === 'buckling' ? `Mode ${simView.mode + 1} · load factor ${fmt(S.factors[simView.mode])}` : (S.kind === 'thermal' || type === 'temp') ? 'Steady state' : (k > 0 ? `Deformation ×${fmtSig(k)}` : 'Undeformed');
   const lg = h('div', { id: 'simLegend', class: 'simlegend' }, h('div', { class: 'lt' }, SIM_TITLES[type] || ''), h('div', { class: 'lbar', style: `background:linear-gradient(to top, ${stops.join(',')})` }),
     h('div', { class: 'lmax' }, (type === 'sf' && hi >= 15 ? '≥ ' : '') + fmtSig(hi * unit)), h('div', { class: 'lmin' }, fmtSig(lo * unit)),
     h('div', { class: 'lnote' }, note));
   $('#stage').append(lg);
-  if (S.kind === 'modal' && simView.anim) startSimAnim();
+  if (isModeKind(S.kind) && simView.anim) startSimAnim();
 }
 // mode-shape animation: positions swing between ±shape
 function startSimAnim() {
@@ -332,19 +377,24 @@ function renderSimBrowser(add) {
   if (!add(0, { key: 'simroot', icon: SIM_KINDS[kind][2], label: st.name, sub: SIM_KINDS[kind][0] + (S.studies.length > 1 ? ` · ${S.studies.length} studies` : ''), menu, onDbl: () => renameStudy() })) return;
   if (add(1, { key: 'simmat', icon: 'material', label: 'Materials' })) for (const id of simBodies()) add(2, { icon: 'bodyi', label: bodyName(id), sub: simMat(st, id), onDbl: () => openSimMaterials(), onClick: () => openSimMaterials() });
   const item = (b) => add(2, { icon: BC_ICON[b.type] || 'fix', label: b.name, sub: bcSub(b), onDbl: () => editBC(b.id), onClick: () => editBC(b.id), menu: () => [{ label: 'Edit', icon: 'params', action: () => editBC(b.id) }, { label: 'Delete', icon: 'delete', action: () => deleteBC(b.id) }] });
-  if (add(1, { key: 'simbc', icon: 'folder', label: kind === 'thermal' ? 'Temperatures' : 'Constraints', sub: String(st.constraints.length) })) st.constraints.forEach(item);
-  if (kind !== 'modal' && add(1, { key: 'simld', icon: 'folder', label: kind === 'thermal' ? 'Thermal loads' : 'Loads', sub: String(st.loads.length) })) st.loads.forEach(item);
+  if (add(1, { key: 'simbc', icon: 'folder', label: kind === 'thermal' ? 'Temperatures' : kind === 'thermalstress' ? 'Constraints and temperatures' : 'Constraints', sub: String(st.constraints.length) })) st.constraints.forEach(item);
+  if (kind !== 'modal' && add(1, { key: 'simld', icon: 'folder', label: kind === 'thermal' ? 'Thermal loads' : kind === 'thermalstress' ? 'Loads and heat' : 'Loads', sub: String(st.loads.length) })) st.loads.forEach(item);
   add(1, { icon: 'remesh', label: 'Mesh', sub: st.mesh + ` (~${(MESH_TARGET[st.mesh] / 1000) | 0}k elements)`, onClick: () => openSimMesh() });
-  if (kind === 'modal') add(1, { icon: 'modes', label: 'Modes to find', sub: String(st.modes || 8), onClick: () => openSimMesh() });
+  if (isModeKind(kind)) add(1, { icon: isModeKind(kind) && kind === 'buckling' ? 'buckle' : 'modes', label: 'Modes to find', sub: String(st.modes || (kind === 'buckling' ? 4 : 8)), onClick: () => openSimMesh() });
+  if (kind === 'thermalstress') add(1, { icon: 'thermo', label: 'Reference temperature', sub: (st.refTemp ?? 20) + ' °C (stress-free)', onClick: () => openSimMesh() });
   const sel = (t, extra = {}) => ({ sel: simView.type === t, onClick: () => { simView.type = t; drawSim2(); renderBrowser(); defaultHint(); }, ...extra });
   if (simShowing() && add(1, { key: 'simres', icon: 'analysis', label: 'Results' })) {
-    if (simRes.kind === 'static') {
+    if (simRes.kind === 'static' || simRes.kind === 'thermalstress') {
+      if (simRes.kind === 'thermalstress') add(2, { icon: 'thermo', label: 'Temperature', sub: fmt(simRes.tmin) + ' – ' + fmt(simRes.tmax) + ' °C', ...sel('temp') });
       add(2, { icon: 'analysis', label: 'Stress (von Mises)', sub: 'max ' + fmt(simRes.vmax) + ' MPa', ...sel('vm') });
       add(2, { icon: 'move', label: 'Displacement', sub: 'max ' + fmt(simRes.dmax) + ' mm', ...sel('disp') });
       add(2, { icon: 'fix', label: 'Safety factor', sub: 'min ' + (simRes.sfmin > 1e6 ? '—' : fmt(simRes.sfmin)), err: simRes.sfmin < 1, ...sel('sf') });
     } else if (simRes.kind === 'thermal') {
       add(2, { icon: 'thermo', label: 'Temperature', sub: fmt(simRes.tmin) + ' – ' + fmt(simRes.tmax) + ' °C', ...sel('temp') });
       add(2, { icon: 'heat', label: 'Heat flux', sub: 'max ' + fmtSig(simRes.fmax * 1e6) + ' W/m²', ...sel('flux') });
+    } else if (simRes.kind === 'buckling') {
+      if (!simRes.factors.length) add(2, { icon: 'buckle', label: 'No buckling', sub: 'loads are tensile', dim: true });
+      simRes.factors.forEach((f, i) => add(2, { icon: 'buckle', label: `Mode ${i + 1}`, sub: 'load factor ' + fmt(f), err: f < 1, sel: simView.mode === i, onClick: () => { simView.mode = i; drawSim2(); renderBrowser(); defaultHint(); } }));
     } else {
       simRes.freqs.forEach((f, i) => add(2, { icon: 'modes', label: `Mode ${i + 1}`, sub: fmt(f) + ' Hz', sel: simView.mode === i, onClick: () => { simView.mode = i; drawSim2(); renderBrowser(); defaultHint(); } }));
     }
@@ -366,7 +416,9 @@ function openNewStudy() {
   openModal('New Study', 'analysis', h('div', { class: 'studycards' },
     card('static', 'Stress, displacement and safety factor under loads and supports.'),
     card('modal', 'Natural frequencies and mode shapes, with or without supports.'),
-    card('thermal', 'Steady-state temperatures from fixed temperatures, heat sources and convection.')),
+    card('thermal', 'Steady-state temperatures from fixed temperatures, heat sources and convection.'),
+    card('thermalstress', 'Stress from thermal expansion of the steady-state temperatures, plus mechanical loads.'),
+    card('buckling', 'Load factors at which slender parts buckle under the applied compressive loads.')),
     [h('button', { class: 'btn', onclick: closeModal }, 'Cancel')]);
 }
 // ---- dialogs ----
@@ -420,19 +472,20 @@ function openSimMaterials() {
     s.addEventListener('change', () => { work[id] = s.value; });
     const mn = work[id] || bodyMaterial(id), p = SIM_MATERIALS[mn] || [], kind = simKind(st);
     const c3 = kind === 'thermal' ? (SIM_THERMAL[mn] != null ? SIM_THERMAL[mn] + ' W/(m·K)' : '') : p[0] ? fmt(p[0] / 1000) + ' GPa' : '';
-    const c4 = kind === 'static' ? (p[2] ? p[2] + ' MPa' : '') : kind === 'modal' ? fmt(MATERIALS[mn]?.density || 7.85) + ' g/cm³' : '';
+    const c4 = kind === 'static' || kind === 'buckling' ? (p[2] ? p[2] + ' MPa' : '') : kind === 'modal' ? fmt(MATERIALS[mn]?.density || 7.85) + ' g/cm³' : kind === 'thermalstress' ? `${SIM_THERMAL[mn] ?? '—'} W/(m·K) · α ${((SIM_ALPHA[mn] ?? 0) * 1e6).toFixed(1)}×10⁻⁶/K` : '';
     return h('tr', {}, h('td', {}, bodyName(id)), h('td', {}, s), h('td', { class: 'num' }, c3), h('td', { class: 'num' }, c4));
   });
-  const kind = simKind(st), heads = ['Body', 'Material', kind === 'thermal' ? 'Conductivity' : 'Young’s modulus', kind === 'static' ? 'Yield' : kind === 'modal' ? 'Density' : ''];
+  const kind = simKind(st), heads = ['Body', 'Material', kind === 'thermal' ? 'Conductivity' : 'Young’s modulus', kind === 'static' || kind === 'buckling' ? 'Yield' : kind === 'modal' ? 'Density' : kind === 'thermalstress' ? 'Conductivity · expansion' : ''];
   openModal('Study Materials', 'material', h('div', { class: 'tablewrap' }, h('table', { class: 'grid' }, h('thead', {}, h('tr', {}, ...heads.map(t => h('th', {}, t)))), h('tbody', {}, rows)),
     h('p', { class: 'note' }, kind === 'thermal' ? 'Isotropic conduction. Bodies that touch exchange heat as if bonded.' : 'Linear elastic, isotropic. Bodies that touch are treated as bonded.')),
     [h('button', { class: 'btn ok', onclick: () => { checkpoint(); st.mats = work; persist(); closeModal(); renderBrowser(); drawSim2(); } }, 'OK'), h('button', { class: 'btn', onclick: closeModal }, 'Cancel')]);
 }
 function openSimMesh() {
   const st = simStudy(); if (!st) return; const snap = JSON.stringify(doc.sim);
-  openPanelDialog({ title: 'Mesh', icon: 'remesh', okLabel: 'OK', help: 'Finer meshes are more accurate near small features but take longer to solve.',
+  openPanelDialog({ title: isModeKind(simKind(st)) || simKind(st) === 'thermalstress' ? 'Study Settings' : 'Mesh', icon: 'remesh', okLabel: 'OK', help: 'Finer meshes are more accurate near small features but take longer to solve.',
     body: () => [section_('Mesh', segField('Size', st, 'mesh', [['coarse', 'Coarse'], ['medium', 'Medium'], ['fine', 'Fine']], { after: renderBrowser }), h('p', { class: 'note' }, 'Cube elements (8-node with bending modes) sized to the volume: about 4k, 12k or 30k elements.')),
-      ...(simKind(st) === 'modal' ? [section_('Modes', exField('Number of modes', st, 'modes', '', { min: 1, max: 30, after: renderBrowser, id: 'sim-modes' }))] : [])],
+      ...(isModeKind(simKind(st)) ? [section_('Modes', exField('Number of modes', st, 'modes', '', { min: 1, max: simKind(st) === 'buckling' ? 12 : 30, after: renderBrowser, id: 'sim-modes' }))] : []),
+      ...(simKind(st) === 'thermalstress' ? [section_('Thermal strain', exField('Reference temperature', st, 'refTemp', '°C', { after: renderBrowser, id: 'sim-ref' }), h('p', { class: 'note' }, 'The part is stress-free at this temperature; it expands by α (T − T_ref).'))] : [])],
     onOK: () => { const now = JSON.stringify(doc.sim); doc.sim = JSON.parse(snap); checkpoint(); doc.sim = JSON.parse(now); persist(); renderBrowser(); drawSim2(); }, onCancel: () => { doc.sim = JSON.parse(snap); renderBrowser(); } });
 }
 function openSimResults() {
@@ -445,10 +498,19 @@ function openSimResults() {
     show = section_('Mode shapes', h('div', { class: 'tablewrap' }, tbl), chkField('Animate', simView, 'anim', { after: () => { if (simView.anim) startSimAnim(); else { stopSimAnim(); drawSim2(); } } }),
       segField('Deformation', simView, 'scale', [['auto', 'Shown'], ['none', 'None']], { after: drawSim2 }),
       h('p', { class: 'note' }, 'Mode shapes have no absolute size: colours show relative motion. Mass columns are the effective mass fractions in each direction.'));
+  } else if (S.kind === 'buckling') {
+    const P = Math.hypot(...S.applied);
+    const tbl = h('table', { class: 'grid', id: 'sim-modes-table' }, h('thead', {}, h('tr', {}, ...['Mode', 'Load factor', 'Critical load'].map(t => h('th', {}, t)))),
+      h('tbody', {}, ...S.factors.map((f, i) => h('tr', { class: simView.mode === i ? 'sel' : '', style: 'cursor:pointer', onclick: () => { simView.mode = i; upd(); rerenderDialog(); } }, h('td', {}, String(i + 1)), h('td', { class: 'num' }, fmt(f)), h('td', { class: 'num' }, P > 0 ? fmtSig(f * P) + ' N' : '—')))));
+    show = section_('Buckling modes', h('div', { class: 'tablewrap' }, tbl), chkField('Animate', simView, 'anim', { after: () => { if (simView.anim) startSimAnim(); else { stopSimAnim(); drawSim2(); } } }),
+      segField('Deformation', simView, 'scale', [['auto', 'Shown'], ['none', 'None']], { after: drawSim2 }),
+      h('p', { class: 'note' }, 'A load factor of 3 means the part buckles at three times the applied loads. Below 1 it buckles before reaching them. Linear buckling overestimates real collapse loads; keep a margin.'));
   } else if (S.kind === 'thermal') show = section_('Show', segField('Result', simView, 'type', [['temp', 'Temperature'], ['flux', 'Heat flux']], { after: upd }));
+  else if (S.kind === 'thermalstress') show = section_('Show', segField('Result', simView, 'type', [['vm', 'Stress'], ['disp', 'Displacement'], ['sf', 'Safety factor'], ['temp', 'Temperature']], { after: upd }),
+    segField('Deformation', simView, 'scale', [['auto', 'Exaggerated'], ['actual', 'Actual'], ['none', 'None']], { after: drawSim2 }));
   else show = section_('Show', segField('Result', simView, 'type', [['vm', 'Stress'], ['disp', 'Displacement'], ['sf', 'Safety factor']], { after: upd }),
     segField('Deformation', simView, 'scale', [['auto', 'Exaggerated'], ['actual', 'Actual'], ['none', 'None']], { after: drawSim2 }));
-  openPanelDialog({ title: 'Results', icon: 'analysis', okLabel: 'Close', help: S.kind === 'static' ? 'Stress concentrates at sharp inside corners and at the edges of fixed faces; refine the mesh to check such peaks.' : S.kind === 'modal' ? 'Keep operating and excitation frequencies away from the natural frequencies.' : 'Steady state: the temperatures once the heat flows have settled.',
+  openPanelDialog({ title: 'Results', icon: 'analysis', okLabel: 'Close', help: S.kind === 'buckling' ? 'Buckling shapes, like vibration modes, have no absolute size.' : S.kind === 'thermalstress' ? 'Stress from restrained thermal expansion plus any mechanical loads.' : S.kind === 'static' ? 'Stress concentrates at sharp inside corners and at the edges of fixed faces; refine the mesh to check such peaks.' : S.kind === 'modal' ? 'Keep operating and excitation frequencies away from the natural frequencies.' : 'Steady state: the temperatures once the heat flows have settled.',
     body: () => [show,
       section_('Summary', h('dl', { class: 'stat' }, ...simSummary().flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)]))),
       h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn', type: 'button', id: 'sim-report', onclick: () => simReport() }, 'Save report (.zip)'))],
@@ -457,17 +519,20 @@ function openSimResults() {
 function simSummary() {
   const S = simRes, mesh = ['Mesh', `${S.M.ne.toLocaleString('en-US')} elements of ${fmt(S.h)} mm`];
   if (S.kind === 'modal') return [['Mode 1', fmt(S.freqs[0]) + ' Hz'], ...(S.freqs.length > 1 ? [['Highest mode', `${S.freqs.length}: ${fmt(S.freqs.at(-1))} Hz`]] : []), ['Mass', fmt(S.mass * 1000) + ' g'], ['Supports', S.free ? 'none (free vibration; 6 rigid-body modes skipped)' : 'fixed faces'], mesh, ['Solver', `${S.iterations} iterations · ${fmt(S.seconds)} s`]];
-  if (S.kind === 'thermal') return [['Max temperature', fmt(S.tmax) + ' °C'], ['Min temperature', fmt(S.tmin) + ' °C'], ['Max heat flux', fmtSig(S.fmax * 1e6) + ' W/m²'], ['Heat in (sources)', fmt(S.heatIn) + ' W'], ['Heat out (convection)', fmt(S.heatOut) + ' W'], ['Heat in (fixed temperatures)', fmt(S.heatFixed) + ' W'], mesh, ['Solver', `${S.R.iterations} iterations · ${fmt(S.seconds)} s`]];
+  const thermalRows = () => [['Max temperature', fmt(S.tmax) + ' °C'], ['Min temperature', fmt(S.tmin) + ' °C'], ['Max heat flux', fmtSig(S.fmax * 1e6) + ' W/m²'], ['Heat in (sources)', fmt(S.heatIn) + ' W'], ['Heat out (convection)', fmt(S.heatOut) + ' W'], ['Heat in (fixed temperatures)', fmt(S.heatFixed) + ' W']];
+  if (S.kind === 'thermal') return [...thermalRows(), mesh, ['Solver', `${S.RT.iterations} iterations · ${fmt(S.seconds)} s`]];
+  if (S.kind === 'buckling') return [['Lowest load factor', S.factors.length ? fmt(S.factors[0]) : 'no buckling (tension)'], ['Applied load', S.applied.map(v => fmt(v)).join(', ') + ' N'], ...(S.factors.length ? [['Critical load', fmtSig(S.factors[0] * Math.hypot(...S.applied)) + ' N']] : []), ['Stress under the applied load', fmt(S.vmax) + ' MPa max'], mesh, ['Solver', `${S.R.iterations} + ${S.iterations} passes · ${fmt(S.seconds)} s`]];
+  if (S.kind === 'thermalstress') return [['Max stress', fmt(S.vmax) + ' MPa'], ['Max displacement', fmt(S.dmax) + ' mm'], ['Min safety factor', S.sfmin > 1e6 ? '—' : fmt(S.sfmin)], ['Reference temperature', fmt(S.refTemp) + ' °C'], ...thermalRows().slice(0, 2), ['Reaction', S.R.reaction.map(v => fmt(v)).join(', ') + ' N'], mesh, ['Solver', `${S.RT.iterations} + ${S.R.iterations} iterations · ${fmt(S.seconds)} s`]];
   return [['Max stress', fmt(S.vmax) + ' MPa'], ['Max displacement', fmt(S.dmax) + ' mm'], ['Min safety factor', S.sfmin > 1e6 ? '—' : fmt(S.sfmin)], ['Applied load', S.applied.map(v => fmt(v)).join(', ') + ' N'], ['Reaction', S.R.reaction.map(v => fmt(v)).join(', ') + ' N'],
     mesh, ['Solver', `${S.R.iterations} iterations · ${fmt(S.seconds)} s`]];
 }
 function simReport() {
   const S = simRes, st = simStudy(), esc = x => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;'), kind = S.kind;
   renderer.render(scene, camera); let img = ''; try { img = renderer.domElement.toDataURL('image/png'); } catch (e) { }
-  const what = { static: 'Linear static stress', modal: 'Natural frequencies (modal analysis)', thermal: 'Steady-state heat transfer' }[kind];
-  const modeTable = kind === 'modal' ? `<h2>Modes</h2><table><tr><th>Mode</th><th>Frequency (Hz)</th><th>Mass X</th><th>Mass Y</th><th>Mass Z</th></tr>${S.freqs.map((f, i) => `<tr><td>${i + 1}</td><td>${fmt(f)}</td>${S.participation[i].map(v => `<td>${(v * 100).toFixed(1)} %</td>`).join('')}</tr>`).join('')}</table>` : '';
-  const matHead = kind === 'thermal' ? '<th>k (W/m·K)</th>' : kind === 'modal' ? '<th>E (MPa)</th><th>ν</th><th>Density (g/cm³)</th>' : '<th>E (MPa)</th><th>ν</th><th>Yield (MPa)</th>';
-  const matRow = m => { const p = SIM_MATERIALS[m] || []; return kind === 'thermal' ? `<td>${SIM_THERMAL[m] ?? ''}</td>` : kind === 'modal' ? `<td>${p[0]}</td><td>${p[1]}</td><td>${MATERIALS[m]?.density || 7.85}</td>` : `<td>${p[0]}</td><td>${p[1]}</td><td>${p[2]}</td>`; };
+  const what = { static: 'Linear static stress', modal: 'Natural frequencies (modal analysis)', thermal: 'Steady-state heat transfer', thermalstress: 'Thermal stress (steady-state temperatures with linear static stress)', buckling: 'Linear buckling' }[kind];
+  const modeTable = kind === 'buckling' ? `<h2>Buckling modes</h2><table><tr><th>Mode</th><th>Load factor</th><th>Critical load (N)</th></tr>${S.factors.map((f, i) => `<tr><td>${i + 1}</td><td>${fmt(f)}</td><td>${fmtSig(f * Math.hypot(...S.applied))}</td></tr>`).join('')}</table>` : kind === 'modal' ? `<h2>Modes</h2><table><tr><th>Mode</th><th>Frequency (Hz)</th><th>Mass X</th><th>Mass Y</th><th>Mass Z</th></tr>${S.freqs.map((f, i) => `<tr><td>${i + 1}</td><td>${fmt(f)}</td>${S.participation[i].map(v => `<td>${(v * 100).toFixed(1)} %</td>`).join('')}</tr>`).join('')}</table>` : '';
+  const matHead = kind === 'thermalstress' ? '<th>E (MPa)</th><th>ν</th><th>Yield (MPa)</th><th>k (W/m·K)</th><th>α (1/K)</th>' : kind === 'thermal' ? '<th>k (W/m·K)</th>' : kind === 'modal' ? '<th>E (MPa)</th><th>ν</th><th>Density (g/cm³)</th>' : '<th>E (MPa)</th><th>ν</th><th>Yield (MPa)</th>';
+  const matRow = m => { const p = SIM_MATERIALS[m] || []; return kind === 'thermalstress' ? `<td>${p[0]}</td><td>${p[1]}</td><td>${p[2]}</td><td>${SIM_THERMAL[m] ?? ''}</td><td>${SIM_ALPHA[m] ?? ''}</td>` : kind === 'thermal' ? `<td>${SIM_THERMAL[m] ?? ''}</td>` : kind === 'modal' ? `<td>${p[0]}</td><td>${p[1]}</td><td>${MATERIALS[m]?.density || 7.85}</td>` : `<td>${p[0]}</td><td>${p[1]}</td><td>${p[2]}</td>`; };
   const val = b => b.type === 'fixed' ? ['x', 'y', 'z'].filter(k => b[k] !== false).join(' ').toUpperCase() : bcSub(b);
   const html = `<!doctype html><meta charset="utf-8"><title>${esc(doc.name)} – ${esc(st.name)}</title><style>body{font:13px system-ui,sans-serif;margin:24px;color:#222;max-width:900px}table{border-collapse:collapse;margin:8px 0 18px}td,th{border:1px solid #bbb;padding:4px 8px;text-align:left}th{background:#eee}img{max-width:100%;border:1px solid #ccc}</style>
 <h1>${esc(doc.name)} — ${esc(st.name)}</h1><p>${what}, voxel finite elements. ${new Date().toISOString().slice(0, 10)}</p>
@@ -475,7 +540,7 @@ ${img ? `<img src="${img}" alt="Result plot">` : ''}
 <h2>Results</h2><table>${simSummary().map(([k, v]) => `<tr><th>${esc(k)}</th><td>${esc(v)}</td></tr>`).join('')}</table>${modeTable}
 <h2>Materials</h2><table><tr><th>Body</th><th>Material</th>${matHead}</tr>${simBodies().map(id => { const m = simMat(st, id); return `<tr><td>${esc(bodyName(id))}</td><td>${esc(m)}</td>${matRow(m)}</tr>`; }).join('')}</table>
 <h2>Boundary conditions</h2><table><tr><th>Name</th><th>Type</th><th>Value</th><th>Faces</th></tr>${[...st.constraints, ...(kind === 'modal' ? [] : st.loads)].map(b => `<tr><td>${esc(b.name)}</td><td>${BC_LABEL[b.type]}</td><td>${esc(val(b))}</td><td>${b.faces?.length || '—'}</td></tr>`).join('')}</table>
-<p>${kind === 'static' ? 'Results are linear elastic: stresses above the yield strength mean the part would deform permanently and the numbers there are no longer valid. Peaks at sharp corners and at fixed edges depend on the mesh.' : kind === 'modal' ? 'Frequencies assume small, undamped vibration. Lumped mass; bodies that touch are bonded.' : 'Constant material properties; radiation is not modelled.'}</p>`;
+<p>${kind === 'buckling' ? 'Linear (eigenvalue) buckling of the ideal shape; imperfections and plasticity lower real collapse loads.' : kind === 'thermalstress' ? 'Linear elastic with constant properties; thermal strain α (T − T_ref) from the steady-state temperatures.' : kind === 'static' ? 'Results are linear elastic: stresses above the yield strength mean the part would deform permanently and the numbers there are no longer valid. Peaks at sharp corners and at fixed edges depend on the mesh.' : kind === 'modal' ? 'Frequencies assume small, undamped vibration. Lumped mass; bodies that touch are bonded.' : 'Constant material properties; radiation is not modelled.'}</p>`;
   saveFile(slug() + '-simulation.zip', makeZip([{ name: slug() + '-simulation.html', data: html }]), 'application/zip');
 }
 // ribbon commands
@@ -492,7 +557,7 @@ cmd('sim.conv', 'Convection', 'conv', { run: () => newBC('conv') });
 cmd('sim.mesh', 'Mesh Settings', 'remesh', { run: () => openSimMesh() });
 cmd('sim.solve', 'Solve', 'start', { run: () => solveStudy() });
 cmd('sim.results', 'Results', 'analysis', { run: () => openSimResults() });
-cmd('sim.animate', 'Animate Mode', 'modes', { run: () => { if (!simShowing() || simRes.kind !== 'modal') { toast('Solve the modal study first'); return; } simView.anim = !simView.anim; if (simView.anim) startSimAnim(); else { stopSimAnim(); drawSim2(); } } });
+cmd('sim.animate', 'Animate Mode', 'modes', { run: () => { if (!simShowing() || !isModeKind(simRes.kind)) { toast('Solve the study first'); return; } simView.anim = !simView.anim; if (simView.anim) startSimAnim(); else { stopSimAnim(); drawSim2(); } } });
 cmd('sim.report', 'Report', 'exportstl', { run: () => simShowing() ? simReport() : toast('Solve the study first') });
 
 $('#busy').addEventListener('click', () => { simCancel = true; });

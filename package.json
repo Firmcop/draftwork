@@ -1,14 +1,14 @@
 {
   "name": "draftwork",
-  "version": "0.28.0",
+  "version": "0.29.0",
   "private": true,
   "description": "Browser-based parametric CAD: sketches, features, exact B-rep geometry (OpenCascade), STEP/STL export.",
   "type": "module",
   "scripts": {
     "build": "node scripts/build.mjs",
     "dev": "node scripts/build.mjs && node scripts/serve.mjs",
-    "test": "node --test tests/solver.test.mjs tests/kernel.test.mjs tests/brep.test.mjs tests/surface.test.mjs tests/sheet.test.mjs tests/plastic.test.mjs tests/mesh.test.mjs tests/cam.test.mjs tests/slicer.test.mjs tests/nest.test.mjs tests/fea.test.mjs tests/fea2.test.mjs",
-    "test:e2e": "node scripts/build.mjs && node tests/e2e.mjs && node tests/e2e-sketch.mjs && node tests/e2e-assembly.mjs && node tests/e2e-drawing.mjs && node tests/e2e-model.mjs && node tests/e2e-sketch2.mjs && node tests/e2e-surface.mjs && node tests/e2e-sheet.mjs && node tests/e2e-plastic.mjs && node tests/e2e-mesh.mjs && node tests/e2e-tools.mjs && node tests/e2e-drawing2.mjs && node tests/e2e-cam.mjs && node tests/e2e-sim.mjs && node tests/e2e-sim2.mjs && ENGINE_INLINE=1 node tests/e2e.mjs"
+    "test": "node --test tests/solver.test.mjs tests/kernel.test.mjs tests/brep.test.mjs tests/surface.test.mjs tests/sheet.test.mjs tests/plastic.test.mjs tests/mesh.test.mjs tests/cam.test.mjs tests/slicer.test.mjs tests/nest.test.mjs tests/fea.test.mjs tests/fea2.test.mjs tests/fea3.test.mjs",
+    "test:e2e": "node scripts/build.mjs && node tests/e2e.mjs && node tests/e2e-sketch.mjs && node tests/e2e-assembly.mjs && node tests/e2e-drawing.mjs && node tests/e2e-model.mjs && node tests/e2e-sketch2.mjs && node tests/e2e-surface.mjs && node tests/e2e-sheet.mjs && node tests/e2e-plastic.mjs && node tests/e2e-mesh.mjs && node tests/e2e-tools.mjs && node tests/e2e-drawing2.mjs && node tests/e2e-cam.mjs && node tests/e2e-sim.mjs && node tests/e2e-sim2.mjs && node tests/e2e-sim3.mjs && ENGINE_INLINE=1 node tests/e2e.mjs"
   },
   "engines": {
     "node": ">=20"

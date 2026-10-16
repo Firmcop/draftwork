@@ -82,9 +82,11 @@ Done
 - [x] Modal frequencies: natural frequencies and mode shapes (LOBPCG), supported or free, effective mass fractions, animated mode shapes
 - [x] Steady-state thermal: fixed temperatures, heat sources, convection; temperature and heat-flux plots, heat balance
 - [x] Several studies per design, each with its own ribbon tab; loads spread by tributary area
+- [x] Thermal stress: steady-state temperatures drive thermal expansion, combined with mechanical loads; reference temperature
+- [x] Linear buckling: geometric stiffness from the static stresses, load factors, critical loads and buckling shapes
 
 Next
-- [ ] Tetrahedral meshing that follows curved faces, contacts, thermal stress, buckling
+- [ ] Tetrahedral meshing that follows curved faces, contacts between bodies, nonlinear materials
 Static stress and deflection (FEA) on a server.
 
 ## Phase 5 — Generative design
