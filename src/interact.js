@@ -31,6 +31,7 @@ function setHint(t) { $('#hint').textContent = t || ''; }
 function defaultHint() {
   if (workspace === 'drawing') return setHint(drawingHint());
   if (workspace === 'manufacture' && !pick) return setHint(camHint());
+  if (workspace === 'simulation' && !pick) return setHint(simHint());
   if (pick) return setHint(pick.prompt + ' · Esc cancels');
   if (jointHint()) return setHint(jointHint());
   if (combMode) return setHint('Click curved edges to show or hide their curvature comb · Esc ends');
@@ -598,6 +599,7 @@ viewport.addEventListener('pointerup', e => {
   if (cpick && constructPickAt(e)) return;
   if (combPickAt(e)) return;
   if (camPickAt(e)) return;
+  if (simPickAt(e)) return;
   if (formPickAt(e)) return;
   const rf = regionDialogFeature();
   if (rf && toggleRegion(rf, regionAt(e, rf))) return;
@@ -859,6 +861,7 @@ if (location.hostname === 'localhost') window.__dw = {
   simAt: (x, y) => { if (!camSim) return null; const G = camSim.ctx.G, k = Math.round((y - G.y0) / G.g) * G.nx + Math.round((x - G.x0) / G.g); return [camSim.S[k], G.H[k]]; },
   camDbg: () => { const st = camSetup(), o = st.ops.find(x => x.type === 'pocket'), r = camCache.get(o.id)?.res, m = r.moves.filter(q => q[0] !== 0); return { n: m.length, zmin: Math.min(...m.map(q => q[3])), x: [Math.min(...m.map(q => q[1])), Math.max(...m.map(q => q[1]))], y: [Math.min(...m.map(q => q[2])), Math.max(...m.map(q => q[2]))], floors: floorsOf(o, camContext(st)), ops: camSim?.ops.map(q => q.name + ':' + q.moves.length), seq: camSim && [...new Set(camSim.moves.map(q => q[4]))] }; },
   print: () => printCache && { layers: printCache.sl.layers.length, minutes: printCache.stats.minutes, grams: printCache.stats.grams, size: printCache.size, shown: printGroup.children.length },
+  simInfo: () => ({ study: !!simStudy(), bcs: simStudy() && [...simStudy().constraints, ...simStudy().loads].map(b => b.type + ':' + b.faces.length), res: simRes && { vmax: simRes.vmax, dmax: simRes.dmax, sfmin: simRes.sfmin, reaction: simRes.R.reaction, ne: simRes.M.ne, it: simRes.R.iterations, converged: simRes.R.converged, warn: simRes.warn } }),
   regen: () => doRegen(),
   rebuild: async () => { if (isBrep()) await engineReset(); else cache = []; await doRegen(); },
   curveScreen: i => { const sk = featById(sketchId), c = sk.geo.curves[i]; const pts = curvePts(sk, c, id => geoPos(sk, id), cc => geoRadius(sk, cc)); const m = pts[Math.floor(pts.length / 2)], m2 = pts.length === 2 ? [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2] : m; return window.__dw.sketchScreen(m2[0], m2[1]); },

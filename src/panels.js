@@ -32,6 +32,7 @@ function renderBrowser() {
   const t = $('#btree'); t.replaceChildren();
   const add = (lvl, o) => { t.append(node(lvl, o)); return expanded.has(o.key); };
   if (workspace === 'manufacture') { expanded.add('camroot'); renderCamBrowser(add); return; }
+  if (workspace === 'simulation') { for (const k of ['simroot', 'simbc', 'simld', 'simres']) if (!expanded.has('x' + k)) { expanded.add(k); expanded.add('x' + k); } renderSimBrowser(add); return; }
   if (!add(0, { key: 'root', icon: 'doc', label: doc.name, renameKey: 'doc', onRename: v => { checkpoint(); doc.name = v; $('#docTitle').textContent = v; }, onDbl: () => { renaming = 'doc'; renderBrowser(); },
     menu: () => [{ label: 'Rename', icon: 'params', action: () => { renaming = 'doc'; renderBrowser(); } }] })) return;
   if (add(1, { key: 'settings', icon: 'gear', label: 'Document Settings' })) {

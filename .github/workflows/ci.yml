@@ -30,6 +30,7 @@ jobs:
       - run: node tests/e2e-tools.mjs
       - run: node tests/e2e-drawing2.mjs
       - run: node tests/e2e-cam.mjs
+      - run: node tests/e2e-sim.mjs
       - run: ENGINE_INLINE=1 node tests/e2e.mjs
       - uses: actions/upload-artifact@v4
         with:

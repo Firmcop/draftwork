@@ -347,3 +347,10 @@ pre.gcode { max-height: 260px; overflow: auto; background: var(--bg); border: 1p
 .note.bad { color: var(--danger, #c0392b); }
 .nestsheet { margin: 10px 0; }
 .nestsheet svg { border: 1px solid var(--line); border-radius: 4px; background: #fff; max-height: 360px; }
+.ws-simulation .timeline { display: none !important; }
+.simlegend { position: absolute; right: 18px; top: 140px; z-index: 6; width: 150px; height: 230px; background: var(--raised); border: 1px solid var(--line); border-radius: 6px; box-shadow: var(--shadow); font: 11px var(--font-data, monospace); color: var(--fg); }
+.simlegend .lt { position: absolute; left: 10px; top: 8px; right: 8px; font: 600 11px var(--font-ui, system-ui); }
+.simlegend .lbar { position: absolute; left: 12px; top: 32px; width: 18px; height: 160px; border: 1px solid var(--line); }
+.simlegend .lmax { position: absolute; left: 38px; top: 28px; } .simlegend .lmin { position: absolute; left: 38px; top: 182px; }
+.simlegend .lnote { position: absolute; left: 10px; bottom: 8px; color: var(--muted, #888); }
+.busy { cursor: pointer; }

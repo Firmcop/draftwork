@@ -74,7 +74,13 @@ Next
 - [ ] Supports for overhangs, turning, adaptive (constant-engagement) clearing, tool holders and collision checks
 2.5D milling, routing, laser/plasma toolpaths, G-code post-processors; sheet metal; plastic design; nesting.
 
-## Phase 4 — Simulation
+## Phase 4 — Simulation *(started)*
+
+Done
+- [x] Linear static stress (voxel FEA with bending-accurate elements), fixed/force/pressure/gravity, stress, displacement, safety factor, report
+
+Next
+- [ ] Tetrahedral meshing that follows curved faces, contacts, modal frequencies, thermal, buckling
 Static stress and deflection (FEA) on a server.
 
 ## Phase 5 — Generative design

@@ -126,6 +126,15 @@ const TABS = {
     { name: 'ACTIONS', bar: ['cam.generate', 'cam.simulate', 'cam.post'], menu: ['cam.generate', 'cam.simulate', 'cam.post'] },
     { name: 'MANAGE', bar: ['cam.tools'], menu: ['cam.tools'] },
   ],
+  'STATIC STRESS': [
+    { name: 'STUDY', bar: ['sim.study'], menu: ['sim.study'] },
+    { name: 'MATERIALS', bar: ['sim.mats'], menu: ['sim.mats'] },
+    { name: 'CONSTRAINTS', bar: ['sim.fixed'], menu: ['sim.fixed'] },
+    { name: 'LOADS', bar: ['sim.force', 'sim.pressure', 'sim.gravity'], menu: ['sim.force', 'sim.pressure', 'sim.gravity'] },
+    { name: 'MESH', bar: ['sim.mesh'], menu: ['sim.mesh'] },
+    { name: 'SOLVE', bar: ['sim.solve'], menu: ['sim.solve'] },
+    { name: 'RESULTS', bar: ['sim.results', 'sim.report'], menu: ['sim.results', 'sim.report'] },
+  ],
   ADDITIVE: [
     { name: 'SETUP', bar: ['am.setup'], menu: ['am.setup'] },
     { name: 'NEST', bar: ['nest'], menu: ['nest'] },
@@ -198,7 +207,7 @@ const TABS = {
     { name: 'FINISH SKETCH', bar: ['k.finish'], menu: ['k.finish'], finish: true },
   ],
 };
-const WORKSPACES = [['Design', null], ['Generative Design', P5], ['Render', P2], ['Animation', P2], ['Simulation', P4], ['Manufacture', null], ['Drawing', null]];
+const WORKSPACES = [['Design', null], ['Generative Design', P5], ['Render', P2], ['Animation', P2], ['Simulation', null], ['Manufacture', null], ['Drawing', null]];
 
 function runCmd(id) {
   const c = CMD[id]; if (!c) return;
@@ -211,7 +220,7 @@ function tip(c) { return c.label + (c.key ? ` (${c.key})` : '') + (c.phase ? ` Â
 
 function renderRibbon() {
   const tabs = $('#rtabs'); tabs.replaceChildren();
-  const names = workspace === 'drawing' ? ['DRAWING'] : workspace === 'manufacture' ? ['MILLING', 'ADDITIVE'] : Object.keys(TABS).filter(t => t !== 'SKETCH' && t !== 'DRAWING' && t !== 'MILLING' && t !== 'ADDITIVE');
+  const names = workspace === 'drawing' ? ['DRAWING'] : workspace === 'manufacture' ? ['MILLING', 'ADDITIVE'] : workspace === 'simulation' ? ['STATIC STRESS'] : Object.keys(TABS).filter(t => !['SKETCH', 'DRAWING', 'MILLING', 'ADDITIVE', 'STATIC STRESS'].includes(t));
   if (mode === 'sketch' && workspace !== 'drawing') names.push('SKETCH');
   if (mode !== 'sketch' && activeTab === 'SKETCH') activeTab = 'SOLID';
   if (!names.includes(activeTab)) activeTab = names[0];
@@ -275,7 +284,7 @@ function openMenu(anchor, items, o = {}) {
 document.addEventListener('pointerdown', e => { if (!e.target.closest('.menu') && !e.target.closest('[aria-haspopup]')) closeMenus(); });
 
 function openWorkspaceMenu() {
-  openMenu($('#wsBtn'), [{ head: 'Workspaces' }, ...WORKSPACES.map(([n, ph]) => ({ label: n.toUpperCase(), icon: n === 'Design' ? 'doc' : n === 'Simulation' ? 'analysis' : n === 'Manufacture' ? 'make' : n === 'Drawing' ? 'properties' : n === 'Animation' ? 'motion' : n === 'Render' ? 'appearance' : 'form', phase: ph, checked: (n === 'Design' && workspace === 'design') || (n === 'Drawing' && workspace === 'drawing') || (n === 'Manufacture' && workspace === 'manufacture') ? true : null, action: () => { if (ph) toast(`The ${n} workspace is planned for ${ph}`); else if (n === 'Drawing') { if (workspace === 'manufacture') exitManufacture(); enterDrawing(); } else if (n === 'Manufacture') enterManufacture(); else if (n === 'Design') { if (workspace === 'drawing') exitDrawing(); if (workspace === 'manufacture') exitManufacture(); } } }))]);
+  openMenu($('#wsBtn'), [{ head: 'Workspaces' }, ...WORKSPACES.map(([n, ph]) => ({ label: n.toUpperCase(), icon: n === 'Design' ? 'doc' : n === 'Simulation' ? 'analysis' : n === 'Manufacture' ? 'make' : n === 'Drawing' ? 'properties' : n === 'Animation' ? 'motion' : n === 'Render' ? 'appearance' : 'form', phase: ph, checked: (n === 'Design' && workspace === 'design') || (n === 'Drawing' && workspace === 'drawing') || (n === 'Manufacture' && workspace === 'manufacture') || (n === 'Simulation' && workspace === 'simulation') ? true : null, action: () => { const leave = () => { if (workspace === 'drawing') exitDrawing(); if (workspace === 'manufacture') exitManufacture(); if (workspace === 'simulation') exitSimulation(); }; if (ph) toast(`The ${n} workspace is planned for ${ph}`); else if (n === 'Drawing') { if (workspace !== 'drawing') { leave(); enterDrawing(); } } else if (n === 'Manufacture') { if (workspace !== 'manufacture') { leave(); enterManufacture(); } } else if (n === 'Simulation') { if (workspace !== 'simulation') { leave(); enterSimulation(); } } else if (n === 'Design') leave(); } }))]);
 }
 function openFileMenu() {
   openMenu($('#abFile'), [
