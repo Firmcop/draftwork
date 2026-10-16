@@ -407,3 +407,22 @@ table.grid tr.sel td { background: color-mix(in srgb, var(--accent) 22%, transpa
 .locrow.on { background: color-mix(in srgb, var(--accent) 18%, transparent); }
 .locrow:hover { background: var(--hover); }
 .datapanel[hidden] { display: none; }
+/* command wheel */
+.wheel { position: fixed; z-index: 60; width: 0; height: 0; }
+.wheel-disc { position: absolute; left: -128px; top: -128px; width: 256px; height: 256px; border-radius: 50%; background: color-mix(in srgb, var(--panel) 72%, transparent); border: 1px solid var(--line); box-shadow: 0 8px 28px rgba(0,0,0,.18); backdrop-filter: blur(3px); pointer-events: none; }
+.wheel-item { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 6px; max-width: 140px; padding: 5px 9px; border-radius: 16px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+.wheel-item span { overflow: hidden; text-overflow: ellipsis; }
+.wheel-item .ico { width: 16px; height: 16px; flex: none; }
+.wheel-item:hover, .wheel-item:focus-visible { background: var(--accent); color: #fff; border-color: var(--accent); outline: none; }
+.wheel-center { position: absolute; left: -15px; top: -15px; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--line); background: var(--panel); color: var(--muted); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.wheel-center .ico { width: 12px; height: 12px; }
+.wheel-more { position: absolute; left: -110px; top: 140px; width: 220px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,.16); padding: 4px 0; max-height: 46vh; overflow-y: auto; }
+.wheel-more .mi { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 10px; border: 0; background: none; color: var(--fg); font: inherit; text-align: left; cursor: pointer; }
+.wheel-more .mi .ico { width: 16px; height: 16px; }
+.wheel-more .mi:hover, .wheel-more .mi:focus-visible { background: var(--hover); outline: none; }
+/* job status */
+.abtn.jobs.busy .ico { animation: jobpulse 1s ease-in-out infinite alternate; color: var(--accent); }
+@keyframes jobpulse { from { opacity: .35; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .abtn.jobs.busy .ico { animation: none; } }
+.prefs { min-width: 400px; padding: 0 14px; }
+.prefs h4 { margin: 12px 0 4px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }

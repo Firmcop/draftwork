@@ -43,7 +43,7 @@ Next
 - [x] v0.31 Extents: extrude (distance, two sides, to object, all; start offset, taper, thin walls), revolve (angle, two sides, full; symmetric/flipped), hole (simple, counterbore, countersink; tapped metric coarse, cosmetic or modeled thread; distance, to object, through all)
 - [x] v0.32 Shape control: chamfer (equal, two distances, distance + angle), variable-radius and full round fillets, Offset Face (neighbouring flat faces extend), Silhouette Split (body or faces), sweep guide rail and end scale, loft along a centre line and to a start/end point
 - [ ] Loft rails and tangent/curvature end conditions; sweep twist
-- [ ] v0.33 Interface: canvas marking menu, preferences (up direction, units, default material), Create Drawing from the browser, job status
+- [x] v0.33 Interface: right-click command wheel (repeat last command, context list for the selected body, sketch wheel), preferences (Z/Y up, theme, new-design type and material, right-drag pan/orbit), Create Drawing from the browser (whole design, a body or a component), job status
 - [ ] Desktop packaging (Tauri)
 
 ## Phase 2 — Drawings, assemblies, animation *(started)*

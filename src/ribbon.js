@@ -251,6 +251,7 @@ function runCmd(id) {
   const c = CMD[id]; if (!c) return;
   closeMenus();
   { const blk = typeof designBlock === 'function' ? designBlock(id) : null; if (blk) { toast(blk); return; } }
+  if (typeof noteCmd === 'function') noteCmd(id);
   if (!c.run) { toast(`${c.label} is planned for ${c.phase}${c.note ? '. ' + c.note : ''}`); return; }
   if (mode === 'sketch' && !id.startsWith('k.') && !['measure', 'section', 'com', 'params', 'properties', 'bom', 'exportstl', 'make3d', 'select'].includes(id)) finishSketch(true);
   c.run();
@@ -327,7 +328,7 @@ function openWorkspaceMenu() {
 }
 function openFileMenu() {
   openMenu($('#abFile'), [
-    { label: 'New Design', icon: 'doc', action: () => newDesign('hybrid') },
+    { label: 'New Design', icon: 'doc', action: () => newDesign(typeof prefs !== 'undefined' ? prefs.newType : 'hybrid') },
     { label: 'New Part, Assembly or Hybrid…', icon: 'plus', action: () => openNewDesignDialog() },
     { label: 'Open…', icon: 'apps', action: () => toggleDataPanel(true) },
     { label: 'Open sample: bearing bracket', icon: 'bodyi', action: () => openInTab(sampleDoc(), { msg: 'Sample bracket opened' }) },
@@ -340,6 +341,7 @@ function openFileMenu() {
     { label: 'Download file (.json)', icon: 'exportstl', action: () => saveProject() },
     { label: 'Import STEP…', icon: 'insertmesh', action: () => startImportSTEP() },
     { label: 'Export STEP / STL (.zip)…', icon: 'exportstl', action: () => openExportDialog() },
+    { label: 'Preferences…', icon: 'gear', action: () => openPreferences() },
     '-',
     { label: 'Keyboard shortcuts and roadmap', icon: 'help', action: () => openHelpModal() },
   ]);

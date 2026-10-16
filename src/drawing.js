@@ -158,11 +158,11 @@ function standardLayout() {
 }
 function newDrawingData() {
   const L = standardLayout() || { scale: 1, views: [] };
-  return { sheet: 'A3', scale: L.scale, views: L.views, dims: [], auto: true, title: { author: '', partNo: '', material: doc.material || '', checked: '' } };
+  return { sheet: 'A3', scale: L.scale, views: L.views, dims: [], auto: true, title: { author: '', partNo: doc.meta?.partNumber || '', material: doc.material || '', checked: '' } };
 }
 
 // ---------- geometry from the engine ----------
-function dwItems() { return [...result.bodies.entries()].filter(([id, b]) => b.shape && !bodyHidden(id)).map(([id, b]) => ({ id, shape: b.shape, place: bodyXf(id) === IDENT ? null : xfParts(bodyXf(id)) })); }
+function dwItems() { const only = doc.drawing?.bodies?.length ? new Set(doc.drawing.bodies) : null; return [...result.bodies.entries()].filter(([id, b]) => b.shape && !bodyHidden(id) && (!only || only.has(id))).map(([id, b]) => ({ id, shape: b.shape, place: bodyXf(id) === IDENT ? null : xfParts(bodyXf(id)) })); }
 async function dwRefresh() {
   if (!isBrep()) return;
   const allViews = dwSheets().flatMap(s => s.views || []);   // one projection serves every sheet

@@ -160,6 +160,7 @@ const IC = {
   conv: '<path d="M3 8c3-3 6 3 9 0s6 3 9 0M3 13c3-3 6 3 9 0s6 3 9 0M3 18c3-3 6 3 9 0s6 3 9 0"/>',
   buckle: '<path d="M5 3h14M5 21h14"/><path class="a" d="M12 3c-5 4-5 14 0 18"/><path d="M15 8l-2-2M15 16l-2 2"/>',
   history: '<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v4h4"/><path class="a" d="M12 8v4l3 2"/>',
+  activity: '<path d="M3 12h4l2-6 4 12 2-6h6"/>',
   modes: '<path d="M2 12c2.5-7 5-7 7.5 0s5 7 7.5 0 3.5-5 5-3"/><path class="a" d="M2 12h20" opacity=".4"/>',
   generic: '<rect x="4" y="4" width="16" height="16" class="b"/><path d="M8 12h8"/>',
 };

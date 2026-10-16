@@ -860,6 +860,7 @@ if (location.hostname === 'localhost') window.__dw = {
   print: () => printCache && { layers: printCache.sl.layers.length, minutes: printCache.stats.minutes, grams: printCache.stats.grams, size: printCache.size, shown: printGroup.children.length },
   view: name => setView(name, true),
   run: id => runCmd(id),
+  camera: () => ({ up: camera.up.toArray().map(v => Math.round(v * 1000) / 1000), dir: camera.position.clone().sub(controls.target).normalize().toArray().map(v => Math.round(v * 1000) / 1000), grid: gridGroup.rotation.x, theme: document.documentElement.getAttribute('data-theme'), ws: workspace, drawingBodies: doc.drawing?.bodies || null, jobs: jobs.map(j => j.label + (j.end ? ':done' : ':run')) }),
   edit: id => editFeature(id),
   mark: () => checkpoint(),
   tabs: () => ({ active: tabIdx, list: tabs.map((t, i) => { const d = i === tabIdx ? doc : t.doc; return { name: d.name, type: d.meta?.type || 'hybrid', id: d.meta?.id || null, version: d.meta?.version || 0, pn: d.meta?.partNumber || null, features: d.features.length, dirty: i === tabIdx ? dirty : !!t.dirty }; }) }),

@@ -36,6 +36,7 @@ jobs:
       - run: node tests/e2e-library.mjs
       - run: node tests/e2e-extents.mjs
       - run: node tests/e2e-shape.mjs
+      - run: node tests/e2e-ui.mjs
       - run: ENGINE_INLINE=1 node tests/e2e.mjs
       - uses: actions/upload-artifact@v4
         with:
