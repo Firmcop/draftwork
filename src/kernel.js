@@ -551,6 +551,8 @@ function step(f, out) {
       const op = f.type === 'hole' ? 'cut' : (f.op || 'join');
       const ext = out.bodies.size && (op === 'join' || op === 'cut') ? op : null;
       let tool;
+      if ((f.type === 'extrude' && ((f.extent && f.extent !== 'distance') || +f.taper || f.thin || +f.startOffset)) || (f.type === 'revolve' && f.extent && f.extent !== 'angle') || (f.type === 'hole' && ((f.extent && f.extent !== 'distance') || f.tapped || f.holeType === 'csink')))
+        throw new Error('This option needs the exact geometry engine, which has not loaded in this view');
       if (f.type === 'extrude' || f.type === 'revolve') {
         const sk = out.sketches.get(f.sketch);
         if (!sk) throw new Error('Choose a sketch that comes before this feature');
@@ -676,7 +678,7 @@ export function resolveFeatures(features, vars) {
   return features.map(f => { const holder = {}; const r = conv(f, holder); if (holder.error) r.error = holder.error; return r; });
 }
 const NUMERIC = new Set(['offset', 'distance', 'angle', 'count', 'count2', 'spacing', 'spacing2', 'cx', 'cy', 'w', 'h', 'd', 'r', 'rot', 'sides', 'length', 'width',
-  'diameter', 'depth', 'cbDiameter', 'cbDepth', 'radius', 'thickness', 'value', 'neutralOffset', 'wall', 'pathIndex', 'major', 'minor', 'dx', 'dy', 'dz', 'rx', 'ry', 'rz', 'tipAngle', 'x', 'y', 'bendRadius', 'kFactor', 'height', 'pitch', 'revolutions', 'section_size', 'factor', 'tolerance', 'gap', 'draftAngle', 'clearance', 'holeDiameter', 'holeDepth', 'holeBelow', 'ribs', 'ribThickness', 'ribLength', 'ribHeight', 'ribAngle', 'hookDepth', 'insertAngle', 'orient', 'edge', 'percent', 'iterations', 'strength', 'nx', 'ny', 'nz', 'level']);
+  'diameter', 'depth', 'cbDiameter', 'cbDepth', 'radius', 'thickness', 'value', 'neutralOffset', 'wall', 'pathIndex', 'major', 'minor', 'dx', 'dy', 'dz', 'rx', 'ry', 'rz', 'tipAngle', 'x', 'y', 'bendRadius', 'kFactor', 'height', 'pitch', 'revolutions', 'section_size', 'factor', 'tolerance', 'gap', 'draftAngle', 'clearance', 'holeDiameter', 'holeDepth', 'holeBelow', 'ribs', 'ribThickness', 'ribLength', 'ribHeight', 'ribAngle', 'hookDepth', 'insertAngle', 'orient', 'edge', 'percent', 'iterations', 'strength', 'nx', 'ny', 'nz', 'level', 'distance2', 'startOffset', 'taper', 'angle2', 'csDiameter', 'csAngle', 'threadDepth']);
 
 // ---- crease edges that tolerate T-junctions (boolean output) ----
 // Edges are grouped by the infinite line they lie on; two triangles are neighbours when

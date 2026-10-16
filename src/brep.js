@@ -103,6 +103,141 @@ function revolveDrawing(drawing, pl, axisDir, origin, angle) {
   return T(res);
 }
 
+// size of the model so far (for "through all" extents)
+function modelReach(out, o) {
+  let r = 100;
+  for (const b of out.bodies.values()) { try { const [lo, hi] = b.shape.boundingBox.bounds; for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) r = Math.max(r, Math.hypot(x - o.x, y - o.y, z - o.z)); } catch (e) { } }
+  return r * 1.2 + 10;
+}
+// a target plane (construction plane or picked flat face) as { o, n }
+function targetPlane(ref, out) {
+  if (!ref) throw new Error('Pick the plane or flat face to extend to');
+  const p = resolvePlane(ref, out), M = planeMatrix(p.base, p.offset, p.flip);
+  return { o: new THREE.Vector3().setFromMatrixPosition(M), n: new THREE.Vector3(0, 0, 1).transformDirection(M) };
+}
+// half-space on the side of plane (o, n) that contains point q, as a big box solid
+function halfSpaceBox(o, n, q, size) {
+  const s = Math.sign(n.clone().dot(q.clone().sub(o))) || 1, nn = n.clone().multiplyScalar(s);
+  const u = Math.abs(nn.x) < 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0); u.sub(nn.clone().multiplyScalar(u.dot(nn))).normalize();
+  const pl = new RC.Plane([o.x, o.y, o.z], [u.x, u.y, u.z], [nn.x, nn.y, nn.z]);
+  return T(RC.drawRectangle(4 * size, 4 * size).sketchOnPlane(pl).extrude(2 * size));
+}
+// extrude with extent types, start offset, taper and thin walls
+function extrudeExtents(f, out, drawing, pi) {
+  const P0 = brepPlane(pi.base, pi.offset, pi.flip), n = P0.n, o = P0.o;
+  let base = drawing;
+  if (f.thin) {
+    const t = +f.thickness; if (!(t > 0)) throw new Error('Wall thickness must be greater than 0 mm');
+    const side = f.thinSide || 'inside';
+    try { base = side === 'outside' ? drawing.offset(t).cut(drawing) : side === 'both' ? drawing.offset(t / 2).cut(drawing.offset(-t / 2)) : drawing.cut(drawing.offset(-t)); }
+    catch (e) { throw new Error('The wall is too thick for this profile'); }
+  }
+  const so = +f.startOffset || 0, ext = f.extent || 'distance', dir = f.direction || 'one';
+  const segs = [];   // [start along n, length]
+  let clip = null;
+  if (ext === 'distance') {
+    const d = Math.abs(+f.distance); if (!(d > 0)) throw new Error('Distance must be greater than 0 mm');
+    segs.push(dir === 'reverse' ? [so - d, d, -1] : dir === 'symmetric' ? [so - d / 2, d, 0] : [so, d, 1]);
+  } else if (ext === 'two') {
+    const d1 = Math.abs(+f.distance), d2 = Math.abs(+f.distance2); if (!(d1 > 0) || !(d2 > 0)) throw new Error('Both distances must be greater than 0 mm');
+    segs.push([so, d1, 1], [so - d2, d2, -1]);
+  } else if (ext === 'all') {
+    const L = modelReach(out, o);
+    segs.push(dir === 'reverse' ? [so - L, L, -1] : dir === 'symmetric' ? [so - L, 2 * L, 0] : [so, L, 1]);
+  } else if (ext === 'to') {
+    const tp = targetPlane(f.to, out), start = o.clone().add(n.clone().multiplyScalar(so));
+    const along = tp.n.dot(n), dist = tp.n.dot(tp.o.clone().sub(start));
+    if (Math.abs(along) > 1 - 1e-9) {   // parallel: an exact distance
+      const s = dist / along; if (Math.abs(s) < 1e-6) throw new Error('The target is on the sketch plane');
+      segs.push(s > 0 ? [so, s, 1] : [so + s, -s, -1]);
+    } else {
+      if (Math.abs(along) < 1e-6) throw new Error('The target face is parallel to the extrude direction');
+      const L = modelReach(out, o), sgn = Math.sign(dist / along) || 1;
+      segs.push(sgn > 0 ? [so, L, 1] : [so - L, L, -1]);
+      clip = { tp, q: start, L };
+    }
+  } else throw new Error('Unknown extent');
+  const taper = +f.taper || 0;
+  if (Math.abs(taper) >= 60) throw new Error('Taper must be between −60° and 60°');
+  if (taper) for (let i = segs.length - 1; i >= 0; i--) if (segs[i][2] === 0) { const [st, len] = segs[i]; segs.splice(i, 1, [st, len / 2, -1], [st + len / 2, len / 2, 1]); }   // symmetric: narrows both ways from the middle
+  let tool = null;
+  for (const [st, len, sense] of segs) {
+    let part = extrudeDrawing(base, brepPlane(pi.base, pi.offset, pi.flip, st).plane, len);
+    if (taper) {
+      // neutral plane at the start face: positive taper narrows away from the sketch
+      const sides = [[sense > 0 ? st : st + len, sense]];
+      for (const [z, sg] of sides) {
+        const np = brepPlane(pi.base, pi.offset, pi.flip, z).plane, startPl = brepPlane(pi.base, pi.offset, pi.flip, st).plane, endPl = brepPlane(pi.base, pi.offset, pi.flip, st + len).plane;
+        try { part = T(part.draft(taper * sg, fi => fi.not(g => g.inPlane(startPl)).not(g => g.inPlane(endPl)), np)); }
+        catch (e) { throw new Error('The taper could not be applied (try a smaller angle)'); }
+      }
+    }
+    tool = tool ? T(tool.fuse(part)) : part;
+  }
+  if (clip) tool = T(tool.intersect(halfSpaceBox(clip.tp.o, clip.tp.n, clip.q, clip.L)));
+  return tool;
+}
+
+// metric coarse tapped holes: [name, nominal diameter, pitch]
+const TAP_SIZES = [['M2', 2, 0.4], ['M2.5', 2.5, 0.45], ['M3', 3, 0.5], ['M4', 4, 0.7], ['M5', 5, 0.8], ['M6', 6, 1], ['M8', 8, 1.25], ['M10', 10, 1.5], ['M12', 12, 1.75], ['M14', 14, 2], ['M16', 16, 2], ['M20', 20, 2.5], ['M24', 24, 3]];
+// helical V cut for an internal thread on radius r, from axis point c along ax for len
+function internalThreadTool(c, ax, r, len, pitch, lefthand) {
+  const d = 0.54 * pitch, w = 0.62 * pitch / 2, eps = 0.05;
+  const c0 = c.clone().add(ax.clone().multiplyScalar(pitch * 0.25));
+  const spine = T(RC.makeHelix(pitch, len - pitch * 0.5, r, [c0.x, c0.y, c0.z], [ax.x, ax.y, ax.z], !!lefthand));
+  let vp = [[-eps, -w], [d, 0], [-eps, w]];
+  if ((vp[1][0] - vp[0][0]) * (vp[2][1] - vp[0][1]) - (vp[2][0] - vp[0][0]) * (vp[1][1] - vp[0][1]) < 0) vp = vp.reverse();
+  return sweepProfileAlongHelix(spine, [c0.x, c0.y, c0.z], () => RC.draw(vp[0]).lineTo(vp[1]).lineTo(vp[2]).close());
+}
+// hole: simple / counterbore / countersink, optional tap size (modeled or cosmetic thread), extents distance / all / to
+function holeTool(f, out, P, c, axisPlane) {
+  const kind = f.holeType || (f.cbore ? 'cbore' : 'simple'), ext = f.extent || 'distance';
+  let r = +f.diameter / 2, tap = null;
+  if (f.tapped) { const t = TAP_SIZES.find(x => x[0] === f.tapSize) || TAP_SIZES[5]; tap = { name: t[0], D: t[1], p: t[2] }; r = (t[1] - t[2]) / 2; }
+  if (!(r > 0)) throw new Error('Diameter must be greater than 0 mm');
+  const down = P.n.clone().negate();
+  let depth, clip = null, tip = f.tip !== false;
+  if (ext === 'all') { depth = modelReach(out, c); tip = false; }
+  else if (ext === 'to') {
+    const tp = targetPlane(f.to, out), along = tp.n.dot(down), dist = tp.n.dot(tp.o.clone().sub(c));
+    if (Math.abs(along) < 1e-6) throw new Error('The target is parallel to the hole');
+    const s = dist / along; if (!(s > 1e-6)) throw new Error('The target must be below the hole placement');
+    if (Math.abs(along) > 1 - 1e-9) depth = s; else { depth = modelReach(out, c); clip = tp; }
+    tip = false;
+  } else { depth = +f.depth; if (!(depth > 0)) throw new Error('Depth must be greater than 0 mm'); }
+  const top = 0.01, pts = [[0, top]];
+  let headDepth = 0;
+  if (kind === 'cbore') {
+    const R = +f.cbDiameter / 2, cd = +f.cbDepth;
+    if (!(R > r)) throw new Error('Counterbore diameter must be larger than the hole diameter');
+    if (!(cd > 0 && cd < depth)) throw new Error('Counterbore depth must be between 0 and the hole depth');
+    pts.push([R, top], [R, -cd], [r, -cd]); headDepth = cd;
+  } else if (kind === 'csink') {
+    const R = +f.csDiameter / 2, ang = +f.csAngle || 90;
+    if (!(R > r)) throw new Error('Countersink diameter must be larger than the hole diameter');
+    if (!(ang > 10 && ang < 170)) throw new Error('Countersink angle must be between 10° and 170°');
+    const hgt = (R - r) / Math.tan(ang / 2 * Math.PI / 180);
+    if (!(hgt < depth)) throw new Error('The countersink is deeper than the hole');
+    pts.push([R + top * Math.tan(ang / 2 * Math.PI / 180), top], [r, -hgt]); headDepth = hgt;
+  } else pts.push([r, top]);
+  pts.push([r, -depth]);
+  if (tip) pts.push([0, -depth - r / Math.tan(((+f.tipAngle || 118) / 2) * Math.PI / 180)]); else pts.push([0, -depth]);
+  let pen = RC.draw(pts[0]); for (let i = 1; i < pts.length; i++) pen = pen.lineTo(pts[i]);
+  let tool = revolveDrawing(pen.close(), axisPlane, P.n, c, 360);
+  if (clip) tool = T(tool.intersect(halfSpaceBox(clip.o, clip.n, c, depth)));
+  if (tap && f.modeled) {
+    // a through hole only needs thread as deep as the material goes
+    let reach = depth;
+    if (ext !== 'distance') { reach = 0; for (const b of out.bodies.values()) { try { const [lo, hi] = b.shape.boundingBox.bounds; for (const x of [lo[0], hi[0]]) for (const y of [lo[1], hi[1]]) for (const z of [lo[2], hi[2]]) reach = Math.max(reach, down.dot(new THREE.Vector3(x, y, z).sub(c))); } catch (e) { } } reach = Math.min(depth, reach + tap.p); }
+    const avail = reach - headDepth, len = Math.min(avail, +f.threadDepth > 0 ? +f.threadDepth : avail);
+    if (len < tap.p * 1.5) throw new Error('The hole is too shallow for a modeled thread');
+    const start = c.clone().add(down.clone().multiplyScalar(headDepth));
+    try { tool = T(tool.fuse(internalThreadTool(start, down, r, len, tap.p, f.lefthand))); }
+    catch (e) { throw new Error('The modeled thread could not be built; try a cosmetic thread or a different thread depth'); }
+  }
+  return tool;
+}
+
 function brepTool(f, out) {
   switch (f.type) {
     case 'extrude': case 'revolve': {
@@ -110,15 +245,20 @@ function brepTool(f, out) {
       if (!sk) throw new Error('Choose a sketch that comes before this feature');
       const pi = placementInfo(sk.feature, out);
       const drawing = sketchDrawing(sk.feature, f.regions);
-      if (f.type === 'extrude') {
-        const d = Math.abs(+f.distance); if (!(d > 0)) throw new Error('Distance must be greater than 0 mm');
-        const shift = f.direction === 'reverse' ? -d : f.direction === 'symmetric' ? -d / 2 : 0;
-        return extrudeDrawing(drawing, brepPlane(pi.base, pi.offset, pi.flip, shift).plane, d);
-      }
-      const ang = Math.min(360, Math.abs(+f.angle)); if (!(ang > 0)) throw new Error('Angle must be greater than 0°');
+      if (f.type === 'extrude') return extrudeExtents(f, out, drawing, pi);
       const P = brepPlane(pi.base, pi.offset, pi.flip);
-      if (f.axis !== 'u' && f.axis !== 'v' && f.axis) { const A = axisOf(f.axis, out); return revolveDrawing(drawing, P.plane, new THREE.Vector3(...A.d), new THREE.Vector3(...A.o), ang); }   // a construction or origin axis
-      return revolveDrawing(drawing, P.plane, f.axis === 'u' ? P.u : P.v, P.o, ang);
+      const A = f.axis !== 'u' && f.axis !== 'v' && f.axis ? (() => { const a = axisOf(f.axis, out); return { d: new THREE.Vector3(...a.d), o: new THREE.Vector3(...a.o) }; })() : { d: f.axis === 'u' ? P.u : P.v, o: P.o };   // construction/origin axis or a sketch axis
+      // extents: one side, symmetric (total angle split) or two sides; full = 360°
+      const full = (f.extent || 'angle') === 'full';
+      const a1 = full ? 360 : Math.min(360, Math.abs(+f.angle)), a2 = (f.extent === 'two') ? Math.min(360, Math.abs(+f.angle2 || 0)) : 0;
+      if (!(a1 > 0)) throw new Error('Angle must be greater than 0°');
+      let total = a1, start = 0;
+      if (!full && f.extent === 'two') { total = Math.min(360, a1 + a2); start = -a2; }
+      else if (!full && f.direction === 'symmetric') start = -a1 / 2;
+      else if (!full && f.direction === 'reverse') start = -a1;
+      let shape = revolveDrawing(drawing, P.plane, A.d, A.o, total);
+      if (start) shape = T(shape.rotate(start, [A.o.x, A.o.y, A.o.z], [A.d.x, A.d.y, A.d.z]));
+      return shape;
     }
     case 'box': case 'cylinder': {
       const pi = placementInfo(f, out), P = brepPlane(pi.base, pi.offset, pi.flip);
@@ -144,23 +284,7 @@ function brepTool(f, out) {
         if (!(R > 0 && r > 0)) throw new Error('Diameters must be greater than 0 mm');
         if (r >= R) throw new Error('Minor diameter must be smaller than the major diameter');
         d = RC.drawCircle(r).translate(R, 0);
-      } else {
-        const r = +f.diameter / 2, depth = +f.depth;
-        if (!(r > 0)) throw new Error('Diameter must be greater than 0 mm');
-        if (!(depth > 0)) throw new Error('Depth must be greater than 0 mm');
-        const top = 0.01, pts = [[0, top]];
-        if (f.cbore) {
-          const R = +f.cbDiameter / 2, cd = +f.cbDepth;
-          if (!(R > r)) throw new Error('Counterbore diameter must be larger than the hole diameter');
-          if (!(cd > 0 && cd < depth)) throw new Error('Counterbore depth must be between 0 and the hole depth');
-          pts.push([R, top], [R, -cd], [r, -cd]);
-        } else pts.push([r, top]);
-        pts.push([r, -depth]);
-        if (f.tip !== false) pts.push([0, -depth - r / Math.tan(((+f.tipAngle || 118) / 2) * Math.PI / 180)]);
-        else pts.push([0, -depth]);
-        let pen = RC.draw(pts[0]); for (let i = 1; i < pts.length; i++) pen = pen.lineTo(pts[i]);
-        d = pen.close();
-      }
+      } else return holeTool(f, out, P, c, axisPlane);
       return revolveDrawing(d, axisPlane, P.n, c, 360);
     }
   }

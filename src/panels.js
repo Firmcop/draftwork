@@ -270,6 +270,13 @@ function planeOptions(beforeIdx, cur) {
   doc.features.slice(0, beforeIdx).filter(f => f.type === 'plane').forEach(p => opts.push([p.id, p.name]));
   return opts;
 }
+const TAP_LIST = [['M2', 2, 0.4], ['M2.5', 2.5, 0.45], ['M3', 3, 0.5], ['M4', 4, 0.7], ['M5', 5, 0.8], ['M6', 6, 1], ['M8', 8, 1.25], ['M10', 10, 1.5], ['M12', 12, 1.75], ['M14', 14, 2], ['M16', 16, 2], ['M20', 20, 2.5], ['M24', 24, 3]];
+// "To object" target: a construction plane from the list, or a picked plane / flat face
+function targetRow(f, key) {
+  const idx = featIndex(f.id);
+  return h('div', {}, selField('To', f, key, [['', 'Pick a plane or face…'], ...planeOptions(idx, f[key])], { id: 'ds-to' }),
+    h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn', type: 'button', id: 'pick-to', onclick: () => startPick({ prompt: 'Select the plane or flat face to extend to', planes: true, faces: true, then: c => { checkpoint(); f[key] = pickToPlaneRef(c); rerenderDialog(); scheduleRegen(0); } }) }, 'Pick plane or face')));
+}
 function bodiesBefore(fid) { return (result.before.get(fid) || [...result.bodies.keys()]).map(id => [id, bodyName(id)]); }   // before its first rebuild a new feature sees the current bodies
 const opOptions = [['join', 'Join'], ['cut', 'Cut'], ['intersect', 'Intersect'], ['new', 'New Body']];
 
@@ -325,23 +332,45 @@ function featureFields(f, idx) {
   switch (f.type) {
     case 'extrude': {
       const sks = doc.features.slice(0, idx).filter(g => g.type === 'sketch');
-      out.push(section_('Input', selField('Profile', f, 'sketch', sks.length ? sks.map(s => [s.id, s.name + ' (' + profCount(s) + ')']) : [['', 'No sketch before this step']]),
-        profileRow(), segField('Direction', f, 'direction', [['one', 'One side'], ['symmetric', 'Symmetric'], ['reverse', 'Flipped']]), exField('Distance', f, 'distance', 'mm', { min: 0.001 })));
+      out.push(section_('Input', selField('Profile', f, 'sketch', sks.length ? sks.map(s => [s.id, s.name + ' (' + profCount(s) + ')']) : [['', 'No sketch before this step']]), profileRow()));
+      const ext = f.extent || 'distance';
+      const extKids = [selField('Extent', f, 'extent', [['distance', 'Distance'], ['two', 'Two sides'], ['to', 'To object'], ['all', 'All']], { rerender: true, id: 'ds-extent' })];
+      if (ext === 'distance' || ext === 'all') extKids.push(segField('Direction', f, 'direction', [['one', 'One side'], ['symmetric', 'Symmetric'], ['reverse', 'Flipped']]));
+      if (ext === 'distance' || ext === 'two') extKids.push(exField(ext === 'two' ? 'Side 1 distance' : 'Distance', f, 'distance', 'mm', { min: 0.001 }));
+      if (ext === 'two') extKids.push(exField('Side 2 distance', f, 'distance2', 'mm', { min: 0.001 }));
+      if (ext === 'to') extKids.push(targetRow(f, 'to'));
+      extKids.push(exField('Start offset', f, 'startOffset', 'mm'), exField('Taper angle', f, 'taper', '°', { min: -59, max: 59 }));
+      out.push(section_('Extent', ...extKids));
+      out.push(section_('Thin', chkField('Thin extrude (wall only)', f, 'thin', { rerender: true }), ...(f.thin ? [exField('Wall thickness', f, 'thickness', 'mm', { min: 0.001 }), segField('Wall side', f, 'thinSide', [['inside', 'Inside'], ['both', 'Centered'], ['outside', 'Outside']])] : [])));
       out.push(section_('Result', ...opsSection()));
       break;
     }
     case 'revolve': {
       const sks = doc.features.slice(0, idx).filter(g => g.type === 'sketch');
       out.push(section_('Input', selField('Profile', f, 'sketch', sks.length ? sks.map(s => [s.id, s.name]) : [['', 'No sketch before this step']]),
-        profileRow(), selField('Axis', f, 'axis', [['v', 'Sketch Y axis'], ['u', 'Sketch X axis'], ...axisOptions(idx)]), exField('Angle', f, 'angle', '°', { min: 0.01, max: 360 })));
+        profileRow(), selField('Axis', f, 'axis', [['v', 'Sketch Y axis'], ['u', 'Sketch X axis'], ...axisOptions(idx)])));
+      { const rx = f.extent || 'angle', kids = [selField('Extent', f, 'extent', [['angle', 'Angle'], ['two', 'Two sides'], ['full', 'Full']], { rerender: true, id: 'ds-extent' })];
+        if (rx === 'angle') kids.push(segField('Direction', f, 'direction', [['one', 'One side'], ['symmetric', 'Symmetric'], ['reverse', 'Flipped']]));
+        if (rx !== 'full') kids.push(exField(rx === 'two' ? 'Side 1 angle' : 'Angle', f, 'angle', '°', { min: 0.01, max: 360 }));
+        if (rx === 'two') kids.push(exField('Side 2 angle', f, 'angle2', '°', { min: 0.01, max: 360 }));
+        out.push(section_('Extent', ...kids)); }
       out.push(section_('Result', ...opsSection()));
       break;
     }
     case 'hole':
       out.push(section_('Placement', ...placement(), exField('Center X', f, 'cx'), exField('Center Y', f, 'cy')));
-      out.push(section_('Shape', segField('Hole type', f, 'cbore', [[false, 'Simple'], [true, 'Counterbore']], { rerender: true }), exField('Diameter', f, 'diameter', 'mm', { min: 0.01 }), exField('Depth', f, 'depth', 'mm', { min: 0.01 }),
-        ...(f.cbore ? [exField('C-bore diameter', f, 'cbDiameter', 'mm', { min: 0.01 }), exField('C-bore depth', f, 'cbDepth', 'mm', { min: 0.01 })] : []),
-        segField('Drill point', f, 'tip', [[false, 'Flat'], [true, 'Angled']], { rerender: true }), ...(f.tip ? [exField('Point angle', f, 'tipAngle', '°', { min: 30, max: 179 })] : [])));
+      { if (!f.holeType) f.holeType = f.cbore ? 'cbore' : 'simple';
+        const hx = f.extent || 'distance';
+        out.push(section_('Shape', segField('Hole type', f, 'holeType', [['simple', 'Simple'], ['cbore', 'C-bore'], ['csink', 'C-sink']], { rerender: true, after: () => { f.cbore = f.holeType === 'cbore'; if (f.holeType === 'csink') { f.csDiameter ??= Math.round((+f.diameter || 6) * 2 * 10) / 10; f.csAngle ??= 90; } } }),
+          chkField('Tapped (metric coarse)', f, 'tapped', { rerender: true, after: () => { f.tapSize ??= 'M6'; f.threadDepth ??= 0; } }),
+          ...(f.tapped ? [selField('Size', f, 'tapSize', TAP_LIST.map(t => [t[0], `${t[0]} × ${t[2]} (drill Ø${fmt(t[1] - t[2])})`]), { id: 'ds-tapsize' }), chkField('Modeled thread (cut the real thread)', f, 'modeled'), exField('Thread depth (0 = full)', f, 'threadDepth', 'mm', { min: 0 })]
+            : [exField('Diameter', f, 'diameter', 'mm', { min: 0.01 })]),
+          ...(f.holeType === 'cbore' ? [exField('C-bore diameter', f, 'cbDiameter', 'mm', { min: 0.01 }), exField('C-bore depth', f, 'cbDepth', 'mm', { min: 0.01 })] : []),
+          ...(f.holeType === 'csink' ? [exField('C-sink diameter', f, 'csDiameter', 'mm', { min: 0.01 }), exField('C-sink angle', f, 'csAngle', '°', { min: 10, max: 170 })] : [])));
+        out.push(section_('Extent', selField('Extent', f, 'extent', [['distance', 'Distance'], ['to', 'To object'], ['all', 'All (through)']], { rerender: true, id: 'ds-extent' }),
+          ...(hx === 'distance' ? [exField('Depth', f, 'depth', 'mm', { min: 0.01 }), segField('Drill point', f, 'tip', [[false, 'Flat'], [true, 'Angled']], { rerender: true }), ...(f.tip ? [exField('Point angle', f, 'tipAngle', '°', { min: 30, max: 179 })] : [])] : []),
+          ...(hx === 'to' ? [targetRow(f, 'to')] : []),
+          ...(f.tapped && !f.modeled ? [h('p', { class: 'note' }, 'Cosmetic thread: the hole is the tap drill size and the thread is noted, not modeled.')] : []))); }
       break;
     case 'box': case 'cylinder': case 'sphere': case 'torus': {
       const dims = f.type === 'box' ? [exField('Length (X)', f, 'w', 'mm', { min: 0.01 }), exField('Width (Y)', f, 'd', 'mm', { min: 0.01 }), exField('Height', f, 'h', 'mm', { min: 0.01 })]

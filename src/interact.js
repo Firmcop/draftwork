@@ -860,6 +860,7 @@ if (location.hostname === 'localhost') window.__dw = {
   print: () => printCache && { layers: printCache.sl.layers.length, minutes: printCache.stats.minutes, grams: printCache.stats.grams, size: printCache.size, shown: printGroup.children.length },
   view: name => setView(name, true),
   run: id => runCmd(id),
+  edit: id => editFeature(id),
   mark: () => checkpoint(),
   tabs: () => ({ active: tabIdx, list: tabs.map((t, i) => { const d = i === tabIdx ? doc : t.doc; return { name: d.name, type: d.meta?.type || 'hybrid', id: d.meta?.id || null, version: d.meta?.version || 0, pn: d.meta?.partNumber || null, features: d.features.length, dirty: i === tabIdx ? dirty : !!t.dirty }; }) }),
   lib: async () => ({ projects: (await libProjects()).map(p => ({ name: p.name, folders: p.folders.map(f => f.name) })), designs: (await libAll('designs')).map(d => ({ name: d.name, type: d.type, version: d.version, pn: d.partNumber, folder: d.folder })) }),
