@@ -57,11 +57,11 @@ cmd('properties', 'Properties', 'properties', { run: () => openPropertiesModal()
 cmd('insderive', 'Insert Derive', 'derive', { run: () => startDerive() }); cmd('decal', 'Decal', 'decal', { run: () => startCanvas('decal') }); cmd('canvas', 'Canvas', 'canvas', { run: () => startCanvas('canvas') });
 cmd('insstep', 'Insert STEP', 'insertmesh', { run: () => startImportSTEP() }); cmd('insmesh', 'Insert Mesh', 'insertmesh', { run: () => startInsertMesh() }); cmd('inssvg', 'Insert SVG', 'insertsvg', { run: () => startInsert2D('svg') }); cmd('insdxf', 'Insert DXF', 'insertsvg', { run: () => startInsert2D('dxf') });
 // assemble
-cmd('newcomp', 'New Component', 'component', { run: () => newComponent() }); cmd('joint', 'Joint', 'joint', { key: 'J', run: () => newJoint() }); cmd('asbuilt', 'As-built Joint', 'joint', { run: () => newJoint(true) });
+cmd('newcomp', 'New Component', 'component', { run: () => newComponent() }); cmd('joint', 'Joint', 'joint', { key: 'J', run: () => newJoint() }); cmd('asbuilt', 'As-built Joint', 'joint', { key: 'Shift+J', run: () => newJoint(true) });
 cmd('rigid', 'Rigid Group', 'component', { run: () => newRigidGroup() }); cmd('drive', 'Drive Joints', 'motion', { run: () => { const j = (selJoint && joints().find(x => x.id === selJoint)) || joints().at(-1); j ? editJoint(j.id) : toast('There are no joints yet'); } }); cmd('motionlink', 'Motion Link', 'motion', { run: () => openMotionLink() }); cmd('contact', 'Enable Contact Sets', 'motion', { run: () => toggleContact() });
 // select
 cmd('select', 'Select', 'select', { run: () => cancelModes(true) });
-cmd('window', 'Window Selection', 'window', { run: () => startWindowSelect() }); cmd('filters', 'Selection Filters', 'filter', { run: () => openSelectionFilters() });
+cmd('window', 'Window Selection', 'window', { key: '1', run: () => startWindowSelect() }); cmd('filters', 'Selection Filters', 'filter', { run: () => openSelectionFilters() });
 // surface
 for (const [k, t, l, ic] of [['s.extrude', 'sextrude', 'Extrude Surface', 'patch'], ['s.revolve', 'srevolve', 'Revolve Surface', 'revolve'], ['s.sweep', 'ssweep', 'Sweep Surface', 'sweep'], ['s.loft', 'sloft', 'Loft Surface', 'loft'], ['s.patch', 'patch', 'Patch', 'patch'], ['s.offset', 'soffset', 'Offset Surface', 'offsetsurf'], ['s.ruled', 'ruled', 'Ruled Surface', 'offsetsurf'],
   ['s.trim', 'trim', 'Trim', 'trim'], ['s.untrim', 'untrim', 'Untrim', 'trim'], ['s.extend', 'sextend', 'Extend', 'extend'], ['s.stitch', 'stitch', 'Stitch', 'stitch'], ['s.unstitch', 'unstitch', 'Unstitch', 'stitch'], ['s.reverse', 'reverse', 'Reverse Normal', 'patch'], ['s.delete', 'deleteface', 'Delete Face', 'delete']])
@@ -88,10 +88,10 @@ cmd('k.line', 'Line', 'line', { key: 'L', run: () => setSketchTool('line') });
 cmd('k.rect2', '2-Point Rectangle', 'rect2', { key: 'R', run: () => setSketchTool('rect2') });
 cmd('k.rectc', 'Center Rectangle', 'rectc', { run: () => setSketchTool('rectc') });
 cmd('k.circle', 'Center Diameter Circle', 'circle', { key: 'C', run: () => setSketchTool('circle') });
-cmd('k.polygon', 'Circumscribed Polygon', 'polygon', { key: 'P', run: () => setSketchTool('polygon') });
-cmd('k.slot', 'Center to Center Slot', 'slot', { key: 'S', run: () => setSketchTool('slot') });
+cmd('k.polygon', 'Circumscribed Polygon', 'polygon', { run: () => setSketchTool('polygon') });
+cmd('k.slot', 'Center to Center Slot', 'slot', { run: () => setSketchTool('slot') });
 cmd('k.arc', 'Three-Point Arc', 'arc', { key: 'A', run: () => setSketchTool('arc3') }); cmd('k.spline', 'Fit Point Spline', 'spline', { run: () => setSketchTool('spline') }); cmd('k.point', 'Point', 'spoint', { run: () => setSketchTool('point') }); cmd('k.text', 'Text', 'text', { run: () => setSketchTool('text') });
-cmd('k.mirror', 'Sketch Mirror', 'mirror', { run: () => startSketchMirror() }); cmd('k.cpattern', 'Sketch Circular Pattern', 'patcirc', { run: () => startSketchCPattern() }); cmd('k.project', 'Project', 'insertmesh', { run: () => setSketchTool('project') });
+cmd('k.mirror', 'Sketch Mirror', 'mirror', { run: () => startSketchMirror() }); cmd('k.cpattern', 'Sketch Circular Pattern', 'patcirc', { run: () => startSketchCPattern() }); cmd('k.project', 'Project', 'insertmesh', { key: 'P', run: () => setSketchTool('project') });
 cmd('k.dimension', 'Sketch Dimension', 'dimension', { key: 'D', run: () => { if (geoSel.size) addDimension(); else { setSketchTool('select'); toast('Select a line, two points, a circle or arc, or two lines, then press D'); } } });
 cmd('k.fillet', 'Sketch Fillet', 'fillet2d', { run: () => setSketchTool('fillet2d') }); cmd('k.trim', 'Trim', 'trim2d', { key: 'T', run: () => setSketchTool('trim') }); cmd('k.extend', 'Extend', 'extend', { run: () => setSketchTool('extend') }); cmd('k.offset', 'Offset', 'offset2d', { key: 'O', run: () => offsetSelection() });
 cmd('k.move', 'Move/Copy', 'move', { run: () => setSketchTool('select') });
@@ -343,6 +343,7 @@ function openFileMenu() {
     { label: 'Export STEP / STL (.zip)…', icon: 'exportstl', action: () => openExportDialog() },
     { label: 'Preferences…', icon: 'gear', action: () => openPreferences() },
     '-',
-    { label: 'Keyboard shortcuts and roadmap', icon: 'help', action: () => openHelpModal() },
+    { label: 'Keyboard Shortcuts', icon: 'help', action: () => openShortcuts() },
+    { label: 'Help and roadmap', icon: 'help', action: () => openHelpModal() },
   ]);
 }

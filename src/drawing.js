@@ -625,6 +625,12 @@ function wireSheet() {
     else if (k === 'Enter' && dwSel?.type === 'note') noteEditDialog(dwSel.id);
     else if (k === 'd' || k === 'D') dwSetTool('dim');
     else if (k === 'f' || k === 'F') { dwFit(); renderSheet(); }
+    else if (k === 'c' || k === 'C') runCmd('dw.centers');
+    else if (k === 't' || k === 'T') dwSetTool('note');
+    else if (k === 'b' || k === 'B') dwSetTool('balloon');
+    else if (k === 'p' || k === 'P') runCmd('dw.std');
+    else if (k === 'm' || k === 'M') { dwTool = null; renderRibbon(); renderSheet(); defaultHint(); }
+    else if (k === 's' || k === 'S') openToolbox();
   }, true);
   window.addEventListener('resize', () => { if (workspace === 'drawing') { dwFit(); renderSheet(); } });
   sheetSvg.addEventListener('dblclick', e => {

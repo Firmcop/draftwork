@@ -178,3 +178,106 @@ function openUnitsDialog() {
     h('p', { class: 'note' }, 'Measurements, the status bar, drawing dimensions and dialog length fields use these units; a plain number in a length field is in these units. A value can also carry its own unit, for example 1 in, 2.5 cm or 30 deg (inside a longer expression, numbers without a unit are millimetres). The model itself is stored in millimetres.')),
     [h('button', { class: 'btn ok', id: 'units-ok', onclick: () => { checkpoint(); doc.units = u; persist(); closeModal(); renderBrowser(); renderInfo(); if (workspace === 'drawing') renderSheet(); toast('Document units: ' + u); } }, 'OK'), h('button', { class: 'btn', onclick: closeModal }, 'Cancel')]);
 }
+
+// ---------- Fusion keyboard shortcuts: system combinations, visibility, Model Toolbox ----------
+var clipboardBody = null, compColors = false;
+const WS_ORDER = ['Design', 'Simulation', 'Manufacture', 'Drawing'];
+function switchWorkspace(step) {
+  const cur = { design: 'Design', simulation: 'Simulation', manufacture: 'Manufacture', drawing: 'Drawing' }[workspace];
+  const next = WS_ORDER[(WS_ORDER.indexOf(cur) + step + WS_ORDER.length) % WS_ORDER.length];
+  leaveWorkspace();
+  if (next === 'Simulation') enterSimulation(); else if (next === 'Manufacture') enterManufacture(); else if (next === 'Drawing') enterDrawing();
+  toast(next + ' workspace');
+}
+function toggleEl(sel, name) { const el = $(sel); if (!el) return; const hide = el.style.display !== 'none'; el.style.display = hide ? 'none' : ''; toast(name + (hide ? ' hidden' : ' shown')); requestRender(); }
+// Ctrl/Cmd combinations; returns true when handled
+function systemKey(e, k) {
+  if (e.altKey) {
+    if (k === 'v') { toggleEl('#viewcube', 'View cube'); return true; }
+    if (k === 'b') { toggleEl('#browser', 'Browser'); return true; }
+    if (k === 'n') { toggleEl('#navbar', 'Navigation bar'); return true; }
+    if (k === 'p') { toggleDataPanel(); return true; }
+    if (k === 'r') { for (const s of ['#viewcube', '#browser', '#navbar']) { const el = $(s); if (el) el.style.display = ''; } $('#browser')?.classList.remove('min'); toggleDataPanel(false); toast('Default layout'); requestRender(); return true; }
+    return false;
+  }
+  if (k === 'n') { newDesign(prefs.newType); return true; }
+  if (k === 'o') { toggleDataPanel(true); return true; }
+  if (k === 'b') { cache = []; scheduleRegen(0); toast('Computing all'); return true; }
+  if (k === ']') { switchWorkspace(1); return true; }
+  if (k === '[') { switchWorkspace(-1); return true; }
+  if (k === 'g' && workspace === 'manufacture') { runCmd('cam.generate'); return true; }
+  if (k === 'c' && workspace === 'design' && selBody) { clipboardBody = selBody; toast('Copied ' + bodyName(selBody)); return true; }
+  if (k === 'v' && workspace === 'design' && clipboardBody) {
+    if (!result.bodies.has(clipboardBody)) { toast('The copied body no longer exists'); return true; }
+    checkpoint();
+    const f = { id: uid(), type: 'move', name: 'Paste ' + bodyName(clipboardBody), body: clipboardBody, copy: true, dx: 10, dy: 10, dz: 0, rx: 0, ry: 0, rz: 0 };
+    insertFeature(f); scheduleRegen(0); openFeatureDialog(f.id, true); toast('Pasted a copy; move it into place'); return true;
+  }
+  return false;
+}
+function toggleSelectionVisibility() {
+  if (selBody && result.bodies.has(selBody)) { meta(selBody).hidden = !meta(selBody).hidden; persist(); updateScene(); renderBrowser(); renderInfo(); return; }
+  if (selFeature && featById(selFeature)?.type === 'sketch') { doc.sketchShown[selFeature] = !doc.sketchShown[selFeature]; persist(); refreshOverlays(); renderBrowser(); return; }
+  if (multiSel.size) { for (const id of multiSel) meta(id).hidden = !meta(id).hidden; persist(); updateScene(); renderBrowser(); return; }
+  toast('Select a body or sketch, then press V to hide or show it');
+}
+function toggleComponentColors() {
+  compColors = !compColors;
+  const pal = ['#d9534a', '#3d7be0', '#3faa5b', '#e8913a', '#8e44ad', '#16a085', '#c0392b', '#2c3e50'];
+  for (const [id, sb] of shownBodies) {
+    const c = compOfBody(id), i = c ? comps().indexOf(c) : -1;
+    sb.mesh.material.color?.set(compColors && i >= 0 ? pal[i % pal.length] : bodyColor(id));
+  }
+  requestRender(); toast(compColors ? 'Component colors on' : 'Component colors off');
+}
+// S: searchable list of every command (Fusion's Model Toolbox / shortcut box)
+function openToolbox() {
+  closeMenus(); $('#toolbox')?.remove();
+  const box = h('div', { id: 'toolbox', class: 'toolbox', role: 'dialog', 'aria-label': 'Commands' });
+  const inp = h('input', { type: 'text', placeholder: 'Search commands…', 'aria-label': 'Search commands', autocomplete: 'off', spellcheck: 'false' });
+  const list = h('div', { class: 'tb-list', role: 'listbox' });
+  const ok = id => { const c = CMD[id]; if (!c?.run) return false; if (workspace === 'drawing') return id.startsWith('dw.') || ['measure', 'prefs'].includes(id); if (workspace === 'simulation') return id.startsWith('sim.') || id === 'prefs'; if (workspace === 'manufacture') return id.startsWith('cam.') || id.startsWith('am.') || id === 'nest'; if (mode === 'sketch') return id.startsWith('k.') || ['measure', 'extrude'].includes(id); return !id.startsWith('k.') && !id.startsWith('dw.') && !id.startsWith('sim.') && !id.startsWith('cam.') && !id.startsWith('am.'); };
+  const all = Object.keys(CMD).filter(ok);
+  let sel = 0, shown = [];
+  const draw = () => {
+    const q = inp.value.trim().toLowerCase();
+    shown = all.filter(id => !q || CMD[id].label.toLowerCase().includes(q) || id.toLowerCase().includes(q)).slice(0, 40);
+    if (sel >= shown.length) sel = 0;
+    list.replaceChildren(...shown.map((id, i) => h('button', { type: 'button', class: 'mi' + (i === sel ? ' on' : ''), role: 'option', 'aria-selected': String(i === sel), 'data-id': id, onclick: () => { close(); runCmd(id); }, html: icon(CMD[id].icon) + `<span class="lab">${CMD[id].label}</span>` + (CMD[id].key ? `<span class="key">${CMD[id].key}</span>` : '') })));
+    if (!shown.length) list.append(h('p', { class: 'note', style: 'padding:8px 12px' }, 'No matching command'));
+  };
+  const close = () => box.remove();
+  inp.addEventListener('input', () => { sel = 0; draw(); });
+  inp.addEventListener('keydown', e => {
+    e.stopPropagation();
+    if (e.key === 'Escape') { e.preventDefault(); close(); }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(shown.length - 1, sel + 1); draw(); list.children[sel]?.scrollIntoView({ block: 'nearest' }); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(0, sel - 1); draw(); list.children[sel]?.scrollIntoView({ block: 'nearest' }); }
+    else if (e.key === 'Enter') { e.preventDefault(); const id = shown[sel]; close(); if (id) runCmd(id); }
+  });
+  box.append(inp, list); document.body.append(box); draw();
+  box.style.left = Math.min(window.innerWidth - 330, Math.max(8, hudMouse.x - 150)) + 'px'; box.style.top = Math.min(window.innerHeight - 380, Math.max(120, hudMouse.y - 20)) + 'px';
+  setTimeout(() => inp.focus(), 10);
+  setTimeout(() => document.addEventListener('pointerdown', function off(ev) { if (!ev.target.closest('#toolbox')) { close(); document.removeEventListener('pointerdown', off, true); } }, true), 0);
+}
+cmd('toolbox', 'Model Toolbox (search commands)', 'select', { key: 'S', run: () => openToolbox() });
+// keyboard shortcut reference (Help)
+function openShortcuts() {
+  const groups = [
+    ['Design', [['E', 'Extrude'], ['H', 'Hole'], ['Q', 'Press Pull'], ['F', 'Fillet'], ['M', 'Move'], ['V', 'Hide/show the selection'], ['A', 'Appearance'], ['J', 'Joint'], ['Shift+J', 'As-built Joint'], ['Shift+N', 'Component colors'], ['I', 'Measure'], ['S', 'Model Toolbox (search commands)'], ['L / R / C', 'Start a sketch with Line / Rectangle / Circle'], ['1', 'Window selection'], ['Del', 'Delete']]],
+    ['Sketch', [['L', 'Line'], ['R', '2-point rectangle'], ['C', 'Center diameter circle'], ['A', 'Three-point arc'], ['T', 'Trim'], ['O', 'Offset'], ['P', 'Project'], ['X', 'Normal / construction'], ['D', 'Sketch dimension'], ['Type a number', 'Set the size while drawing (Tab, Enter)'], ['Esc', 'Stop the tool']]],
+    ['System', [['Ctrl+N', 'New design'], ['Ctrl+O', 'Open (data panel)'], ['Ctrl+S', 'Save version'], ['Ctrl+Shift+S', 'Recovery copy (download)'], ['Ctrl+Z / Ctrl+Y', 'Undo / redo'], ['Ctrl+C / Ctrl+V', 'Copy / paste a body'], ['Ctrl+B', 'Compute all'], ['Ctrl+] / Ctrl+[', 'Next / previous workspace'], ['Ctrl+Alt+V', 'Show/hide view cube'], ['Ctrl+Alt+B', 'Show/hide browser'], ['Ctrl+Alt+N', 'Show/hide navigation bar'], ['Ctrl+Alt+P', 'Show/hide data panel'], ['Ctrl+Alt+R', 'Default layout']]],
+    ['Drawing', [['P', 'Projected (standard) views'], ['D', 'Dimension'], ['C', 'Center marks'], ['T', 'Text'], ['B', 'Balloon'], ['M', 'Move (select)'], ['Del', 'Delete']]],
+    ['Simulation', [['N', 'New study'], ['E', 'Settings'], ['C', 'Structural constraint'], ['L / F', 'Structural load (force)'], ['H', 'Thermal load']]],
+    ['Manufacture', [['Ctrl+G', 'Generate toolpaths']]],
+    ['Mouse', [['Middle drag', 'Pan'], ['Shift + middle drag', 'Orbit'], ['Wheel', 'Zoom'], ['Right-click', 'Command wheel']]],
+  ];
+  openModal('Keyboard Shortcuts', 'help', h('div', {}, h('div', { class: 'shortcuts', id: 'shortcuts' }, ...groups.map(([g, rows]) => h('section', {}, h('h4', {}, g), h('dl', {}, ...rows.flatMap(([k, v]) => [h('dt', {}, ...k.split(' / ').flatMap((x, i) => [i ? ' / ' : '', h('kbd', {}, x)])), h('dd', {}, v)]))))),
+    h('p', { class: 'note', style: 'padding:0 14px' }, 'In a browser tab, Ctrl+N and Ctrl+Tab belong to the browser and may not reach Draftwork.')));
+}
+cmd('shortcuts', 'Keyboard Shortcuts', 'help', { run: () => openShortcuts() });
+// Shift + middle-drag orbits (Fusion); middle-drag pans
+{
+  const cv = renderer.domElement;
+  cv.addEventListener('pointerdown', e => { if (e.button === 1) controls.mouseButtons.MIDDLE = e.shiftKey ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN; }, true);
+}

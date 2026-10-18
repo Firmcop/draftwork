@@ -100,7 +100,7 @@ if (process.env.SHOTS) { await page.click('#vcHome'); await W(800); await page.s
 // slot tool: tangent arcs make an extrudable profile
 await page.click('.rbtn[aria-label^="Create Sketch"]'); await W(300);
 await page.click('#bMin'); await page.click('.node .nlab:text-is("XY")'); await page.click('#bMin'); await W(1500);
-await page.keyboard.press('s');
+await page.click('.rbtn[aria-label^="Center to Center Slot"]'); await W(200);
 const a = await sk(-30, 40), b = await sk(10, 40);
 await page.mouse.move(a.x, a.y); await page.mouse.down(); await page.mouse.move(b.x, b.y, { steps: 6 }); await page.mouse.up(); await W(600);
 g = await geo();

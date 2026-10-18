@@ -47,7 +47,7 @@ await ok();
 // offset face: push the top down 3 (chamfer and fillet faces follow)
 const v0 = (await vols())[0];
 await menu('Offset Face'); await clickAt(await scr(0, 0, 20));
-await page.fill('#dx-ofdist', '-3'); await page.keyboard.press('Tab'); await W(2000);
+await page.fill('#dx-ofdist', '-3'); await page.keyboard.press('Tab'); await W(600); await page.waitForFunction(() => document.querySelector('#busy').hidden, null, { timeout: 60000 }); await W(400);
 st = await state();
 check(st.features.at(-1) === 'offsetface:ok' && (await vols())[0] < v0 - 40 * 20 * 3, 'Offset Face pushes the top down 3 mm (' + (v0 - (await vols())[0]).toFixed(0) + ' mm³ less)');
 await ok();

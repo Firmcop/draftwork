@@ -45,7 +45,9 @@ function defaultHint() {
       extend: 'Click near the end of a line or arc to lengthen it to the next curve it meets',
       spline: lineDraft ? 'Click to add fit points. Click the last point again, or press Enter, to finish; click the first point to close.' : 'Click to place the first fit point',
       arc3: !gdraw?.pts?.length ? 'Click the arc start' : gdraw.pts.length === 1 ? 'Click the arc end' : 'Click a point the arc passes through',
-      rect2: 'Drag from corner to corner', rectc: 'Drag from the center to a corner', circle: 'Drag from the center outward', polygon: 'Drag from the center to a corner (6 equal sides)', slot: 'Drag from one end center to the other', ...sketchHints2() }[sketchTool];
+      ...(gdraw?.kind === 'shape' && gdraw.waiting ? { [sketchTool]: 'Click to finish, or type the size (Tab moves between values, Enter places it)' } : {
+      rect2: 'Click the first corner (or drag corner to corner)', rectc: 'Click the center (or drag center to corner)', circle: 'Click the center (or drag outward)', polygon: 'Click the center (or drag to a corner; 6 equal sides)', slot: 'Click the first end center (or drag to the other)' }),
+      ...(lineDraft && sketchTool === 'line' ? { line: 'Click the next point, or type the length (Tab: angle, Enter places it). Click the first point to close; Esc ends.' } : {}), ...sketchHints2() }[sketchTool];
     return setHint(t);
   }
   setHint('');
@@ -89,14 +91,16 @@ function newProfileFeature(type) {
   const f = type === 'extrude'
     ? { id: uid(), type, name: nextName(type), sketch: sk.id, distance: 10, direction: 'one', op, target: null }
     : { id: uid(), type, name: nextName(type), sketch: sk.id, axis: 'v', angle: 360, op, target: null };
+  if (doc.sketchShown?.[sk.id]) doc.sketchShown[sk.id] = false;   // like Fusion: the sketch hides once a feature uses it
   insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
 }
+var pendingSketchTool = null;
 function startCreateSketch() {
   startPick({ prompt: 'Select a plane or flat face to sketch on', planes: true, faces: true, then: c => {
     checkpoint();
     const f = { id: uid(), type: 'sketch', name: nextName('sketch'), plane: c.plane, offset: c.offset || 0, flip: !!c.flip, profiles: [], ...(c.body && compOfBody(c.body) ? { body: c.body } : {}) };
     insertFeature(f); lastSketchId = f.id;
-    doRegen(); enterSketch(f.id); setSketchTool('rect2');
+    doRegen(); enterSketch(f.id); setSketchTool(pendingSketchTool || 'rect2'); pendingSketchTool = null;
   } });
 }
 const PLACED_DEFAULTS = {
@@ -478,6 +482,7 @@ function finishSketch(silent) {
   exitSketch(false);
   if (!sk) return;
   const used = doc.features.some(f => f.sketch === sk.id);
+  if (!used && (sk.geo?.curves?.length || sk.profiles?.length)) { doc.sketchShown ||= {}; doc.sketchShown[sk.id] = true; }
   if (!silent && profCount(sk) && !used) toast('Sketch finished. Press E to extrude it.');
   else if (!silent && sk.geo?.curves.length && !profCount(sk)) toast('Sketch finished. It has no closed profile yet, so it cannot be extruded.');
   const n = new THREE.Vector3(0, 0, 1).transformDirection(M), view = camera.position.clone().sub(controls.target).normalize();
@@ -506,12 +511,20 @@ function startPick(o) {
   viewport.classList.add('picking');
   updateScene(); defaultHint();
 }
+function pickTip(e, text) {
+  let t = $('#picktip');
+  if (!text) { t?.remove(); return; }
+  if (!t) { t = h('div', { id: 'picktip', class: 'picktip', role: 'status' }); document.body.append(t); }
+  t.textContent = text; t.style.left = (e.clientX + 18) + 'px'; t.style.top = (e.clientY + 20) + 'px';
+}
 function cancelPick() {
   if (!pick) return;
+  $('#picktip')?.remove();
   pick = null; pickHover = null; viewport.classList.remove('picking');
   updateScene(); defaultHint();
 }
 function completePick(c) {
+  $('#picktip')?.remove();
   const p = pick; pick = null; pickHover = null;
   viewport.classList.remove('picking'); defaultHint();
   updateScene();
@@ -527,7 +540,7 @@ function pickAt(e) {
   let hits = raycaster.intersectObjects(targets, false);
   // A face beats a plane at (nearly) the same depth: origin planes often slice through parts.
   const firstBody = hits.find(x => x.object.userData.body);
-  if (firstBody) hits = hits.filter(x => x.object.userData.body || x.distance < firstBody.distance - Math.max(0.05, firstBody.distance * 1e-3));
+  if (firstBody) hits = hits.filter(x => x.object.userData.body || (!PLANES[x.object.userData.plane] && x.distance < firstBody.distance - Math.max(0.05, firstBody.distance * 1e-3)));   // over a body its faces win over the translucent origin planes
   for (let hit of hits) {
     const ud = hit.object.userData;
     if (ud.plane) {
@@ -536,6 +549,8 @@ function pickAt(e) {
       return { plane: ud.plane, offset: 0, flip: false, M, local: { x: snapHalf(l.x), y: snapHalf(l.y) }, label: PLANES[ud.plane] ? ud.plane + ' plane' : featById(ud.plane)?.name };
     }
     if (ud.body) {
+      const fh = (() => { const s0 = shownBodies.get(ud.body); return s0?.rec.shape ? brepMeshOf(s0.rec).triFace[hit.faceIndex] : null; })();
+      const tag = r => (r && !r.invalid ? { ...r, faceHash: fh } : r);
       // work in the body's as-modeled coordinates (its component may be moved by joints)
       hit = { ...hit, point: hit.point.clone().applyMatrix4(bodyXf(ud.body).clone().invert()) };
       const n = hit.face.normal.clone(), a = [Math.abs(n.x), Math.abs(n.y), Math.abs(n.z)];
@@ -550,7 +565,7 @@ function pickAt(e) {
         }
         const frame = frameFromPoint(hit.point, nn);
         const M = planeMatrix(frame, 0, false);
-        return { plane: frame, offset: 0, flip: false, face: true, body: ud.body, M, local: { x: 0, y: 0 }, label: `Angled face of ${bodyName(ud.body)}` };
+        return tag({ plane: frame, offset: 0, flip: false, face: true, body: ud.body, M, local: { x: 0, y: 0 }, label: `Angled face of ${bodyName(ud.body)}` });
       }
       const p = hit.point; let base, offset, flip;
       if (ax === 2) { base = 'XY'; offset = p.z; flip = n.z < 0; }
@@ -559,7 +574,7 @@ function pickAt(e) {
       offset = Math.round(offset * 1000) / 1000;
       const M = planeMatrix(base, offset, flip);
       const l = p.clone().applyMatrix4(M.clone().invert());
-      return { plane: base, offset, flip, face: true, body: ud.body, M, local: { x: snapHalf(l.x), y: snapHalf(l.y) }, label: `Face of ${bodyName(ud.body)} (${base} at ${fmt(offset)} mm${flip ? ', facing back' : ''})` };
+      return tag({ plane: base, offset, flip, face: true, body: ud.body, M, local: { x: snapHalf(l.x), y: snapHalf(l.y) }, label: `Face of ${bodyName(ud.body)} (${base} at ${fmt(offset)} mm${flip ? ', facing back' : ''})` });
     }
   }
   return null;
@@ -625,6 +640,7 @@ viewport.addEventListener('pointermove', e => {
       const c = pickAt(e);
       pickHover = c && !c.invalid ? c : null;
       setHint(c ? (c.invalid ? 'This face cannot be used yet' : c.label) : pick.prompt + ' · Esc cancels');
+      pickTip(e, c ? (c.invalid ? c.msg || 'Cannot use this' : c.label) : null);
       drawToolsOverlay();
     } else if (edgeDialogFeature() && !e.buttons) {
       const ef = edgeDialogFeature(), hit = FACE_PICK.has(ef.type) ? brepFaceHit(e) : brepEdgeHit(e);
@@ -754,7 +770,9 @@ function renderNavbar() {
 window.addEventListener('keydown', e => {
   const tag = e.target.tagName, typing = tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA';
   const k = e.key.toLowerCase();
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && k === 's') { e.preventDefault(); saveProject(); toast('Recovery copy downloaded'); return; }
   if ((e.ctrlKey || e.metaKey) && k === 's') { e.preventDefault(); saveCmd(); return; }
+  if ((e.ctrlKey || e.metaKey) && !typing && systemKey(e, k)) { e.preventDefault(); return; }
   if ((e.ctrlKey || e.metaKey) && (k === 'z' || k === 'y')) { if (typing) return; e.preventDefault(); (k === 'y' || e.shiftKey) ? redo() : undo(); return; }
   if (e.key === 'Escape') {
     if ($('#menus').children.length) return closeMenus();
@@ -765,8 +783,8 @@ window.addEventListener('keydown', e => {
     if (multiSel.size) { multiSel.clear(); updateScene(); renderSelectionBar(); return; }
     if (pick) return cancelPick();
     document.querySelectorAll('.dimedit').forEach(x => x.remove());
-    if (lineDraft) { lineDraft = null; refreshOverlays(); defaultHint(); return; }
-    if (gdraw) { gdraw = null; refreshOverlays(); defaultHint(); return; }
+    if (lineDraft) { lineDraft = null; hudHide(); refreshOverlays(); defaultHint(); return; }
+    if (gdraw) { window.removeEventListener('pointermove', onGeoMove); gdraw = null; hudHide(); refreshOverlays(); defaultHint(); return; }
     if (drag) { drag = null; refreshOverlays(); return; }
     if (mode === 'sketch' && sketchTool !== 'select') return setSketchTool('select');
     if (dlg) return closeDialog(false);
@@ -782,15 +800,28 @@ window.addEventListener('keydown', e => {
     }
   }
   if (typing || e.ctrlKey || e.metaKey || e.altKey || !$('#modalBack').hidden) return;
+  if (k === 's' && !e.shiftKey) { e.preventDefault(); openToolbox(); return; }
+  if (k === 's' && e.shiftKey) { e.preventDefault(); toast('Scripts and add-ins are not available in this version'); return; }
+  if (workspace === 'simulation') { const m = { n: 'sim.study', e: 'sim.mesh', c: simKind(simStudy()) === 'thermal' ? 'sim.temp' : 'sim.fixed', l: 'sim.force', f: 'sim.force', h: 'sim.heat' }; if (m[k]) { e.preventDefault(); runCmd(m[k]); } return; }
+  if (workspace === 'manufacture') return;
   if (mode === 'sketch') {
     if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); if (geoSel.size) deleteGeoSelection(); else if (selProfile) deleteProfile(selProfile); return; }
-    const map = { l: 'k.line', r: 'k.rect2', c: 'k.circle', a: 'k.arc', p: 'k.polygon', s: 'k.slot', d: 'k.dimension', v: 'k.select', x: 'k.construction', t: 'k.trim', o: 'k.offset', h: 'k.c.horizontal' };
+    // Fusion: L line, R rectangle, C circle, T trim, O offset, P project, X construction, D dimension, I measure
+    const map = { l: 'k.line', r: 'k.rect2', c: 'k.circle', a: 'k.arc', p: 'k.project', d: 'k.dimension', x: 'k.construction', t: 'k.trim', o: 'k.offset', h: 'k.c.horizontal', i: 'measure', v: 'k.select' };
     if (map[k]) { runCmd(map[k]); return; }
     if (k === 'e') { runCmd('extrude'); return; }
     return;
   }
-  const map = { e: 'extrude', h: 'hole', m: 'move', i: 'measure', a: 'appearance', q: 'presspull', f: 'fillet', j: 'joint' };
-  if (map[k]) { e.preventDefault(); runCmd(map[k]); return; }
+  if (e.shiftKey && k === 'j') { e.preventDefault(); runCmd('asbuilt'); return; }
+  if (e.shiftKey && k === 'n') { e.preventDefault(); toggleComponentColors(); return; }
+  if (k === 'v') { e.preventDefault(); toggleSelectionVisibility(); return; }
+  if (k === '1') { e.preventDefault(); runCmd('window'); return; }
+  if (k === '2' || k === '3') { e.preventDefault(); runCmd('window'); toast((k === '2' ? 'Freeform' : 'Paint') + ' selection is not available yet; using window selection'); return; }
+  // sketch tools from the model start a sketch: pick a plane, then draw
+  const sk = { l: 'line', r: 'rect2', c: 'circle' };
+  if (sk[k] && workspace === 'design') { e.preventDefault(); pendingSketchTool = sk[k]; startCreateSketch(); return; }
+  const map = { e: 'extrude', h: 'hole', m: 'move', i: 'measure', a: 'appearance', q: 'presspull', f: 'fillet', j: 'joint', d: 'k.dimension', x: null };
+  if (map[k]) { e.preventDefault(); if (k === 'd') { toast('Sketch Dimension works inside a sketch'); return; } runCmd(map[k]); return; }
   if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelection(); }
 });
 
@@ -860,7 +891,7 @@ if (location.hostname === 'localhost') window.__dw = {
   print: () => printCache && { layers: printCache.sl.layers.length, minutes: printCache.stats.minutes, grams: printCache.stats.grams, size: printCache.size, shown: printGroup.children.length },
   view: name => setView(name, true),
   run: id => runCmd(id),
-  camera: () => ({ up: camera.up.toArray().map(v => Math.round(v * 1000) / 1000), dir: camera.position.clone().sub(controls.target).normalize().toArray().map(v => Math.round(v * 1000) / 1000), grid: gridGroup.rotation.x, theme: document.documentElement.getAttribute('data-theme'), ws: workspace, drawingBodies: doc.drawing?.bodies || null, jobs: jobs.map(j => j.label + (j.end ? ':done' : ':run')) }),
+  camera: () => ({ near: camera.near, far: camera.far, dist: camera.position.distanceTo(controls.target), up: camera.up.toArray().map(v => Math.round(v * 1000) / 1000), dir: camera.position.clone().sub(controls.target).normalize().toArray().map(v => Math.round(v * 1000) / 1000), grid: gridGroup.rotation.x, theme: document.documentElement.getAttribute('data-theme'), ws: workspace, drawingBodies: doc.drawing?.bodies || null, jobs: jobs.map(j => j.label + (j.end ? ':done' : ':run')) }),
   edit: id => editFeature(id),
   mark: () => checkpoint(),
   tabs: () => ({ active: tabIdx, list: tabs.map((t, i) => { const d = i === tabIdx ? doc : t.doc; return { name: d.name, type: d.meta?.type || 'hybrid', id: d.meta?.id || null, version: d.meta?.version || 0, pn: d.meta?.partNumber || null, features: d.features.length, dirty: i === tabIdx ? dirty : !!t.dirty }; }) }),

@@ -189,7 +189,9 @@ viewport.addEventListener('pointerdown', e => {
   if (sketchTool === 'fillet2d') return filletClick(sk, hit);
   if (sketchTool === 'trim') return trimClick(sk, hit);
   if (sketchTool === 'extend') return extendClick(sk, hit);
-  gdraw = { kind: 'shape', tool: sketchTool, s: snapPoint(sk, hit), e: null };
+  // click, move, click: the second click finishes a shape started with a plain click
+  if (gdraw?.kind === 'shape' && gdraw.waiting) { gdraw.e = snapPoint(sk, hit); gdraw.waiting = false; window.removeEventListener('pointermove', onGeoMove); finishShape(gdraw); gdraw = null; refreshOverlays(); hudHide(); return; }
+  gdraw = { kind: 'shape', tool: sketchTool, s: snapPoint(sk, hit), e: null, tol: hit.tol };
   window.addEventListener('pointermove', onGeoMove); window.addEventListener('pointerup', onGeoUp, { once: true });
 }, { capture: true });
 
@@ -226,14 +228,23 @@ function onGeoMove(e) {
     commitGeo(sk, g, { drag, tag: 'drag-' + t.id, quiet: true, noPalette: true, delay: 200 });
   }
 }
+function finishShape(d, dims) {
+  const sk = featById(sketchId); if (!sk || !d.e) return false;
+  const frag = buildShape(d.tool, d.s, d.e); if (!frag) return false;
+  if (dims) dims(frag);
+  const g = mergeGeo(cloneGeo(sk.geo), frag);
+  if (commitGeo(sk, g)) { geoSel = new Set(frag.curves.filter(c => !c.constr).map(c => c.id)); return true; }
+  return false;
+}
 function onGeoUp() {
+  const d0 = gdraw;
+  // a plain click (no drag) starts click-move-click drawing: keep following the mouse until the next click
+  if (d0?.kind === 'shape' && !d0.waiting && (!d0.e || Math.hypot(d0.e.x - d0.s.x, d0.e.y - d0.s.y) < (d0.tol || 1) * 0.6)) { d0.waiting = true; defaultHint(); return; }
   window.removeEventListener('pointermove', onGeoMove);
   const d = gdraw; gdraw = null; viewport.classList.remove('moving');
   const sk = featById(sketchId); if (!d || !sk) return;
-  if (d.kind === 'shape' && d.e) {
-    const frag = buildShape(d.tool, d.s, d.e);
-    if (frag) { const g = mergeGeo(cloneGeo(sk.geo), frag); if (commitGeo(sk, g)) geoSel = new Set(frag.curves.filter(c => !c.constr).map(c => c.id)); }
-  } else if ((d.kind === 'drag' || d.kind === 'legacy') && d.moved) { renderPalette(); scheduleRegen(0); }
+  if (d.kind === 'shape' && d.e) { finishShape(d); hudHide(); }
+  else if ((d.kind === 'drag' || d.kind === 'legacy') && d.moved) { renderPalette(); scheduleRegen(0); }
   refreshOverlays();
 }
 function lineClick(sk, hit) {

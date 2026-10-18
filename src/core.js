@@ -218,6 +218,15 @@ function buildGrid() {
 }
 
 let needsRender = true, tween = null;
+// near/far planes follow the model size and the camera distance, so big imports and close zooms stay visible
+let clipBox = null;
+function fitClip() {
+  const b = clipBox && !clipBox.isEmpty() ? clipBox : null;
+  const c = b ? b.getCenter(new THREE.Vector3()) : controls.target, R = Math.max(400, b ? b.getSize(new THREE.Vector3()).length() / 2 : 0);
+  const d = camera.position.distanceTo(c), dt = camera.position.distanceTo(controls.target);
+  const near = Math.max(0.001, Math.min(dt * 0.02, Math.max(d - R * 1.5, dt * 0.002))), far = d + R * 3 + 1000;
+  if (Math.abs(camera.near - near) / near > 0.05 || Math.abs(camera.far - far) / far > 0.05) { camera.near = near; camera.far = far; camera.updateProjectionMatrix(); }
+}
 const requestRender = () => { needsRender = true; };
 controls.addEventListener('change', requestRender);
 renderer.setAnimationLoop(t => {
@@ -229,6 +238,7 @@ renderer.setAnimationLoop(t => {
     needsRender = true;
   }
   const moved = controls.update();
+  if (moved || needsRender) fitClip();
   if (moved || needsRender) { renderer.render(scene, camera); labelRenderer.render(scene, camera); renderViewCube(); needsRender = false; }
 });
 new ResizeObserver(() => {
@@ -242,6 +252,7 @@ function visibleBox() {
   const b = new THREE.Box3();
   for (const [id, body] of result.bodies) { if (bodyHidden(id)) continue; const g = bodyGeomOf(body); g.computeBoundingBox(); b.union(g.boundingBox); }
   if (b.isEmpty()) b.set(new THREE.Vector3(-50, -50, 0), new THREE.Vector3(50, 50, 20));
+  clipBox = b.clone();
   return b;
 }
 const VIEWS = {
@@ -381,13 +392,17 @@ function drawPlanes() {
   }
   drawConstructGeometry(planesGroup, size);
 }
+// origin plane squares meet at the origin and open toward the default view (+X, −Y, +Z), so none hides another
+function originQuadShift(k, size) { const h2 = size / 2, s = { XY: [h2, -h2], XZ: [h2, h2], YZ: [-h2, h2] }[k] || [h2, h2]; return new THREE.Matrix4().makeTranslation(s[0], s[1], 0); }
 function drawOrigin() {
   clearGroup(originGroup);
   const show = doc.showOrigin || !!pick;
   if (!show) return;
   const size = Math.min(planeSize() * 0.6, 120);
   const cols = { XY: 0x3d7be0, XZ: 0x3faa5b, YZ: 0xd9534a };
-  if (mode !== 'sketch' || pick) for (const k of ['XY', 'XZ', 'YZ']) originGroup.add(planeQuad(planeMatrix(k, 0), size, cols[k], pick ? 0.16 : 0.07, { plane: k, pickable: true }, k));
+  // like Fusion: three squares meeting at the origin corner, so each plane is easy to point at
+  const corner = k => planeMatrix(k, 0).multiply(originQuadShift(k, size));
+  if (mode !== 'sketch' || pick) for (const k of ['XY', 'XZ', 'YZ']) originGroup.add(planeQuad(corner(k), size, cols[k], pick ? 0.2 : 0.07, { plane: k, pickable: true }, k));
   const L = size * 0.6;
   originGroup.add(line([[0, 0, 0], [L, 0, 0]], 0xd9534a, { depthTest: false, order: 3 }), line([[0, 0, 0], [0, L, 0]], 0x3faa5b, { depthTest: false, order: 3 }), line([[0, 0, 0], [0, 0, L]], 0x3d7be0, { depthTest: false, order: 3 }));
 }
@@ -529,6 +544,21 @@ function drawToolsOverlay() {
           }
         }
       }
+    }
+  }
+  if (pickHover && !pickHover.face) {   // the whole plane lights up
+    const size = PLANES[pickHover.plane] ? Math.min(planeSize() * 0.6, 120) : planeSize();
+    const Mq = PLANES[pickHover.plane] ? pickHover.M.clone().multiply(originQuadShift(pickHover.plane, size)) : pickHover.M;
+    const q = planeQuad(Mq, size, colors.select, 0.32, {}); q.traverse(o => { if (o.material) { o.material.depthTest = false; } o.renderOrder = 8; }); toolsOverlay.add(q);
+  }
+  if (pickHover?.faceHash != null) {   // the whole face lights up
+    const s = shownBodies.get(pickHover.body), m = s?.rec.shape ? brepMeshOf(s.rec) : null;
+    if (m) {
+      const idx = m.display.index.array, P = m.display.attributes.position.array, out = [];
+      for (let t = 0; t < m.triFace.length; t++) if (m.triFace[t] === pickHover.faceHash) for (let k = 0; k < 3; k++) { const q = idx[3 * t + k]; out.push(P[3 * q], P[3 * q + 1], P[3 * q + 2]); }
+      const g2 = new THREE.BufferGeometry(); g2.setAttribute('position', new THREE.Float32BufferAttribute(out, 3));
+      const fm = new THREE.Mesh(g2, new THREE.MeshBasicMaterial({ color: colors.select, transparent: true, opacity: 0.45, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2, side: THREE.DoubleSide }));
+      fm.matrixAutoUpdate = false; fm.matrix.copy(bodyXf(pickHover.body)); fm.renderOrder = 8; toolsOverlay.add(fm);
     }
   }
   if (pickHover) {
