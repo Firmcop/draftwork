@@ -243,7 +243,8 @@ function insertDialog(f, idx, out, placement) {
       return true;
     case 'derive': {
       const d = doc.files?.[f.file]?.design;
-      out.push(section_('Derived design', h('p', { class: 'note' }, d ? `${d.name || 'Design'} · ${d.features.length} features, ${(d.params || []).length} parameters` : 'Missing design'),
+      const src = h('p', { class: 'note', id: 'derive-src' }); if (typeof derivedSourceInfo === 'function') derivedSourceInfo(f, src);
+      out.push(section_('Derived design', h('p', { class: 'note' }, d ? `${d.name || 'Design'} · ${d.features.length} features, ${(d.params || []).length} parameters` : 'Missing design'), src,
         exField('Move X', f, 'dx'), exField('Move Y', f, 'dy'), exField('Move Z', f, 'dz'),
         h('p', { class: 'note' }, 'The bodies are rebuilt from the derived design and copied in. Insert the file again to pick up its changes.')));
       return true;

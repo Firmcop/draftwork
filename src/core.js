@@ -3,6 +3,11 @@ const $ = s => document.querySelector(s);
 const uid = () => Math.random().toString(36).slice(2, 9);
 const fmt = n => (Math.round((+n || 0) * 1000) / 1000).toString();
 const fix = (n, d = 1) => (+n).toLocaleString('en-US', { minimumFractionDigits: d, maximumFractionDigits: d });
+// document display units (the model is always stored in millimetres)
+var UNIT_DEFS = { mm: [1, 'mm'], cm: [10, 'cm'], m: [1000, 'm'], in: [25.4, 'in'] };
+function docUnit() { return doc && UNIT_DEFS[doc.units] ? doc.units : 'mm'; }
+function uLen(mm, d = 3) { const u = docUnit(); return fix(mm / UNIT_DEFS[u][0], u === 'mm' ? d : d + 1) + ' ' + u; }
+function uVol(mm3, d = 2) { return docUnit() === 'in' ? fix(mm3 / 16387.064, d) + ' in³' : fix(mm3 / 1000, d) + ' cm³'; }
 function h(tag, attrs = {}, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs || {})) {
@@ -471,7 +476,7 @@ function drawToolsOverlay() {
     if (measure.pts.length === 2) {
       const [a, b] = measure.pts;
       toolsOverlay.add(line([a, b], colors.select, { depthTest: false, order: 9 }));
-      const o = new CSS2DObject(h('div', { class: 'mlabel' }, fix(a.distanceTo(b), 2) + ' mm')); o.position.copy(a).add(b).multiplyScalar(0.5); toolsOverlay.add(o);
+      const o = new CSS2DObject(h('div', { class: 'mlabel' }, uLen(a.distanceTo(b), 2))); o.position.copy(a).add(b).multiplyScalar(0.5); toolsOverlay.add(o);
     }
   }
   if (showCOM) {
@@ -603,6 +608,7 @@ function doRegen() {
 function finishRegen() {
   $('#busy').hidden = true;
   if (selBody && !result.bodies.has(selBody)) selBody = null;
+  if (typeof assemblyAutoComponents === 'function') assemblyAutoComponents();
   solveAssembly();
   updateScene(); dwAfterRegen(); renderTimeline(); renderBrowser(); renderInfo(); refreshDialogStatus(); persist();
 }

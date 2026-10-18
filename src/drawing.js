@@ -258,7 +258,7 @@ function displayList() {
   const cell = (x, y, label, val, size = 3) => { text(x + 1.5, y + 3, label, 1.8); text(x + 1.5, y + 7.5, val || '—', size); };
   text(tx + 3, ty + 6, 'TITLE', 1.8); text(tx + 3, ty + 11.5, doc.name || 'Untitled', 5, { bold: true });
   cell(tx, ty + 14, 'DRAWN BY', t.author); cell(tx + 60, ty + 14, 'DATE', t.date || new Date().toISOString().slice(0, 10)); cell(tx + 105, ty + 14, 'SCALE', scaleLabel(D.scale)); cell(tx + 140, ty + 14, 'SIZE', D.sheet);
-  cell(tx, ty + 23, 'MATERIAL', t.material); cell(tx + 60, ty + 23, 'PART NO.', t.partNo); cell(tx + 105, ty + 23, 'UNITS', 'mm'); cell(tx + 140, ty + 23, 'SHEET', `${Math.max(1, dwSheets().indexOf(D) + 1)} / ${Math.max(1, dwSheets().length)}`);
+  cell(tx, ty + 23, 'MATERIAL', t.material); cell(tx + 60, ty + 23, 'PART NO.', t.partNo); cell(tx + 105, ty + 23, 'UNITS', docUnit()); cell(tx + 140, ty + 23, 'SHEET', `${Math.max(1, dwSheets().indexOf(D) + 1)} / ${Math.max(1, dwSheets().length)}`);
   text(12, H - 12, 'Third-angle projection · Draftwork', 1.8);
   if (D.partsList) partsListItems(path, text, tx, ty);
   // views

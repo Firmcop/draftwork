@@ -168,3 +168,13 @@ applyPrefs(true);
 setTimeout(() => setView('iso', true), 60);
 cmd('prefs', 'Preferences', 'gear', { run: () => openPreferences() });
 cmd('createdrawing', 'Create Drawing', 'properties', { run: () => openCreateDrawing(selBody ? [selBody] : null) });
+
+// ---------- document units ----------
+function openUnitsDialog() {
+  let u = docUnit();
+  const s = h('select', { id: 'units-sel' }, ...Object.keys(UNIT_DEFS).map(k => h('option', { value: k, selected: k === u }, { mm: 'Millimeters (mm)', cm: 'Centimeters (cm)', m: 'Meters (m)', in: 'Inches (in)' }[k])));
+  s.addEventListener('change', () => { u = s.value; });
+  openModal('Document Units', 'ruler', h('div', { style: 'min-width:360px;padding:0 14px' }, row('Length', s, 'units-sel'),
+    h('p', { class: 'note' }, 'Measurements, the status bar, drawing dimensions and dialog length fields use these units; a plain number in a length field is in these units. A value can also carry its own unit, for example 1 in, 2.5 cm or 30 deg (inside a longer expression, numbers without a unit are millimetres). The model itself is stored in millimetres.')),
+    [h('button', { class: 'btn ok', id: 'units-ok', onclick: () => { checkpoint(); doc.units = u; persist(); closeModal(); renderBrowser(); renderInfo(); if (workspace === 'drawing') renderSheet(); toast('Document units: ' + u); } }, 'OK'), h('button', { class: 'btn', onclick: closeModal }, 'Cancel')]);
+}

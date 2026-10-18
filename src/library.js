@@ -299,7 +299,7 @@ async function renderDataPanel() {
   for (const d of here) {
     const open = tabs.some((t, i) => (i === tabIdx ? doc : t.doc).meta?.id === d.id);
     list.append(h('div', { class: 'dpitem', role: 'listitem', tabindex: 0, 'data-id': d.id, title: 'Double-click to open', ondblclick: () => openDesign(d.id), onkeydown: e => { if (e.key === 'Enter') openDesign(d.id); },
-      oncontextmenu: e => { e.preventDefault(); openMenu(e.currentTarget, [{ label: 'Open', icon: 'doc', action: () => openDesign(d.id) }, { label: 'Versions…', icon: 'history', action: () => openVersions(d.id) }, { label: 'Rename', icon: 'params', action: () => inlineAsk($('#dp-crumbs'), d.name, n => renameDesign(d.id, n)) }, '-', { label: 'Delete', icon: 'delete', action: () => deleteDesign(d.id) }], { at: { x: e.clientX, y: e.clientY } }); } },
+      oncontextmenu: e => { e.preventDefault(); openMenu(e.currentTarget, [{ label: 'Open', icon: 'doc', action: () => openDesign(d.id) }, { label: 'Insert into Current Design', icon: 'component', action: () => insertFromLibrary(d.id) }, { label: 'Versions…', icon: 'history', action: () => openVersions(d.id) }, { label: 'Rename', icon: 'params', action: () => inlineAsk($('#dp-crumbs'), d.name, n => renameDesign(d.id, n)) }, '-', { label: 'Delete', icon: 'delete', action: () => deleteDesign(d.id) }], { at: { x: e.clientX, y: e.clientY } }); } },
       h('span', { class: 'dpico', html: icon(DESIGN_TYPES[d.type || 'hybrid'].icon) }),
       h('span', { class: 'dpname' }, d.name, open ? h('span', { class: 'dpopen' }, ' · open') : null),
       h('span', { class: 'dpmeta' }, `v${d.version} · ${d.partNumber || '—'} · ${designTypeLabel(d.type)} · ${fmtDate(d.modified)}`)));
@@ -384,4 +384,55 @@ function openCurrentVersions() { if (!doc.meta?.id) { toast('Save the design fir
   $('#abSave').replaceWith((() => { const b = h('button', { class: 'abtn', id: 'abSave', 'aria-label': 'Save', title: 'Save (Ctrl+S)', html: icon('save') }); b.addEventListener('click', () => saveCmd()); return b; })());
   const init = () => { if (!doc) { setTimeout(init, 50); return; } if (!doc.meta) doc.meta = { type: 'hybrid' }; restoreSession(); renderTabs(); renderBrowser(); };
   init(); libOpen();
+}
+
+// ---------- assembly designs: every body lives in a component ----------
+function assemblyAutoComponents() {
+  // Hybrid designs: bodies made with the New Component operation get their own component
+  if (designType() === 'hybrid') {
+    for (const f of doc.features) {
+      if (f.op !== 'newcomp' || f.suppressed) continue;
+      const ids = [...result.bodies.keys()].filter(id => String(id).split(':')[0] === f.id && !compOfBody(id));
+      if (ids.length) comps().push({ id: uid(), name: f.name, bodies: ids, grounded: false, feature: f.id });
+    }
+    return;
+  }
+  if (designType() !== 'assembly') return;
+  const free = [...result.bodies.keys()].filter(id => !compOfBody(id));
+  if (!free.length) return;
+  const byFeat = new Map();
+  for (const id of free) { const fid = result.bodies.get(id)?.feature || id; if (!byFeat.has(fid)) byFeat.set(fid, []); byFeat.get(fid).push(id); }
+  for (const [fid, ids] of byFeat) {
+    const f = featById(String(fid).split(':')[0]);
+    comps().push({ id: uid(), name: (f?.name || bodyName(ids[0])).replace(/^Body\b/, 'Component'), bodies: ids, grounded: comps().length === 0 });
+  }
+  if (!assemblyAutoComponents.told) { assemblyAutoComponents.told = true; toast('Assembly design: new bodies go into their own components'); }
+}
+// ---------- insert a saved design into the open one (a derived, updatable component) ----------
+async function insertFromLibrary(id) {
+  const rec = await libGet('designs', id); if (!rec) return;
+  if (doc.meta?.id === id) { toast('A design cannot be inserted into itself'); return; }
+  if (!needExact('Insert')) return;
+  const v = await libGet('versions', rec.latest); if (!v) { toast('The design has no saved version'); return; }
+  const d = v.doc, fileId = uid(); checkpoint();
+  doc.files ||= {}; doc.files[fileId] = { name: rec.name, design: { name: rec.name, params: d.params || [], features: d.features }, kind: 'design', lib: { id, version: rec.version, partNumber: rec.partNumber } };
+  const f = { id: uid(), type: 'derive', name: rec.name, file: fileId, dx: 0, dy: 0, dz: 0 };
+  insertFeature(f); scheduleRegen(0); toggleDataPanel(false);
+  toast(`Inserted “${rec.name}” v${rec.version}`);
+}
+async function updateDerived(fid) {
+  const f = featById(fid), file = f && doc.files?.[f.file]; if (!file?.lib) return;
+  const rec = await libGet('designs', file.lib.id); if (!rec) { toast('The source design is no longer in the library'); return; }
+  const v = await libGet('versions', rec.latest); if (!v) return;
+  checkpoint();
+  file.design = { name: rec.name, params: v.doc.params || [], features: v.doc.features }; file.lib.version = rec.version; file.name = rec.name;
+  scheduleRegen(0); rerenderDialog?.(); toast(`Updated “${rec.name}” to v${rec.version}`);
+}
+// insertDialog hook: library source line with an update check
+async function derivedSourceInfo(f, el) {
+  const file = doc.files?.[f.file]; if (!file?.lib || !el) return;
+  const rec = await libGet('designs', file.lib.id);
+  el.replaceChildren(rec ? (rec.version > file.lib.version
+    ? h('span', {}, `From the library: v${file.lib.version} (v${rec.version} available) `, h('button', { class: 'btn', type: 'button', id: 'derive-update', onclick: () => updateDerived(f.id) }, 'Update'))
+    : `From the library: v${file.lib.version} (up to date)${file.lib.partNumber ? ' · ' + file.lib.partNumber : ''}`) : 'The source design is no longer in the library');
 }

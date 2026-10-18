@@ -42,7 +42,7 @@ Next
 - [ ] Press Pull on edges (fillet) and fillet faces (change radius); offset faces that meet neighbours at an angle; sweep with guide rails/twist
 - [x] v0.31 Extents: extrude (distance, two sides, to object, all; start offset, taper, thin walls), revolve (angle, two sides, full; symmetric/flipped), hole (simple, counterbore, countersink; tapped metric coarse, cosmetic or modeled thread; distance, to object, through all)
 - [x] v0.32 Shape control: chamfer (equal, two distances, distance + angle), variable-radius and full round fillets, Offset Face (neighbouring flat faces extend), Silhouette Split (body or faces), sweep guide rail and end scale, loft along a centre line and to a start/end point
-- [ ] Loft rails and tangent/curvature end conditions; sweep twist
+- [x] v0.34 Gaps closed: loft rails (one or two) and end conditions (free, normal, smooth); sweep twist; assembly designs put every body in its own component; New Component operation in hybrid designs; insert saved designs from the library as updatable components; document units (mm, cm, m, in) for display and length fields, unit suffixes in any value
 - [x] v0.33 Interface: right-click command wheel (repeat last command, context list for the selected body, sketch wheel), preferences (Z/Y up, theme, new-design type and material, right-drag pan/orbit), Create Drawing from the browser (whole design, a body or a component), job status
 - [ ] Desktop packaging (Tauri)
 

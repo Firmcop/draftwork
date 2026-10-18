@@ -611,7 +611,8 @@ export function mergeBodies(geoms) {
 const FUNCS = { sqrt: Math.sqrt, abs: Math.abs, sin: x => Math.sin(x * Math.PI / 180), cos: x => Math.cos(x * Math.PI / 180), tan: x => Math.tan(x * Math.PI / 180),
   min: Math.min, max: Math.max, round: Math.round, floor: Math.floor, ceil: Math.ceil, if: (c, a, b) => (c ? a : b) };
 export function evalExpr(src, vars = {}) {
-  const s = String(src).replace(/\s*(mm|deg|°)\b/g, '').trim();
+  const s = String(src).replace(/°/g, ' deg').trim();
+  const UNITS = { mm: 1, cm: 10, m: 1000, in: 25.4, ft: 304.8, deg: 1, rad: 180 / Math.PI };
   let i = 0;
   const peek = () => s[i], eat = c => { if (s[i] === c) { i++; return true; } return false; };
   const ws = () => { while (s[i] === ' ') i++; };
@@ -639,7 +640,9 @@ export function evalExpr(src, vars = {}) {
     }
     err(i < s.length ? 'Unexpected "' + s[i] + '"' : 'Expression ends early');
   }
-  function power() { let v = primary(); ws(); if (eat('^')) v = Math.pow(v, power()); return v; }
+  // a unit after a value converts it to millimetres or degrees: 1 in, 2.5 cm, 0.3 rad
+  function united() { const v = primary(); const m = /^\s*(mm|cm|m|in|ft|deg|rad)(?![A-Za-z0-9_])/.exec(s.slice(i)); if (m) { i += m[0].length; return v * UNITS[m[1]]; } return v; }
+  function power() { let v = united(); ws(); if (eat('^')) v = Math.pow(v, power()); return v; }
   function term() { let v = power(); for (;;) { ws(); if (eat('*')) v *= power(); else if (eat('/')) v /= power(); else return v; } }
   function expr() { let v = term(); for (;;) { ws(); if (eat('+')) v += term(); else if (eat('-')) v -= term(); else return v; } }
   // comparisons give 1 or 0 (for configuration rules and if(cond, a, b))
@@ -675,7 +678,8 @@ export function resolveFeatures(features, vars) {
     }
     return o;
   };
-  return features.map(f => { const holder = {}; const r = conv(f, holder); if (holder.error) r.error = holder.error; return r; });
+  // 'New component' is a new body that the page then puts in its own component
+  return features.map(f => { const holder = {}; const r = conv(f, holder); if (holder.error) r.error = holder.error; if (r.op === 'newcomp') { r.op = 'new'; r.newComp = true; } return r; });
 }
 const NUMERIC = new Set(['offset', 'distance', 'angle', 'count', 'count2', 'spacing', 'spacing2', 'cx', 'cy', 'w', 'h', 'd', 'r', 'rot', 'sides', 'length', 'width',
   'diameter', 'depth', 'cbDiameter', 'cbDepth', 'radius', 'thickness', 'value', 'neutralOffset', 'wall', 'pathIndex', 'major', 'minor', 'dx', 'dy', 'dz', 'rx', 'ry', 'rz', 'tipAngle', 'x', 'y', 'bendRadius', 'kFactor', 'height', 'pitch', 'revolutions', 'section_size', 'factor', 'tolerance', 'gap', 'draftAngle', 'clearance', 'holeDiameter', 'holeDepth', 'holeBelow', 'ribs', 'ribThickness', 'ribLength', 'ribHeight', 'ribAngle', 'hookDepth', 'insertAngle', 'orient', 'edge', 'percent', 'iterations', 'strength', 'nx', 'ny', 'nz', 'level', 'distance2', 'startOffset', 'taper', 'angle2', 'csDiameter', 'csAngle', 'threadDepth']);

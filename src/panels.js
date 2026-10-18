@@ -36,7 +36,7 @@ function renderBrowser() {
   if (!add(0, { key: 'root', icon: (typeof DESIGN_TYPES !== 'undefined' && DESIGN_TYPES && DESIGN_TYPES[designType()]?.icon) || 'doc', label: doc.name, sub: typeof DESIGN_TYPES !== 'undefined' && DESIGN_TYPES ? designTypeLabel() + (doc.meta?.version ? ' · v' + doc.meta.version : '') + (doc.meta?.partNumber ? ' · ' + doc.meta.partNumber : '') : '', renameKey: 'doc', onRename: v => { checkpoint(); doc.name = v; $('#docTitle').textContent = v; renderTabs(); }, onDbl: () => { renaming = 'doc'; renderBrowser(); },
     menu: () => [{ label: 'Rename', icon: 'params', action: () => { renaming = 'doc'; renderBrowser(); } }, { label: 'Save', icon: 'save', action: () => saveCmd() }, { label: 'Save As…', icon: 'save', action: () => saveAsCmd() }, { label: 'Versions…', icon: 'history', action: () => openCurrentVersions() }, '-', { label: 'Create Drawing…', icon: 'properties', action: () => openCreateDrawing(null) }] })) return;
   if (add(1, { key: 'settings', icon: 'gear', label: 'Document Settings' })) {
-    add(2, { icon: 'ruler', label: 'Units: mm, g', onClick: () => toast('Units are millimeters and grams in this version') });
+    add(2, { icon: 'ruler', label: `Units: ${docUnit()}, g`, onClick: () => openUnitsDialog() });
   }
   if (add(1, { key: 'views', icon: 'folder', label: 'Named Views' })) {
     for (const [k, l] of [['top', 'TOP'], ['front', 'FRONT'], ['right', 'RIGHT'], ['iso', 'HOME']]) add(2, { icon: 'lookat', label: l, onClick: () => setView(k) });
@@ -201,7 +201,7 @@ function renderInfo() {
   const errs = [...result.status.values()].filter(v => v.state === 'error').length;
   const vis = mp.bodies.filter(b => !b.hidden);
   $('#tlInfo').innerHTML = vis.length
-    ? `<b>${vis.length}</b> ${vis.length > 1 ? 'bodies' : 'body'} · <b>${fix(mp.total.volume / 1000, 2)}</b> cm³ · <b>${fix(mp.total.mass, 1)}</b> g<br>${errs ? `<span class="bad">${errs} ${errs > 1 ? 'features need' : 'feature needs'} attention</span>` : 'Rebuilt in ' + fix(lastRegenMs, 0) + ' ms'}${doc.rollback != null ? ' · rolled back' : ''}`
+    ? `<b>${vis.length}</b> ${vis.length > 1 ? 'bodies' : 'body'} · <b>${uVol(mp.total.volume).replace(/ (cm³|in³)$/, '</b> $1')} · <b>${fix(mp.total.mass, 1)}</b> g<br>${errs ? `<span class="bad">${errs} ${errs > 1 ? 'features need' : 'feature needs'} attention</span>` : 'Rebuilt in ' + fix(lastRegenMs, 0) + ' ms'}${doc.rollback != null ? ' · rolled back' : ''}`
     : (errs ? `<span class="bad">${errs} ${errs > 1 ? 'features need' : 'feature needs'} attention</span>` : 'No bodies yet');
 }
 
@@ -211,29 +211,32 @@ function exField(label, obj, key, unit = 'mm', o = {}) {
   const id = o.id || ('dx-' + key);
   const wrap = h('div', { class: 'exin' });
   const val = h('span', { class: 'val' });
-  const raw = obj[key] ?? '';
+  // length fields follow the document units: plain numbers are shown and typed in them (stored in mm)
+  const du = unit === 'mm' && typeof docUnit === 'function' ? docUnit() : 'mm', k = du === 'mm' ? 1 : UNIT_DEFS[du][0];
+  const raw0 = obj[key] ?? '', raw = k !== 1 && typeof raw0 === 'number' ? fmt(raw0 / k) : raw0;
   const inp = h('input', { type: 'text', id, value: String(raw), inputmode: 'decimal', spellcheck: 'false', autocomplete: 'off' });
   const show = () => {
     const s = inp.value.trim(); let ok = true, v = null;
-    try { v = evalExpr(s, params.vars); if (o.min != null && v < o.min) throw new Error('Must be at least ' + o.min); if (o.max != null && v > o.max) throw new Error('Must be at most ' + o.max); } catch (e) { ok = false; inp.title = e.message; }
     const isNum = /^-?\d*\.?\d+(e[+-]?\d+)?$/i.test(s);
+    try { v = isNum ? parseFloat(s) * k : evalExpr(s, params.vars); if (o.min != null && v < o.min) throw new Error('Must be at least ' + fmt(o.min / k)); if (o.max != null && v > o.max) throw new Error('Must be at most ' + fmt(o.max / k)); } catch (e) { ok = false; inp.title = e.message; }
     wrap.classList.toggle('bad', !ok); wrap.classList.toggle('expr', ok && !isNum);
-    val.textContent = ok && !isNum ? '= ' + fmt(v) : '';
+    val.textContent = ok && !isNum ? '= ' + fmt(v / k) : '';
     if (ok) inp.title = '';
     return { ok, v, isNum, s };
   };
   inp.addEventListener('input', () => {
     const r = show(); if (!r.ok) return;
     checkpoint(id + ':' + (obj.id || ''));
-    obj[key] = r.isNum ? parseFloat(r.s) : r.s;
+    obj[key] = r.isNum ? parseFloat(r.s) * k : r.s;
     o.after?.(); scheduleRegen(o.delay ?? 160); if (mode === 'sketch') refreshOverlays();
   });
   inp.addEventListener('keydown', e => {
     if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
       const r = show(); if (!r.ok || !r.isNum) return; e.preventDefault();
-      const step = o.step || (unit === '°' ? 5 : 1); inp.value = fmt(r.v + (e.key === 'ArrowUp' ? step : -step)); inp.dispatchEvent(new Event('input'));
+      const step = o.step || (unit === '°' ? 5 : du === 'in' ? 0.1 : 1); inp.value = fmt(r.v / k + (e.key === 'ArrowUp' ? step : -step)); inp.dispatchEvent(new Event('input'));
     }
   });
+  unit = unit === 'mm' ? du : unit;
   wrap.append(inp, val, h('span', { class: 'u' }, unit));
   show();
   return row(label, wrap, id);
@@ -317,7 +320,7 @@ function featureFields(f, idx) {
   const nameRow = h('input', { type: 'text', id: 'dx-name', value: f.name, autocomplete: 'off' });
   nameRow.addEventListener('input', () => { checkpoint('name' + f.id); f.name = nameRow.value; renderTimeline(); renderBrowser(); });
   const opsSection = () => {
-    const kids = [selField('Operation', f, 'op', opOptions, { rerender: true })];
+    const kids = [selField('Operation', f, 'op', typeof designType === 'function' && designType() === 'hybrid' ? [...opOptions, ['newcomp', 'New Component']] : opOptions, { rerender: true })];
     if (f.op !== 'new') kids.push(selField('Objects', f, 'target', [['', f.op === 'cut' ? 'All bodies it touches' : 'Automatic (last body)'], ...bodiesBefore(f.id)], { id: 'ds-target' }));
     return kids;
   };
@@ -494,6 +497,12 @@ function featureFields(f, idx) {
       }
       out.push(section_('Profiles', h('p', { class: 'note' }, 'Pick two or more sketches, one closed profile each (or one sketch and an end point). They are joined in timeline order.'), list, chkField('Straight (ruled) sides', f, 'ruled')));
       { const pathSks = sks.filter(s => sketchPathCount(s)), pts = doc.features.slice(0, idx).filter(g => g.type === 'point');
+        const rl = h('div', { class: 'picklist', id: 'loft-rails' });
+        for (const s of pathSks) { const cid = 'lr-' + s.id, c = h('input', { type: 'checkbox', id: cid, checked: (f.rails || []).includes(s.id) }); c.addEventListener('change', () => { checkpoint(); const set = new Set(f.rails || []); c.checked ? set.add(s.id) : set.delete(s.id); f.rails = pathSks.map(x => x.id).filter(id => set.has(id)); scheduleRegen(0); }); rl.append(h('label', { class: 'chk', for: cid }, c, s.name)); }
+        const conds = [['free', 'Free'], ['normal', 'Normal to profile'], ['smooth', 'Smooth (curvature)']];
+        out.push(section_('Rails and ends', pathSks.length ? rl : h('p', { class: 'note' }, 'Draw rails as open sketch curves from the first section to the last.'),
+          selField('Start', f, 'startCond', conds, { id: 'ds-startcond' }), selField('End', f, 'endCond', conds, { id: 'ds-endcond' }),
+          h('p', { class: 'note' }, 'Up to two rails pull the sections out to follow them. Normal makes the loft leave a section square to it; Smooth also matches curvature. Rails and end conditions work between two sections.')));
         out.push(section_('Guide', selField('Centre line', f, 'centerline', [['', 'None'], ...pathSks.map(s => [s.id, s.name])], { id: 'ds-centerline' }),
           selField('Start at point', f, 'startPoint', [['', 'None'], ...pts.map(p => [p.id, p.name])], { id: 'ds-startpt' }), selField('End at point', f, 'endPoint', [['', 'None'], ...pts.map(p => [p.id, p.name])], { id: 'ds-endpt' }),
           h('p', { class: 'note' }, 'A centre line carries the sections along a path. A start or end point closes the loft to a tip (create the point with Construct › Point).'))); }
@@ -508,7 +517,7 @@ function featureFields(f, idx) {
       if (np > 1) kids.push(selField('Which chain', f, 'pathIndex', Array.from({ length: np }, (_, i) => [i, 'Chain ' + (i + 1)]), { numeric: true, id: 'ds-pidx' }));
       out.push(section_('Path', ...kids, h('p', { class: 'note' }, 'The profile is placed at the start of the path, square to it.')));
       out.push(section_('Orientation and size', selField('Guide rail', f, 'guide', [['', 'None (follow the path)'], ...pathSks.filter(s => s.id !== f.path).map(s => [s.id, s.name])], { id: 'ds-guide' }),
-        exField('End scale', f, 'scaleEnd', '×', { min: 0.01, id: 'dx-scaleEnd' }), h('p', { class: 'note' }, 'A guide rail sets how the profile turns along the path. End scale grows or shrinks the profile evenly to the end of the path (1 = unchanged).')));
+        exField('Twist', f, 'twist', '°', { id: 'dx-twist' }), exField('End scale', f, 'scaleEnd', '×', { min: 0.01, id: 'dx-scaleEnd' }), h('p', { class: 'note' }, 'A guide rail sets how the profile turns along the path; without one, Twist turns it evenly by the given angle. End scale grows or shrinks the profile evenly to the end of the path (1 = unchanged).')));
       const prof = [segField('Profile', f, 'profileKind', [['circle', 'Circle'], ['sketch', 'From sketch']], { rerender: true })];
       if ((f.profileKind || 'circle') === 'circle') prof.push(exField('Diameter', f, 'diameter', 'mm', { min: 0.001 }), exField('Wall thickness', f, 'wall', 'mm', { min: 0, id: 'dx-wall' }), h('p', { class: 'note' }, 'Wall 0 makes a solid rod; a wall makes a tube.'));
       else { const ps = sks.filter(s => s.id !== f.path && profCount(s) >= 1); prof.push(selField('Profile sketch', f, 'profile', ps.length ? ps.map(s => [s.id, s.name]) : [['', 'No other sketch with a profile']], { id: 'ds-prof' }), h('p', { class: 'note' }, 'Its sketch origin lands on the path start.')); }

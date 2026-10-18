@@ -78,7 +78,7 @@ check(near(32000 - await vol(), Math.PI * (36 + 6 * 3.375 + 3.375 ** 2) * (6 - 3
 await page.selectOption('#ds-extent', 'all'); await W(1500);
 const removedAll = 32000 - await vol();
 check(removedAll > Math.PI * 3.375 ** 2 * 20 && removedAll < Math.PI * 3.375 ** 2 * 20 + 300, 'through all: the hole goes through the 20 mm plate (' + removedAll.toFixed(1) + ' mm³ removed)');
-await page.click('#dc-modeled'); await W(4000);
+await page.click('#dc-modeled'); await W(600); await page.waitForFunction(() => document.querySelector('#busy').hidden, null, { timeout: 120000 }); await W(500);
 const removedMod = 32000 - await vol();
 check(removedMod > removedAll + 40, `modeled thread cuts into the wall (${removedAll.toFixed(1)} → ${removedMod.toFixed(1)} mm³)`);
 if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/hole-tapped.png' });

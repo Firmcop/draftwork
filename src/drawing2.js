@@ -22,7 +22,7 @@ function clipD(d, c) {
 }
 // ---- dimension text: value, precision, tolerance, override ----
 function dwDimLabel(m) {
-  const v = dimValue(m), pre = m.kind === 'd' ? 'Ø' : m.kind === 'r' ? 'R' : '', post = m.kind === 'ang' ? '°' : '';
+  const v = m.kind === 'ang' ? dimValue(m) : dimValue(m) / UNIT_DEFS[docUnit()][0], pre = m.kind === 'd' ? 'Ø' : m.kind === 'r' ? 'R' : '', post = m.kind === 'ang' ? '°' : '';
   const f = x => m.prec != null && m.prec !== '' ? (+x).toFixed(+m.prec) : fmtDim(x);
   const t = m.tol || {}, plus = +t.plus || 0, minus = +t.minus || 0;
   let s = pre + f(v) + post;

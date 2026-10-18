@@ -336,7 +336,7 @@ function startMeasure() {
       const kids = [h('p', { class: 'note' }, a && b ? 'Click again to start a new measurement.' : a ? 'Click the second point.' : 'Click the first point on the model.')];
       if (a && b) {
         const d = b.clone().sub(a);
-        kids.push(h('dl', { class: 'stat' }, ...[['Distance', fix(d.length(), 3) + ' mm'], ['ΔX', fix(d.x, 3) + ' mm'], ['ΔY', fix(d.y, 3) + ' mm'], ['ΔZ', fix(d.z, 3) + ' mm'],
+        kids.push(h('dl', { class: 'stat' }, ...[['Distance', uLen(d.length())], ['ΔX', uLen(d.x)], ['ΔY', uLen(d.y)], ['ΔZ', uLen(d.z)],
           ['Point 1', `${fix(a.x, 2)}, ${fix(a.y, 2)}, ${fix(a.z, 2)}`], ['Point 2', `${fix(b.x, 2)}, ${fix(b.y, 2)}, ${fix(b.z, 2)}`]].flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])));
       }
       return [section_('Result', ...kids), section_(null, h('button', { class: 'btn', onclick: () => { measure.pts = []; drawToolsOverlay(); rerenderDialog(); } }, 'Clear'))];
@@ -374,7 +374,7 @@ function toggleCOM() {
   if (showCOM) { showCOM = false; if (dlg?.custom?.title === 'Center of Mass') closeDialog(false); drawToolsOverlay(); renderRibbon(); return; }
   showCOM = true; drawToolsOverlay();
   openPanelDialog({ title: 'Center of Mass', icon: 'com', cancelLabel: 'Close', help: 'Uses each body\'s physical material.',
-    body: () => { const mp = massProps(), c = mp.total.com; return [section_('Visible bodies', h('dl', { class: 'stat' }, ...[['X', fix(c.x, 3) + ' mm'], ['Y', fix(c.y, 3) + ' mm'], ['Z', fix(c.z, 3) + ' mm'], ['Mass', fix(mp.total.mass, 2) + ' g']].flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])))]; },
+    body: () => { const mp = massProps(), c = mp.total.com; return [section_('Visible bodies', h('dl', { class: 'stat' }, ...[['X', uLen(c.x)], ['Y', uLen(c.y)], ['Z', uLen(c.z)], ['Mass', fix(mp.total.mass, 2) + ' g']].flatMap(([k, v]) => [h('dt', {}, k), h('dd', {}, v)])))]; },
     onCancel: () => { showCOM = false; drawToolsOverlay(); renderRibbon(); },
   });
 }

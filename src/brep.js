@@ -1079,7 +1079,20 @@ function brepStep(f, out) {
         return asSketches(s)[0];
       });
       let tool;
-      if (f.centerline) {   // sections swept along a centre line
+      const railIds = (f.rails || []).filter(Boolean), sc = f.startCond || 'free', ec = f.endCond || 'free';
+      if (railIds.length || sc !== 'free' || ec !== 'free') {
+        if (parts.length !== 2) throw new Error('Rails and end conditions work between two sections');
+        if (railIds.length > 2) throw new Error('Use one or two rails');
+        const rails = railIds.map(id => {
+          const rs = out.sketches.get(id); if (!rs) throw new Error('A rail sketch is missing');
+          const g = rs.feature.geo, sol = g?.curves?.length ? solveSketch(g) : null; if (!sol?.ok) throw new Error('A rail sketch has no usable curve');
+          const paths = geoPaths(g, sol).paths; if (!paths?.length) throw new Error('A rail sketch has no chain of lines or arcs');
+          const rpi = placementInfo(rs.feature, out);
+          return wirePoints(segsPen(paths[0].segs, false).sketchOnPlane(brepPlane(rpi.base, rpi.offset, rpi.flip).plane).wire, 60);
+        });
+        try { tool = guidedLoft(parts[0].wire, parts[1].wire, rails, sc, ec); }
+        catch (e) { if (e instanceof Error && !/WebAssembly|deleted/.test(e.message)) throw e; throw new Error('The loft could not be built with these rails'); }
+      } else if (f.centerline) {   // sections swept along a centre line
         const cs = out.sketches.get(f.centerline); if (!cs) throw new Error('Choose the centre line sketch');
         const cg = cs.feature.geo, csol = cg?.curves?.length ? solveSketch(cg) : null; if (!csol?.ok) throw new Error('The centre line sketch has no usable lines');
         const cp = geoPaths(cg, csol).paths; if (!cp?.length) throw new Error('The centre line sketch has no chain of lines or arcs');
@@ -1256,6 +1269,98 @@ function segsPen(segs, closed) {
   });
   return closed ? pen.close() : pen.done();
 }
+// ---- sampled curves (lofts with rails/end conditions, sweep twist) ----
+const V3w = q => new THREE.Vector3(q.x, q.y, q.z);
+// dense ordered points along a wire (edges chained head to tail), closed wires without the repeated end point
+function wirePoints(wire, perEdge = 40) {
+  const pts = [];
+  for (const e of wire.edges) {
+    const a = V3w(e.startPoint), b = V3w(e.endPoint), last = pts[pts.length - 1];
+    const rev = last && last.distanceTo(a) > last.distanceTo(b) + 1e-9;
+    const k = e.geomType === 'LINE' ? 1 : perEdge;
+    for (let i = 0; i < k; i++) { const t = rev ? 1 - i / k : i / k; pts.push(V3w(e.pointAt(t))); }
+    if (!wire.isClosed) { /* the next edge adds its start */ }
+    e.delete?.();
+  }
+  if (!wire.isClosed) { const es = wire.edges, e = es[es.length - 1], a = V3w(e.startPoint), b = V3w(e.endPoint), last = pts[pts.length - 1]; pts.push(last.distanceTo(a) < last.distanceTo(b) ? b : a); es.forEach(x => x.delete?.()); }
+  return pts;
+}
+// resample a closed polyline to n points evenly by arc length, starting at index 0
+function resampleClosed(P, n) {
+  const L = [0]; for (let i = 1; i <= P.length; i++) L.push(L[i - 1] + P[i - 1].distanceTo(P[i % P.length]));
+  const tot = L[P.length], out = []; let j = 0;
+  for (let k = 0; k < n; k++) { const d = tot * k / n; while (L[j + 1] < d) j++; const t = (d - L[j]) / ((L[j + 1] - L[j]) || 1); out.push(P[j].clone().lerp(P[(j + 1) % P.length], t)); }
+  return out;
+}
+function resampleOpen(P, n) {
+  const L = [0]; for (let i = 1; i < P.length; i++) L.push(L[i - 1] + P[i - 1].distanceTo(P[i]));
+  const tot = L[L.length - 1], out = []; let j = 0;
+  for (let k = 0; k < n; k++) { const d = tot * k / (n - 1); while (j < L.length - 2 && L[j + 1] < d) j++; const t = (d - L[j]) / ((L[j + 1] - L[j]) || 1); out.push(P[j].clone().lerp(P[j + 1], Math.min(1, t))); }
+  return out;
+}
+const centroidOf = P => P.reduce((a, p) => a.add(p), new THREE.Vector3()).multiplyScalar(1 / P.length);
+function polyNormal(P) { const n = new THREE.Vector3(), c = centroidOf(P); for (let i = 0; i < P.length; i++) n.add(P[i].clone().sub(c).cross(P[(i + 1) % P.length].clone().sub(c))); return n.normalize(); }
+// polyline as a parameterised curve: point at distance along a plane normal through c (first crossing)
+function railAt(R, c, n) {
+  for (let i = 0; i + 1 < R.length; i++) {
+    const a = n.dot(R[i].clone().sub(c)), b = n.dot(R[i + 1].clone().sub(c));
+    if ((a <= 0 && b >= 0) || (a >= 0 && b <= 0)) { const t = Math.abs(a - b) < 1e-12 ? 0 : a / (a - b); return R[i].clone().lerp(R[i + 1], t); }
+  }
+  return null;
+}
+// loft between two sections with optional rails (1 or 2 open sketch curves) and end conditions ('free' | 'normal' | 'smooth')
+function guidedLoft(wA, wB, rails, startCond, endCond) {
+  const N = 96;
+  let A = resampleClosed(wirePoints(wA), N), B = resampleClosed(wirePoints(wB), N);
+  const cA = centroidOf(A), cB = centroidOf(B);
+  let nA = polyNormal(A), nB = polyNormal(B);
+  const axis = cB.clone().sub(cA), Lax = axis.length(); if (Lax < 1e-9) throw new Error('The sections must not lie on top of each other');
+  if (nA.dot(axis) < 0) nA.negate(); if (nB.dot(axis) < 0) nB.negate();
+  // same winding, then start B at the point that best matches A's start
+  const wind = (P, n) => { const c = centroidOf(P); let s = 0; for (let i = 0; i < P.length; i++) s += n.dot(P[i].clone().sub(c).cross(P[(i + 1) % P.length].clone().sub(c))); return s; };
+  if (wind(A, axis) * wind(B, axis) < 0) B.reverse();
+  let best = 0, bd = Infinity; for (let k = 0; k < N; k++) { let d = 0; for (let i = 0; i < N; i += 8) d += A[i].clone().sub(cA).distanceToSquared(B[(i + k) % N].clone().sub(cB)); if (d < bd) { bd = d; best = k; } }
+  B = B.map((_, i) => B[(i + best) % N]);
+  // centre path: Hermite curve, leaving each section along its normal when that end is not free
+  const tA = startCond === 'free' || !startCond ? axis.clone() : nA.clone().multiplyScalar(Lax), tB = endCond === 'free' || !endCond ? axis.clone() : nB.clone().multiplyScalar(Lax);
+  const centre = t => { const t2 = t * t, t3 = t2 * t; return cA.clone().multiplyScalar(2 * t3 - 3 * t2 + 1).add(tA.clone().multiplyScalar(t3 - 2 * t2 + t)).add(cB.clone().multiplyScalar(-2 * t3 + 3 * t2)).add(tB.clone().multiplyScalar(t3 - t2)); };
+  // shape blend weight with zero slope (and for 'smooth' zero curvature) at constrained ends
+  const ease = t => {
+    const s0 = startCond && startCond !== 'free', s1 = endCond && endCond !== 'free';
+    if (startCond === 'smooth' && endCond === 'smooth') return t * t * t * (t * (6 * t - 15) + 10);
+    const t2 = t * t, t3 = t2 * t; return (-2 * t3 + 3 * t2) + (s0 ? 0 : t3 - 2 * t2 + t) + (s1 ? 0 : t3 - t2);
+  };
+  const R = (rails || []).map(r => r);
+  // anchors: section-A points closest to each rail start
+  const anchors = R.map(r => { const s = r[0].distanceTo(cA) < r[r.length - 1].distanceTo(cA) ? r[0] : r[r.length - 1]; let k = 0, d = Infinity; A.forEach((p, i) => { const q = p.distanceTo(s); if (q < d) { d = q; k = i; } }); if (d > 1e-2 * Math.max(1, Lax)) throw new Error('Each rail must start on the first section and end on the last'); return k; });
+  const steps = 16, sections = [];
+  for (let s = 0; s <= steps; s++) {
+    const t = s / steps, w = ease(t), c = centre(t);
+    let P = A.map((a, i) => a.clone().sub(cA).multiplyScalar(1 - w).add(B[i].clone().sub(cB).multiplyScalar(w)).add(c));
+    if (R.length && s > 0 && s < steps) {
+      const n = nA.clone().multiplyScalar(1 - t).add(nB.clone().multiplyScalar(t)).normalize();
+      const tg = R.map(r => railAt(r, c, n));
+      if (tg.some(x => !x)) throw new Error('The rails must run from the first section to the last');
+      if (R.length === 1) {   // uniform scale about the centre so the anchor reaches the rail
+        const a = P[anchors[0]].clone().sub(c), b = tg[0].clone().sub(c), k = b.length() / (a.length() || 1);
+        P = P.map(p => p.clone().sub(c).multiplyScalar(k).add(c));
+      } else {   // in-plane similarity taking both anchors to both rails
+        const u = n.clone().cross(Math.abs(n.x) < 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0)).normalize(), v = n.clone().cross(u);
+        const to2 = p => { const d = p.clone().sub(c); return [d.dot(u), d.dot(v)]; }, from2 = (x, y) => c.clone().add(u.clone().multiplyScalar(x)).add(v.clone().multiplyScalar(y));
+        const [p1, p2] = [to2(P[anchors[0]]), to2(P[anchors[1]])], [q1, q2] = [to2(tg[0]), to2(tg[1])];
+        const dp = [p2[0] - p1[0], p2[1] - p1[1]], dq = [q2[0] - q1[0], q2[1] - q1[1]], den = dp[0] * dp[0] + dp[1] * dp[1] || 1;
+        const a = (dq[0] * dp[0] + dq[1] * dp[1]) / den, b = (dq[1] * dp[0] - dq[0] * dp[1]) / den;   // complex ratio
+        P = P.map(p => { const [x, y] = to2(p), X = x - p1[0], Y = y - p1[1]; return from2(q1[0] + a * X - b * Y, q1[1] + b * X + a * Y); });
+      }
+    }
+    sections.push(P);
+  }
+  const oc = RC.getOC(), ts = new oc.BRepOffsetAPI_ThruSections(true, false, 1e-6);
+  for (const P of sections) ts.AddWire(RC.makePolygon(P.map(p => [p.x, p.y, p.z])).outerWire().wrapped);
+  ts.Build(new oc.Message_ProgressRange());
+  return T(RC.cast(ts.Shape()));
+}
+
 function sweepTool(f, out) {
   const ps = out.sketches.get(f.path);
   if (!ps) throw new Error('Choose a path sketch that comes before this feature');
@@ -1295,6 +1400,20 @@ function sweepTool(f, out) {
     const gp = geoPaths(gg, gsol).paths; if (!gp?.length) throw new Error('The guide rail sketch has no chain of lines or arcs');
     const gpi = placementInfo(gs.feature, out);
     cfg.auxiliarySpine = segsPen(gp[0].segs, gp[0].closed).sketchOnPlane(brepPlane(gpi.base, gpi.offset, gpi.flip).plane).wire;
+    cfg.frenet = false;
+  }
+  const twist = +f.twist || 0;
+  if (twist && !f.guide) {   // twist: an auxiliary rail that turns around the path, on rotation-minimising frames
+    const P = resampleOpen(wirePoints(spine.wire, 60), 121), n0 = new THREE.Vector3(n.x, n.y, n.z).normalize().negate();
+    let xv = new THREE.Vector3(x.x, x.y, x.z).normalize(), prevT = n0.clone();
+    const L = 10, aux = [];
+    for (let i = 0; i < P.length; i++) {
+      const tg = (i + 1 < P.length ? P[i + 1].clone().sub(P[i]) : P[i].clone().sub(P[i - 1])).normalize();
+      if (i > 0) { const q = new THREE.Quaternion().setFromUnitVectors(prevT, tg); xv.applyQuaternion(q); prevT = tg; }
+      const yv = tg.clone().cross(xv).normalize(), th = twist * Math.PI / 180 * i / (P.length - 1);
+      aux.push(P[i].clone().add(xv.clone().multiplyScalar(Math.cos(th) * L)).add(yv.clone().multiplyScalar(Math.sin(th) * L)));
+    }
+    cfg.auxiliarySpine = RC.assembleWire([RC.makeBSplineApproximation(aux.map(p => [p.x, p.y, p.z]), { tolerance: 1e-4, degMax: 3, smoothing: null })]);
     cfg.frenet = false;
   }
   const scaleEnd = f.scaleEnd === '' || f.scaleEnd == null ? 1 : +f.scaleEnd;
