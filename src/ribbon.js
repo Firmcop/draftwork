@@ -345,5 +345,6 @@ function openFileMenu() {
     '-',
     { label: 'Keyboard Shortcuts', icon: 'help', action: () => openShortcuts() },
     { label: 'Help and roadmap', icon: 'help', action: () => openHelpModal() },
+    { label: 'Install Desktop App…', icon: 'exportstl', action: () => installDesktopApp() },
   ]);
 }

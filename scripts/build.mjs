@@ -62,4 +62,42 @@ const wasmOut = path.join(dist, 'engine/occ-gz.wasm');
 if (!fs.existsSync(wasmOut) || fs.statSync(wasmOut).mtimeMs < fs.statSync(wasmSrc).mtimeMs) {
   fs.writeFileSync(wasmOut, zlib.gzipSync(fs.readFileSync(wasmSrc), { level: 9 }));
 }
+
+// ---- installable desktop app (PWA) for GitHub Pages: dist/site ----
+{
+  const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+  const site = path.join(dist, 'site'); fs.mkdirSync(path.join(site, 'engine'), { recursive: true });
+  const head = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1B64D8"><meta name="description" content="Draftwork — parametric CAD in your browser and on your desktop">
+<link rel="manifest" href="manifest.webmanifest"><link rel="icon" href="icon-192.png"><link rel="apple-touch-icon" href="apple-touch-icon.png">
+<script>window.DRAFTWORK_VERSION = ${JSON.stringify(pkg.version)};</script></head><body style="margin:0">`;
+  const reg = `<script>if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) addEventListener('load', () => navigator.serviceWorker.register('sw.js').then(r => {
+  r.addEventListener('updatefound', () => { const w = r.installing; w && w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller && typeof toast === 'function') toast('A new version of Draftwork is ready: close and reopen the app (or reload) to use it.'); }); });
+}).catch(() => {}));</script>`;
+  fs.writeFileSync(path.join(site, 'index.html'), head + html + reg + '</body></html>');
+  fs.copyFileSync(wasmOut, path.join(site, 'engine/occ-gz.wasm'));
+  for (const f of ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png']) fs.copyFileSync(path.join(root, 'assets', f), path.join(site, f));
+  fs.writeFileSync(path.join(site, 'manifest.webmanifest'), JSON.stringify({
+    name: 'Draftwork', short_name: 'Draftwork', description: 'Parametric CAD: design, drawings, simulation and manufacture',
+    start_url: './', scope: './', display: 'standalone', display_override: ['window-controls-overlay', 'standalone'], background_color: '#F4F5F7', theme_color: '#1B64D8',
+    icons: [{ src: 'icon-192.png', sizes: '192x192', type: 'image/png' }, { src: 'icon-512.png', sizes: '512x512', type: 'image/png' }, { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' }],
+    file_handlers: [{ action: './', accept: { 'application/json': ['.json'] } }],
+  }, null, 2));
+  // offline cache: the app shell updates network-first; libraries, fonts and the engine are cached on first use
+  fs.writeFileSync(path.join(site, 'sw.js'), `const V = 'draftwork-${pkg.version}-${Date.now().toString(36)}';
+const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'engine/occ-gz.wasm'];
+self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
+self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V && k.startsWith('draftwork-')).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
+self.addEventListener('fetch', e => {
+  const u = new URL(e.request.url);
+  if (e.request.method !== 'GET') return;
+  const same = u.origin === location.origin, page = same && (e.request.mode === 'navigate' || u.pathname.endsWith('/') || u.pathname.endsWith('index.html'));
+  if (page) { e.respondWith(fetch(e.request).then(r => { const c = r.clone(); caches.open(V).then(x => x.put(e.request, c)); return r; }).catch(() => caches.match(e.request).then(r => r || caches.match('index.html')))); return; }
+  if (same || /(^|\\.)(jsdelivr\\.net|unpkg\\.com|googleapis\\.com|gstatic\\.com)$/.test(u.hostname)) {
+    e.respondWith(caches.match(e.request).then(hit => hit || fetch(e.request).then(r => { if (r.ok || r.type === 'opaque') { const c = r.clone(); caches.open(V).then(x => x.put(e.request, c)); } return r; })));
+  }
+});
+`);
+  console.log('dist/site: installable app (manifest, service worker, icons)');
+}
 console.log(`dist/index.html ${(html.length / 1024).toFixed(0)} KB · engine ${(fs.statSync(wasmOut).size / 1e6).toFixed(1)} MB`);

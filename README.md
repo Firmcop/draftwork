@@ -36,6 +36,14 @@ Parametric CAD in the browser. Sketch on planes or faces, build solids with a fe
 
 Edge and face picks for fillet/chamfer/shell are stored as geometric signatures and re-matched after every rebuild, so they survive moderate upstream changes.
 
+## Desktop app
+
+Draftwork installs as a desktop app (Windows, macOS, Linux, ChromeOS) from **https://firmcop.github.io/draftwork/**:
+open it in Chrome or Edge and click the install icon in the address bar (Safari on a Mac: File → Add to Dock),
+or use **File → Install Desktop App…**. It opens in its own window, works offline once loaded, and updates itself
+every time `main` is pushed; the `Desktop app (GitHub Pages)` workflow builds and publishes it.
+One-time setup in the repository: Settings → Pages → Source: **GitHub Actions**.
+
 ## Run it
 
 ```bash
@@ -51,7 +59,9 @@ npm run test:e2e   # full modeling session in headless Chromium
 - `dist/engine/occ-gz.wasm` — gzip-compressed OpenCascade (7.3 MB); the page unpacks it in the browser
 - `dist/local.html` — the same page wired to `node_modules`, used by the dev server and tests
 
-Deploy `dist/index.html` and `dist/engine/` together on any static host.
+- `dist/site/` — the installable desktop app: a full page, web app manifest, icons, service worker (offline cache, versioned per release) and the engine
+
+Deploy `dist/site/` (or `dist/index.html` with `dist/engine/`) on any static host.
 
 ## Layout
 

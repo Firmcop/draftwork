@@ -45,6 +45,7 @@ Next
 - [x] v0.34 Gaps closed: loft rails (one or two) and end conditions (free, normal, smooth); sweep twist; assembly designs put every body in its own component; New Component operation in hybrid designs; insert saved designs from the library as updatable components; document units (mm, cm, m, in) for display and length fields, unit suffixes in any value
 - [x] v0.33 Interface: right-click command wheel (repeat last command, context list for the selected body, sketch wheel), preferences (Z/Y up, theme, new-design type and material, right-drag pan/orbit), Create Drawing from the browser (whole design, a body or a component), job status
 - [x] v0.35 Sketch and navigation: plane-picking cursor with highlighted plane/face and tip; origin planes laid out as a corner; click-move-click shapes; heads-up size input while drawing (type, Tab, Enter → dimensions); sketches stay visible after Finish until used; Fusion keyboard shortcuts (S Model Toolbox, V, Shift+J, Shift+N, 1, L/R/C from the model, Ctrl+N/O/B/[/], Ctrl+Alt+V/B/N/P/R, Ctrl+C/V bodies, drawing and simulation keys, Shift+middle-drag orbit); camera clipping follows the model so big imports stay visible
+- [x] v0.36 Desktop app: installable web app (manifest, icons, standalone window, offline cache via service worker, update notice) published to GitHub Pages on every push; File → Install Desktop App; native installer (Tauri) planned when file-system integration is needed
 - [ ] Desktop packaging (Tauri)
 
 ## Phase 2 — Drawings, assemblies, animation *(started)*

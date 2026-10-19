@@ -39,6 +39,7 @@ jobs:
       - run: node tests/e2e-ui.mjs
       - run: node tests/e2e-gaps.mjs
       - run: node tests/e2e-sketchux.mjs
+      - run: node tests/e2e-pwa.mjs
       - run: ENGINE_INLINE=1 node tests/e2e.mjs
       - uses: actions/upload-artifact@v4
         with:

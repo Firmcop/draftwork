@@ -281,3 +281,21 @@ cmd('shortcuts', 'Keyboard Shortcuts', 'help', { run: () => openShortcuts() });
   const cv = renderer.domElement;
   cv.addEventListener('pointerdown', e => { if (e.button === 1) controls.mouseButtons.MIDDLE = e.shiftKey ? THREE.MOUSE.ROTATE : THREE.MOUSE.PAN; }, true);
 }
+
+// ===== Desktop app: install the web app as a desktop window (Chrome / Edge) =====
+var installPromptEvt = null;
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installPromptEvt = e; });
+window.addEventListener('appinstalled', () => { installPromptEvt = null; toast('Draftwork is installed. Open it from your Start menu, Dock or desktop.'); });
+function installDesktopApp() {
+  const standalone = matchMedia('(display-mode: standalone)').matches || matchMedia('(display-mode: window-controls-overlay)').matches;
+  if (standalone) return toast('You are already using the desktop app' + (window.DRAFTWORK_VERSION ? ' (v' + window.DRAFTWORK_VERSION + ')' : '') + '.');
+  if (installPromptEvt) { const ev = installPromptEvt; installPromptEvt = null; ev.prompt(); return; }
+  const SITE = 'https://firmcop.github.io/draftwork/';
+  const onSite = /github\.io$|^localhost$/.test(location.hostname);
+  openModal('Install the desktop app', 'exportstl', h('div', { class: 'install-help', style: 'max-width:440px;padding:0 14px;line-height:1.5' },
+    h('p', {}, 'Draftwork installs as its own desktop window, works offline and updates itself each time a new version is released.'),
+    onSite ? h('p', {}, 'In Chrome or Edge, click the install icon at the right of the address bar, or open the browser menu and choose “Install Draftwork”. In Safari on a Mac, choose File → Add to Dock.')
+      : h('p', {}, 'Open ', h('a', { href: SITE, target: '_blank', rel: 'noopener' }, SITE), ' in Chrome or Edge, then click the install icon at the right of the address bar. In Safari on a Mac, choose File → Add to Dock.'),
+    h('p', { class: 'muted' }, 'Your designs are stored in that window’s own library. To move designs from here, use File → Download file (.json) and open the file in the desktop app.')));
+}
+cmd('installapp', 'Install Desktop App', 'exportstl', { run: () => installDesktopApp() });
