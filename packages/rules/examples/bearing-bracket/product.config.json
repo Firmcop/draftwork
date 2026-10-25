@@ -1,5 +1,6 @@
 {
   "product": "bearing-bracket",
+  "title": "Bearing bracket",
   "version": 1,
   "currency": "KES",
   "model": { "design": "bracket.design.json" },

@@ -1,0 +1,17 @@
+{
+  "name": "@draftwork/generator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Configurator server: the customer page, the product API and release-file generation with a cache.",
+  "type": "module",
+  "main": "./src/server.mjs",
+  "bin": { "draftwork-generator": "./bin/start.mjs" },
+  "scripts": {
+    "start": "node bin/start.mjs",
+    "test": "node --test test/server.test.mjs"
+  },
+  "dependencies": {
+    "@draftwork/core": "0.1.0",
+    "@draftwork/rules": "0.1.0"
+  }
+}

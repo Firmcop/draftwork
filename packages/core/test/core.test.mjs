@@ -88,3 +88,11 @@ test('sheet metal flat pattern exports DXF', async () => {
   const dxf = await m.export('dxf-flat');
   assert.match(dxf, /SECTION[\s\S]*ENTITIES[\s\S]*LINE[\s\S]*EOF/);
 });
+
+test('meshes for a preview: typed arrays per visible body', async () => {
+  const m = engine.open(sampleDoc());
+  await m.rebuild();
+  const [mesh] = m.meshes();
+  assert.ok(mesh.pos instanceof Float32Array && mesh.idx instanceof Uint32Array && mesh.nrm.length === mesh.pos.length);
+  assert.ok(mesh.idx.length % 3 === 0 && Math.max(...mesh.idx) < mesh.pos.length / 3);
+});
