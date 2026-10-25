@@ -1,0 +1,60 @@
+{
+  "product": "bearing-bracket",
+  "version": 1,
+  "currency": "KES",
+  "model": { "design": "bracket.design.json" },
+  "inputs": [
+    { "name": "ShaftSize", "label": "Shaft diameter", "type": "choice", "unit": "mm", "options": "COLUMN(bearings, \"shaft\")", "default": 12, "group": "Size" },
+    { "name": "Load", "label": "Load class", "type": "choice", "options": ["Light", "Medium", "Heavy"], "default": "Medium", "group": "Size" },
+    { "name": "Material", "type": "choice", "options": "COLUMN(materials, \"material\")", "default": "Aluminium 6061", "group": "Build" },
+    { "name": "CoverScrews", "label": "Tapped holes for a cover", "type": "boolean", "default": true, "group": "Build" },
+    { "name": "Quantity", "type": "number", "min": 1, "max": 1000, "step": 1, "default": 1, "group": "Order" }
+  ],
+  "tables": {
+    "bearings": "tables/bearings.csv",
+    "materials": "tables/materials.csv",
+    "breaks": "tables/breaks.csv"
+  },
+  "variables": [
+    { "name": "PlateVolume", "expr": "width * depth * thickness" },
+    { "name": "BossVolume", "expr": "PI * (boss_d / 2) ^ 2 * boss_h" },
+    { "name": "StockKg", "expr": "1.15 * (PlateVolume + BossVolume) / 1e9 * LOOKUP(materials, Material, \"density_kg_m3\")" },
+    { "name": "UnitMachining", "expr": "LOOKUP(materials, Material, \"machining_min\") * LOOKUP(materials, Material, \"rate_per_min\") + IF(CoverScrews, 4 * 35, 0)" },
+    { "name": "Bearing", "expr": "LOOKUP(bearings, ShaftSize, \"bearing\")" },
+    { "name": "Discount", "expr": "RANGELOOKUP(breaks, Quantity, \"discount\")" }
+  ],
+  "rules": [
+    { "kind": "param", "target": "bore_d", "expr": "LOOKUP(bearings, ShaftSize, \"bore\")" },
+    { "kind": "param", "target": "boss_d", "expr": "LOOKUP(bearings, ShaftSize, \"boss_d\")" },
+    { "kind": "param", "target": "boss_h", "expr": "LOOKUP(bearings, ShaftSize, \"boss_h\")" },
+    { "kind": "param", "target": "thickness", "expr": "SWITCH(Load, \"Light\", 8, \"Medium\", 10, \"Heavy\", 14)" },
+    { "kind": "param", "target": "width", "expr": "MAX(100, CEILING(boss_d + 60, 10))" },
+    { "kind": "param", "target": "depth", "expr": "MAX(60, CEILING(boss_d + 20, 10))" },
+    { "kind": "param", "target": "edge", "expr": "12" },
+
+    { "kind": "suppress", "feature": "M3 tap hole", "expr": "NOT CoverScrews" },
+    { "kind": "suppress", "feature": "Bolt circle", "expr": "NOT CoverScrews" },
+
+    { "kind": "validate", "level": "warning", "expr": "NOT (Load = \"Heavy\" AND Material = \"Aluminium 6061\" AND ShaftSize >= 20)", "message": "A heavy-duty {ShaftSize} mm bracket in aluminium is near its limit: consider Steel S275" },
+    { "kind": "validate", "level": "error", "expr": "Quantity <= 500", "message": "For {Quantity} brackets please ask for a production quote" },
+
+    { "kind": "bom", "item": "=\"Bracket body, \" & Material", "qty": "Quantity" },
+    { "kind": "bom", "item": "=\"Bearing \" & Bearing", "qty": "Quantity" },
+    { "kind": "bom", "item": "Cover screw M3x8", "qty": "4 * Quantity", "when": "CoverScrews" },
+
+    { "kind": "price", "line": "Material", "expr": "StockKg * LOOKUP(materials, Material, \"per_kg\") * Quantity" },
+    { "kind": "price", "line": "Machining", "expr": "UnitMachining * Quantity" },
+    { "kind": "price", "line": "Bearings", "expr": "LOOKUP(bearings, ShaftSize, \"bearing_cost\") * Quantity" },
+    { "kind": "price", "line": "Setup", "expr": "2500" },
+    { "kind": "price", "line": "Volume discount", "expr": "-Discount * (StockKg * LOOKUP(materials, Material, \"per_kg\") + UnitMachining) * Quantity", "when": "Discount > 0" },
+
+    { "kind": "text", "name": "part_number", "expr": "\"BB-\" & ShaftSize & \"-\" & SWITCH(Load, \"Light\", \"L\", \"Medium\", \"M\", \"Heavy\", \"H\") & IF(CoverScrews, \"-C\", \"\")" },
+    { "kind": "text", "name": "title", "expr": "\"Bearing bracket for \" & ShaftSize & \" mm shaft (\" & Bearing & \"), \" & Material" }
+  ],
+  "tests": [
+    { "name": "default", "answers": {}, "expect": { "ok": true, "bore_d": 12, "boss_d": 40, "thickness": 10, "width": 100, "depth": 60, "text.part_number": "BB-12-M-C", "model.suppressed.Bolt circle": false } },
+    { "name": "20 mm heavy aluminium warns", "answers": { "ShaftSize": 20, "Load": "Heavy" }, "expect": { "ok": true, "width": 120, "depth": 80, "thickness": 14, "messages": "consider Steel S275" } },
+    { "name": "no cover screws, steel, 60 off", "answers": { "ShaftSize": 15, "Material": "Steel S275", "CoverScrews": "no", "Quantity": 60 }, "expect": { "Discount": 0.1, "model.suppressed.M3 tap hole": true, "text.part_number": "BB-15-M", "bom.length": 2 } },
+    { "name": "too many", "answers": { "Quantity": 800 }, "expect": { "ok": false, "messages": "production quote" } }
+  ]
+}
