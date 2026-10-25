@@ -85,9 +85,9 @@ test('files and jobs cannot be reached by guessing or by path tricks', async () 
 
 test('the page and the libraries it imports are served, engine files gzipped', async () => {
   const page = await fetch(base + '/');
-  assert.match(await page.text(), /<script type="module" src="\/app\.mjs">/);
+  assert.match(await page.text(), /<script type="module" src="\.\/app\.mjs">/);
   const core = await (await fetch(base + '/core/dist/kernel.mjs')).text();
-  assert.match(core, /from '\/vendor\/three\/build\/three\.module\.js'/);
+  assert.match(core, /from '\.\.\/\.\.\/vendor\/three\/build\/three\.module\.js'/);
   assert.doesNotMatch(core, /from 'three'|from 'replicad'/);
   const rules = await fetch(base + '/rules/index.mjs');
   assert.equal(rules.headers.get('content-type'), 'text/javascript');

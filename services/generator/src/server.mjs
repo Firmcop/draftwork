@@ -32,6 +32,10 @@ function pkgDir(name) {
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.wasm': 'application/wasm', '.svg': 'image/svg+xml', '.step': 'application/step', '.stl': 'model/stl', '.dxf': 'image/vnd.dxf', '.png': 'image/png' };
 const MAX_BODY = 256 * 1024;
 
+// core/dist/kernel.mjs imports 'three' and 'replicad' by package name; a Worker has no import map, so point them at
+// the vendor copies, relative to /core/dist/ (the same layout on the server and on a static host)
+export const coreImports = text => text.replace(/from 'three'/g, "from '../../vendor/three/build/three.module.js'").replace(/from 'replicad'/g, "from '../../vendor/replicad/replicad.js'");
+
 export function createServer({ productsDir, storageDir, appDir = path.join(repo, 'apps/configurator') } = {}) {
   const catalog = new Catalog(productsDir);
   const jobs = new Jobs({ storageDir });
@@ -113,7 +117,7 @@ export function createServer({ productsDir, storageDir, appDir = path.join(repo,
     const headers = { 'content-type': type, 'cache-control': prefix === '/' ? 'no-cache' : 'public, max-age=3600', 'x-content-type-options': 'nosniff' };
     if (prefix === '/core/' && (ext === '.mjs' || ext === '.js')) {
       let text = await fsp.readFile(file, 'utf8');
-      text = text.replace(/from 'three'/g, "from '/vendor/three/build/three.module.js'").replace(/from 'replicad'/g, "from '/vendor/replicad/replicad.js'");
+      text = coreImports(text);
       res.writeHead(200, headers); return res.end(text);
     }
     // large engine files go out gzipped (once, then from memory)
