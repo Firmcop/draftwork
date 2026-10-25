@@ -110,29 +110,77 @@ function openWheel(x, y) {
 }
 
 // ---------- Create Drawing ----------
-function openCreateDrawing(bodyIds) {
+// Sources: the whole design (assembled positions), one component alone, or one body. Optionally a flat face sets the
+// base view: the part is turned so that face looks straight out of the front view (the face itself is not isolated).
+var dwFacePick = null;     // dialog state while the user clicks a face for the base view
+function openCreateDrawing(bodyIds, st0) {
   if (!isBrep()) { toast('Drawings need the exact geometry engine'); return; }
   if (!result.bodies.size) { toast('There is no body to draw yet'); return; }
-  const st = { from: bodyIds?.length ? 'some' : 'all', sheet: 'A3', replace: !doc.drawing };
-  const names = (bodyIds || []).map(bodyName).join(', ');
-  const body = () => h('div', { style: 'min-width:360px' },
-    h('div', { class: 'row' }, h('span', { class: 'rl' }, 'Contents'), (() => { const s = h('select', { id: 'cd-from' }, h('option', { value: 'all', selected: st.from === 'all' }, 'Whole design'), ...(bodyIds?.length ? [h('option', { value: 'some', selected: st.from === 'some' }, names.length > 40 ? bodyIds.length + ' bodies' : names)] : [])); s.addEventListener('change', () => { st.from = s.value; }); return s; })()),
-    h('div', { class: 'row' }, h('span', { class: 'rl' }, 'Sheet size'), (() => { const s = h('select', { id: 'cd-sheet' }, ...['A4', 'A3', 'A2', 'A1'].map(k => h('option', { value: k, selected: st.sheet === k }, k))); s.addEventListener('change', () => { st.sheet = s.value; }); return s; })()),
-    doc.drawing ? (() => { const c = h('input', { type: 'checkbox', id: 'cd-replace', checked: st.replace }); c.addEventListener('change', () => { st.replace = c.checked; }); return h('div', { class: 'row' }, h('span', { class: 'rl' }), h('label', { class: 'chk', for: 'cd-replace' }, c, 'Start a new drawing (replaces the existing one)')); })() : null,
-    h('p', { class: 'note' }, 'Front, top, right and iso views are placed automatically with a title block. The part number comes from the design.'));
+  const ids = (bodyIds || []).filter(id => result.bodies.has(id));
+  const comp = ids.length ? (comps().find(c => c.bodies.length && ids.every(id => c.bodies.includes(id)) && c.bodies.filter(id => result.bodies.has(id)).every(id => ids.includes(id))) || (ids.length === 1 && compOfBody(ids[0]))) : null;
+  const st = st0 || { from: comp ? 'component' : ids.length ? 'body' : 'all', ids, comp: comp?.id || null, sheet: 'A3', projection: 'third', replace: !doc.drawing, face: null };
+  const c = st.comp && compById(st.comp);
+  const opts = [['all', comps().length ? 'Whole assembly (as assembled)' : 'Whole design']];
+  if (c) opts.push(['component', 'Component: ' + c.name + ' (alone)']);
+  if (st.ids.length === 1) opts.push(['body', 'Body: ' + bodyName(st.ids[0])]);
+  else if (st.ids.length > 1 && !c) opts.push(['body', st.ids.length + ' selected bodies']);
+  const sel = (id, list, val, on) => { const s = h('select', { id }, ...list.map(([v, l]) => h('option', { value: v, selected: v === val }, l))); s.addEventListener('change', () => on(s.value)); return s; };
+  const faceDesc = st.face ? 'Looking at a face of ' + bodyName(st.face.body) : 'Standard (front view looks along +Y)';
+  const body = () => h('div', { style: 'min-width:380px' },
+    h('div', { class: 'row' }, h('label', { class: 'rl', for: 'cd-from' }, 'Contents'), sel('cd-from', opts, st.from, v => { st.from = v; })),
+    h('div', { class: 'row' }, h('span', { class: 'rl' }, 'Base view'), h('div', {}, h('div', { class: 'note', id: 'cd-face', style: 'margin:0' }, faceDesc),
+      h('div', { style: 'display:flex;gap:6px;margin-top:4px' },
+        h('button', { class: 'btn', type: 'button', id: 'cd-pickface', onclick: () => { closeModal(); startDrawingFacePick(st); } }, st.face ? 'Pick another face' : 'Pick a face…'),
+        st.face ? h('button', { class: 'btn', type: 'button', id: 'cd-clearface', onclick: () => { st.face = null; closeModal(); openCreateDrawing(null, st); } }, 'Standard') : null))),
+    h('div', { class: 'row' }, h('label', { class: 'rl', for: 'cd-sheet' }, 'Sheet size'), sel('cd-sheet', ['A4', 'A3', 'A2', 'A1', 'A0'].map(k => [k, k]), st.sheet, v => { st.sheet = v; })),
+    h('div', { class: 'row' }, h('label', { class: 'rl', for: 'cd-proj' }, 'Projection'), sel('cd-proj', [['third', 'Third angle'], ['first', 'First angle']], st.projection, v => { st.projection = v; })),
+    doc.drawing ? (() => { const cb = h('input', { type: 'checkbox', id: 'cd-replace', checked: st.replace }); cb.addEventListener('change', () => { st.replace = cb.checked; }); return h('div', { class: 'row' }, h('span', { class: 'rl' }), h('label', { class: 'chk', for: 'cd-replace' }, cb, 'Replace the existing drawing')); })() : null,
+    h('p', { class: 'note' }, 'Front, top, right and iso views are placed automatically with a title block. The views come from the exact model with hidden lines removed, and stay linked to it.'));
   openModal('Create Drawing', 'properties', body(), [
     h('button', { class: 'btn ok', id: 'cd-ok', onclick: async () => {
       closeModal(); checkpoint();
       if (st.replace || !doc.drawing) doc.drawing = null;
       if (workspace !== 'design') leaveWorkspace();
+      const cc = st.comp && compById(st.comp);
+      const source = st.from === 'component' && cc ? { kind: 'component', comp: cc.id, name: cc.name }
+        : st.from === 'body' ? { kind: 'body', bodies: [...st.ids], name: st.ids.map(bodyName).join(', ') }
+        : { kind: comps().length ? 'assembly' : 'design', name: doc.name || 'design' };
+      if (st.face) source.face = true;
+      // the source and orientation must be known before the first views are made
+      const pre = { bodies: source.kind === 'body' ? [...st.ids] : source.kind === 'component' ? [...cc.bodies] : null, source, orient: st.face ? { body: st.face.body, sig: st.face.sig } : null };
+      pendingDrawingSource = pre;
       await enterDrawing();
+      pendingDrawingSource = null;
       if (!doc.drawing) return;
-      doc.drawing.bodies = st.from === 'some' ? [...bodyIds] : null;
-      const s = dw(); if (s && s.sheet !== st.sheet) { s.sheet = st.sheet; if (s.auto) relayoutAuto(); }
-      persist(); await dwRefresh(); if (dw()?.auto) relayoutAuto(); renderSheet(); dwFit();
+      Object.assign(doc.drawing, pre);
+      const s = dw();
+      if (s) { s.sheet = st.sheet; s.projection = st.projection; }
+      persist(); await dwRefresh(); if (dw()?.auto) relayoutAuto(); dwFit(); renderSheet();   // fit to the chosen sheet size, then draw
     } }, 'Create'),
     h('button', { class: 'btn', onclick: closeModal }, 'Cancel')]);
 }
+var pendingDrawingSource = null;
+function startDrawingFacePick(st) {
+  if (workspace !== 'design') leaveWorkspace();
+  dwFacePick = st || { from: 'all', ids: [], comp: null, sheet: 'A3', projection: 'third', replace: !doc.drawing, face: null };
+  viewport.classList.add('picking');
+  setHint('Click a flat face: the drawing’s front view will look straight at it · Esc cancels');
+}
+function dwFacePickAt(e) {
+  if (!dwFacePick) return false;
+  const fh = brepFaceHit(e);
+  if (!fh?.sig) return true;
+  if (fh.sig.type !== 'PLANE' || !fh.sig.n) { toast('Pick a flat face'); return true; }
+  const st = dwFacePick; dwFacePick = null; viewport.classList.remove('picking');
+  st.face = { body: fh.body, sig: fh.sig };
+  // a face picked on its own also chooses the contents: that body's component, or the body
+  if (!st.ids.length) { const c = compOfBody(fh.body); st.ids = c ? c.bodies.filter(id => result.bodies.has(id)) : [fh.body]; st.comp = c?.id || null; st.from = c ? 'component' : 'body'; }
+  defaultHint(); openCreateDrawing(null, st);
+  return true;
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && dwFacePick) { dwFacePick = null; viewport.classList.remove('picking'); defaultHint(); e.stopPropagation(); } }, true);
+cmd('createdrawingface', 'Create Drawing from Face', 'properties', { run: () => startDrawingFacePick(null) });
+cmd('opendrawing', 'Open Drawing', 'properties', { run: () => { if (doc.drawing) { if (workspace !== 'design') leaveWorkspace(); enterDrawing(); } else toast('This design has no drawing yet. Use Create Drawing.'); } });
 
 // ---------- job status ----------
 var jobs = [], jobSeq = 0, jobCur = null;

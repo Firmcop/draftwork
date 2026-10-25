@@ -91,11 +91,39 @@ Verification: `node --test tests/asmref.test.mjs` and `node scripts/build.mjs &&
 By hand: two components, Assemble ▸ Joint (J), hover a corner: a square marker and “Vertex on …” in the hint; Tab cycles;
 click, then click a corner on the other part: Ball is suggested and the corners meet exactly.
 
+## Module C — drawings (Phase 3, v0.39)
+
+| Requirement | Status | Notes |
+|---|---|---|
+| C1 Create Drawing / from model / from assembly | done | whole design in assembled positions |
+| C1 from selected component | done | component alone; follows the component's current bodies |
+| C1 from selected body | done | |
+| C1 from selected face | done | the face's normal sets the front view; the whole part is drawn |
+| C1 from exploded assembly | open | Phase 4 |
+| C1 open existing drawing | done | File ▸ Open Drawing, workspace switcher |
+| C1 toolbar and browser context menus | done | File menu, command search, browser body/component menus |
+| C2 source identity and orientation preserved | done | `doc.drawing.source`, `doc.drawing.orient` (face re-found after model changes) |
+| C3 standard and isometric views | existing | exact hidden-line removal in the engine |
+| C3 projected views aligned to a base view | existing | |
+| C3 first- and third-angle | done | layout mirrors; existing projected views flip when switching |
+| C3 hidden lines visible / removed | existing | per view |
+| C3 section, detail views | existing | |
+| C3 auxiliary, broken, exploded views | open | Phase 4–5 |
+| C4 linear, aligned, angular, radial, diameter dims; centre marks, centrelines, notes, leaders | existing | |
+| C4 hole / thread callouts, GD&T, datums, surface finish, welding | open | Phase 4–5 |
+| C4 never invent values | done | empty title fields print a dash; revision and drawing number start empty |
+| C7 A4–A0 and custom sheets | done | custom 50–5000 mm per side |
+| C7 scale, units, projection standard | done | |
+| C7 title block: drawing no., part no., revision, material, finish, author, approval status, date | done | plus checked by and approver |
+| C7 PDF and vector export, DXF | existing | use the active sheet size |
+
+Verification: `node scripts/build.mjs && node tests/e2e-drawing3.mjs` (face orientation checked on an axis-aligned face and on one turned 30°, to 0.01 mm).
+By hand: File ▸ Create Drawing from Face…, click a flat face, choose A1 and First angle, Create. Double-click the title block to fill it in.
+
 ## Module C and later phases
 
 | Phase | Scope | Status |
 |---|---|---|
-| 3 Core drawings | drawing from selected component/body/face, first-angle, A1/A0/custom sheets, title block fields (revision, finish, approval) | open (base/projected views, dimensions, PDF exist) |
 | 4 Manufacturing drawings | out-of-date detection with controlled update preserving annotations, revision record, exploded/auxiliary/broken views | open (section, detail, BOM, balloons, DXF exist) |
 | 5 Advanced | ball/planar suggestions, alignment inference, GD&T, datum, surface finish, welding symbols, drawing checks | open |
 

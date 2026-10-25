@@ -610,6 +610,7 @@ viewport.addEventListener('pointerup', e => {
     if (c.invalid) { toast(c.msg); return; }
     completePick(c); return;
   }
+  if (dwFacePick && dwFacePickAt(e)) return;
   if (jointEdit?.stage && jointPickAt(e)) return;
   if (cpick && constructPickAt(e)) return;
   if (combPickAt(e)) return;
@@ -880,6 +881,7 @@ if (location.hostname === 'localhost') window.__dw = {
   engine: () => engineMode,
   sheetPt: (X, Y) => { const r = sheetSvg.getBoundingClientRect(); return { x: r.left + (X - dwCam.x) / dwCam.w * r.width, y: r.top + (Y - dwCam.y) / dwCam.h * r.height }; },
   sheet: (kind, x, y) => { const v = dw()?.views.find(w => w.kind === kind); if (!v) return null; const P = viewXf(v).toSheet([x, y]), r = sheetSvg.getBoundingClientRect(); return { x: r.left + (P[0] - dwCam.x) / dwCam.w * r.width, y: r.top + (P[1] - dwCam.y) / dwCam.h * r.height }; },
+  dwInfo: () => dw() && { size: sheetSize(), sheet: dw().sheet, projection: dw().projection || 'third', scale: dw().scale, source: doc.drawing.source || null, orient: !!doc.drawing.orient, title: dw().title, tb: [...sheetSvg.querySelectorAll('[data-tag^="tb:"]')].map(e => e.getAttribute('data-tag') + '=' + (e.textContent || '')).filter(x => !x.endsWith('=')), views: Object.fromEntries(dw().views.filter(v => dwData[vk(v)]).map(v => { const d = dwData[vk(v)], [x, y] = viewPos(v); return [v.kind, { x, y, w: d.w, h: d.h, dir: v.dir || null }]; })) },
   drawing: () => dw() && { sheets: dwSheets().map(x => x.name), axes: Object.fromEntries(dw().views.map(v => [v.kind, dwData[vk(v)]?.axes?.length || 0])), balloons: (dw().balloons || []).length, notes: (dw().notes || []).length, labels: dw().dims.map(m => dwDimLabel(m)), views: dw().views.map(v => v.kind + ':' + (dwData[vk(v)]?.vis.length || 0) + '/' + (dwData[vk(v)]?.hid.length || 0) + (v.kind === 'section' ? '/cut' + (dwData[vk(v)]?.cut.length || 0) : '')), centerMarks: sheetSvg.querySelectorAll('path[stroke-dasharray="4 1 0.6 1"]').length, hatches: sheetSvg.querySelectorAll('path[fill="url(#hatch45)"]').length, dims: dw().dims.map(m => m.kind + ':' + fmtDim(dimValue(m))), scale: dw().scale, size: sheetSize(), boxes: dw().views.filter(v => dwData[vk(v)]).map(v => { const X = viewXf(v), d = dwData[vk(v)]; return [X.x - X.s * d.w / 2, X.y - X.s * d.h / 2, X.x + X.s * d.w / 2, X.y + X.s * d.h / 2]; }), texts: [...sheetSvg.querySelectorAll('text')].map(t => t.textContent) },
   setDoc: d => { checkpoint(); doc = upgradeDoc(d); afterDocReplace(); },
   refs: () => refHover ? { body: refHover.body, idx: refHover.idx, list: refHover.list.map(c => ({ type: c.type, d: Math.round(c.d * 10) / 10, p: c.p })) } : null,

@@ -138,7 +138,7 @@ async function switchSheet(id) {
 }
 async function addSheet() {
   checkpoint();
-  const R = doc.drawing, cur = dw(), s = { id: uid(), name: 'Sheet ' + (R.sheets.length + 1), sheet: cur.sheet, scale: cur.scale, views: [], dims: [], notes: [], balloons: [], auto: false, title: { ...(cur.title || {}) } };
+  const R = doc.drawing, cur = dw(), s = { id: uid(), name: 'Sheet ' + (R.sheets.length + 1), sheet: cur.sheet, size: cur.size ? [...cur.size] : undefined, projection: cur.projection || 'third', scale: cur.scale, views: [], dims: [], notes: [], balloons: [], auto: false, title: { ...(cur.title || {}) } };
   R.sheets.push(s); R.active = s.id; persist();
   await dwRefresh(); renderSheetTabs(); renderSheet();
   toast('New sheet: place views from the ribbon (Base views or Standard Views)');

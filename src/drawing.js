@@ -2,10 +2,10 @@
 // dimensions, a title block, and PDF export. Views and dimensions are stored in doc.drawing; the view geometry is
 // recomputed by the engine whenever the model changes, so the drawing stays associative.
 let workspace = 'design';
-const SHEETS = { A4: [297, 210], A3: [420, 297], A2: [594, 420] };
+const SHEETS = { A4: [297, 210], A3: [420, 297], A2: [594, 420], A1: [841, 594], A0: [1189, 841] };
 const SCALES = [10, 5, 4, 2, 1, 1 / 2, 1 / 4, 1 / 5, 1 / 10, 1 / 20, 1 / 50, 1 / 100];
 const VIEW_KINDS = { front: 'Front', top: 'Top', right: 'Right', left: 'Left', back: 'Back', bottom: 'Bottom', iso: 'Isometric' };
-const TB = { w: 180, h: 32 };      // title block size (mm)
+const TB = { w: 180, h: 41 };      // title block size (mm)
 let dwData = {};                   // view kind -> { vis, hid, bbox, segs, snaps, circles }
 let dwKey = '', dwPending = null;
 let dwTool = null;                 // 'dim' | 'dia' | 'place:<kind>' | null
@@ -23,7 +23,11 @@ function dw() {
 const dwSheets = () => doc.drawing?.sheets || [];
 function replaceSheet(obj) { const R = doc.drawing, i = R.sheets.findIndex(s => s.id === obj.id); if (i >= 0) R.sheets[i] = obj; }
 const vk = v => v.kind === 'section' ? 'sec:' + v.id : v.kind === 'detail' ? (viewById(v.of) ? vk(viewById(v.of)) : 'none') : v.kind;     // key of a view's geometry in dwData
-const sheetSize = () => SHEETS[dw()?.sheet || 'A3'];
+const sheetSize = () => { const D = dw(); return D?.sheet === 'custom' && D.size?.[0] > 0 && D.size?.[1] > 0 ? [+D.size[0], +D.size[1]] : SHEETS[D?.sheet] || SHEETS.A3; };
+const sheetLabel = D => D?.sheet === 'custom' ? `${+D.size?.[0] || 0} × ${+D.size?.[1] || 0}` : D?.sheet || 'A3';
+// First-angle (ISO E) puts the top view below the front view and the right view on its left; third-angle (ISO A, US) the opposite
+const firstAngle = () => dw()?.projection === 'first';
+const PROJ_FLIP = { up: 'down', down: 'up', left: 'right', right: 'left' };
 const scaleLabel = s => s >= 1 ? `${+s.toFixed(3)}:1` : `1:${+(1 / s).toFixed(3)}`;
 const fmtDim = v => (Math.round(v * 100) / 100).toString();
 
@@ -142,9 +146,17 @@ function standardLayout() {
   const gap = 18, left = 10 + gap, top = 10 + gap;
   const tbBox = [W - 10 - TB.w - 4, H - 10 - TB.h - 4, W - 10, H - 10];
   const build = scale => {
-    const fx = left + scale * F.w / 2, ty = top + scale * T.h / 2, fy = ty + scale * T.h / 2 + gap + scale * F.h / 2, fid = uid();
-    const views = [{ id: fid, kind: 'front', x: fx, y: fy, hidden: true }, { id: uid(), kind: 'top', x: fx, y: ty, hidden: true, parent: fid, dir: 'up', gap },
-      { id: uid(), kind: 'right', x: fx + scale * F.w / 2 + gap + scale * R.w / 2, y: fy, hidden: true, parent: fid, dir: 'right', gap }];
+    const fid = uid(); let views;
+    if (!firstAngle()) {
+      const fx = left + scale * F.w / 2, ty = top + scale * T.h / 2, fy = ty + scale * T.h / 2 + gap + scale * F.h / 2;
+      views = [{ id: fid, kind: 'front', x: fx, y: fy, hidden: true }, { id: uid(), kind: 'top', x: fx, y: ty, hidden: true, parent: fid, dir: 'up', gap },
+        { id: uid(), kind: 'right', x: fx + scale * F.w / 2 + gap + scale * R.w / 2, y: fy, hidden: true, parent: fid, dir: 'right', gap }];
+    } else {
+      // first angle: right view on the left of the front view, top view below it
+      const rx = left + scale * R.w / 2, fx = rx + scale * R.w / 2 + gap + scale * F.w / 2, fy = top + scale * F.h / 2, ty = fy + scale * F.h / 2 + gap + scale * T.h / 2;
+      views = [{ id: fid, kind: 'front', x: fx, y: fy, hidden: true }, { id: uid(), kind: 'top', x: fx, y: ty, hidden: true, parent: fid, dir: 'down', gap },
+        { id: uid(), kind: 'right', x: rx, y: fy, hidden: true, parent: fid, dir: 'left', gap }];
+    }
     if (I) views.push({ id: uid(), kind: 'iso', x: W - 10 - gap - scale * I.w / 2, y: top + scale * I.h / 2, hidden: false });
     const box = v => { const d = dwData[vk(v)]; return [v.x - scale * d.w / 2, v.y - scale * d.h / 2 - 2, v.x + scale * d.w / 2, v.y + scale * d.h / 2 + 8]; };   // room for the label
     // sections and views placed by hand stay where they are; the standard views must avoid them
@@ -156,13 +168,40 @@ function standardLayout() {
   for (const sc of SCALES) { const L = build(sc); if (L.ok) return { scale: sc, views: L.views }; }
   const sc = SCALES[SCALES.length - 1]; return { scale: sc, views: build(sc).views };
 }
+function dwDefaultTitle() {
+  return { author: '', partNo: doc.meta?.partNumber || '', drawingNo: '', revision: '', material: doc.material || '', finish: '', checked: '', approval: 'Not approved', approvedBy: '', date: '' };
+}
 function newDrawingData() {
   const L = standardLayout() || { scale: 1, views: [] };
-  return { sheet: 'A3', scale: L.scale, views: L.views, dims: [], auto: true, title: { author: '', partNo: doc.meta?.partNumber || '', material: doc.material || '', checked: '' } };
+  return { sheet: 'A3', scale: L.scale, views: L.views, dims: [], auto: true, projection: 'third', title: dwDefaultTitle() };
 }
 
 // ---------- geometry from the engine ----------
-function dwItems() { const only = doc.drawing?.bodies?.length ? new Set(doc.drawing.bodies) : null; return [...result.bodies.entries()].filter(([id, b]) => b.shape && !bodyHidden(id) && (!only || only.has(id))).map(([id, b]) => ({ id, shape: b.shape, place: bodyXf(id) === IDENT ? null : xfParts(bodyXf(id)) })); }
+// What the drawing shows: its source (a component follows that component's current bodies) and, for a drawing based on a
+// face, the whole part turned so that face looks straight out of the front view (the face only sets the direction).
+const dwSrc = () => (typeof pendingDrawingSource !== 'undefined' && pendingDrawingSource) || doc.drawing;   // a drawing being created has its source before its sheets
+function dwItems() {
+  const S = dwSrc(), src = S?.source, comp = src?.kind === 'component' && compById(src.comp);
+  const only = comp ? new Set(comp.bodies) : S?.bodies?.length ? new Set(S.bodies) : null;
+  const R = dwOrient();
+  return [...result.bodies.entries()].filter(([id, b]) => b.shape && !bodyHidden(id) && (!only || only.has(id))).map(([id, b]) => {
+    const M = R ? R.clone().multiply(bodyXf(id)) : bodyXf(id);
+    return { id, shape: b.shape, place: M.equals(IDENT) ? null : xfParts(M) };
+  });
+}
+// Rotation that turns the source face's normal toward the viewer of the front view (−Y) with "up" kept as close to world Z
+// as possible (world Y for faces that already point up or down). The face is found again after model changes.
+function dwOrient() {
+  const o = dwSrc()?.orient; if (!o?.sig) return null;
+  const rec = result.bodies.get(o.body);
+  let sig = o.sig;
+  if (rec?.shape) { const m = rematchSig([...brepSigMap(rec, 'face').values()], 'face', o.sig); if (m) sig = m; }
+  if (!sig.n) return null;
+  const n = new THREE.Vector3(...sig.n).transformDirection(bodyXf(o.body)).normalize();
+  const upRef = Math.abs(n.z) > 0.95 ? new THREE.Vector3(0, n.z > 0 ? 1 : -1, 0) : new THREE.Vector3(0, 0, 1);
+  const u = upRef.clone().addScaledVector(n, -upRef.dot(n)).normalize(), r = u.clone().cross(n).normalize();
+  return new THREE.Matrix4().makeBasis(r, n.clone().negate(), u).transpose();
+}
 async function dwRefresh() {
   if (!isBrep()) return;
   const allViews = dwSheets().flatMap(s => s.views || []);   // one projection serves every sheet
@@ -195,7 +234,7 @@ async function enterDrawing() {
   document.body.classList.add('ws-drawing'); $('#wsBtn span').textContent = 'DRAWING';
   activeTab = 'DRAWING'; renderRibbon(); ensureSheetEl();
   await dwRefresh();
-  if (!dw()) { checkpoint(); const s = { id: uid(), name: 'Sheet 1', ...newDrawingData() }; doc.drawing = { sheets: [s], active: s.id }; persist(); }
+  if (!dw()) { checkpoint(); const s = { id: uid(), name: 'Sheet 1', ...newDrawingData() }; doc.drawing = { sheets: [s], active: s.id, ...(typeof pendingDrawingSource !== 'undefined' && pendingDrawingSource || {}) }; persist(); }
   else if (dw().auto) relayoutAuto();
   renderSheetTabs();
   dwFit(); renderSheet(); defaultHint();
@@ -251,15 +290,21 @@ function displayList() {
   const path = (d, o = {}) => L.push({ t: 'path', d, w: o.w ?? 0.25, dash: o.dash || null, fill: !!o.fill, tag: o.tag || null });
   const text = (x, y, s, size = 3.5, o = {}) => L.push({ t: 'text', x, y, s: String(s), size, anchor: o.anchor || 'start', rot: o.rot || 0, bold: !!o.bold, tag: o.tag || null });
   path(`M10 10H${W - 10}V${H - 10}H10Z`, { w: 0.5 });
-  // title block
+  // title block: title and drawing number; drawn by, date, scale, size; material, finish, part number, revision;
+  // approval, units, projection symbol, sheet. Empty fields print a dash: nothing is invented.
   const tx = W - 10 - TB.w, ty = H - 10 - TB.h, t = D.title || {};
   path(`M${tx} ${ty}H${W - 10}V${H - 10}H${tx}Z`, { w: 0.5 });
-  path(`M${tx} ${ty + 14}H${W - 10}M${tx} ${ty + 23}H${W - 10}M${tx + 60} ${ty + 14}V${H - 10}M${tx + 105} ${ty + 14}V${H - 10}M${tx + 140} ${ty + 14}V${H - 10}`, { w: 0.25 });
-  const cell = (x, y, label, val, size = 3) => { text(x + 1.5, y + 3, label, 1.8); text(x + 1.5, y + 7.5, val || '—', size); };
-  text(tx + 3, ty + 6, 'TITLE', 1.8); text(tx + 3, ty + 11.5, doc.name || 'Untitled', 5, { bold: true });
-  cell(tx, ty + 14, 'DRAWN BY', t.author); cell(tx + 60, ty + 14, 'DATE', t.date || new Date().toISOString().slice(0, 10)); cell(tx + 105, ty + 14, 'SCALE', scaleLabel(D.scale)); cell(tx + 140, ty + 14, 'SIZE', D.sheet);
-  cell(tx, ty + 23, 'MATERIAL', t.material); cell(tx + 60, ty + 23, 'PART NO.', t.partNo); cell(tx + 105, ty + 23, 'UNITS', docUnit()); cell(tx + 140, ty + 23, 'SHEET', `${Math.max(1, dwSheets().indexOf(D) + 1)} / ${Math.max(1, dwSheets().length)}`);
-  text(12, H - 12, 'Third-angle projection · Draftwork', 1.8);
+  const r1 = ty + 14, r2 = r1 + 9, r3 = r2 + 9;
+  path(`M${tx} ${r1}H${W - 10}M${tx} ${r2}H${W - 10}M${tx} ${r3}H${W - 10}M${tx + 120} ${ty}V${r1}M${tx + 60} ${r1}V${H - 10}M${tx + 105} ${r1}V${H - 10}M${tx + 140} ${r1}V${H - 10}`, { w: 0.25 });
+  const cell = (x, y, label, val, size = 3, o = {}) => { text(x + 1.5, y + 3, label, 1.8); text(x + 1.5, y + 7.5, val || '—', size, o); };
+  text(tx + 3, ty + 4.5, 'TITLE', 1.8); text(tx + 3, ty + 11, doc.name || 'Untitled', 5, { bold: true, tag: 'tb:title' });
+  text(tx + 121.5, ty + 4.5, 'DRAWING NO.', 1.8); text(tx + 121.5, ty + 11, t.drawingNo || '—', 3.6, { bold: true, tag: 'tb:drawingNo' });
+  cell(tx, r1, 'DRAWN BY', t.author, 3, { tag: 'tb:author' }); cell(tx + 60, r1, 'DATE', t.date || new Date().toISOString().slice(0, 10), 3, { tag: 'tb:date' }); cell(tx + 105, r1, 'SCALE', scaleLabel(D.scale), 3, { tag: 'tb:scale' }); cell(tx + 140, r1, 'SIZE', sheetLabel(D), 3, { tag: 'tb:size' });
+  cell(tx, r2, 'MATERIAL', t.material, 3, { tag: 'tb:material' }); cell(tx + 60, r2, 'FINISH', t.finish, 3, { tag: 'tb:finish' }); cell(tx + 105, r2, 'PART NO.', t.partNo, 3, { tag: 'tb:partNo' }); cell(tx + 140, r2, 'REV', t.revision, 3, { tag: 'tb:revision' });
+  cell(tx, r3, 'APPROVAL', (t.approval || 'Not approved') + (t.approvedBy ? ' · ' + t.approvedBy : '') + (t.checked ? ' · chk ' + t.checked : ''), 2.6, { tag: 'tb:approval' }); cell(tx + 60, r3, 'UNITS', docUnit(), 3, { tag: 'tb:units' });
+  text(tx + 106.5, r3 + 3, firstAngle() ? 'FIRST ANGLE' : 'THIRD ANGLE', 1.8, { tag: 'tb:projection' }); projectionSymbol(path, tx + 113, r3 + 6.2, firstAngle());
+  cell(tx + 140, r3, 'SHEET', `${Math.max(1, dwSheets().indexOf(D) + 1)} / ${Math.max(1, dwSheets().length)}`);
+  text(12, H - 12, (firstAngle() ? 'First' : 'Third') + '-angle projection · Draftwork' + (doc.drawing?.source?.name ? ' · from ' + doc.drawing.source.name : ''), 1.8, { tag: 'tb:source' });
   if (D.partsList) partsListItems(path, text, tx, ty);
   // views
   for (const v of D.views) {
@@ -300,6 +345,15 @@ function displayList() {
   return L;
 }
 const viewById = id => dw().views.find(v => v.id === id);
+// ISO 128 projection symbol: a truncated cone's side view (trapezoid) and end view (two circles, always on the right).
+// Third angle: the small end faces the circles; first angle: the large end does.
+function projectionSymbol(path, x, y, first) {
+  const L = 7, R1 = 2.2, R2 = 1.1, cx = x + L + 5.5;
+  const big = first ? x + L : x, small = first ? x : x + L;
+  path(`M${big} ${y - R1}L${small} ${y - R2}L${small} ${y + R2}L${big} ${y + R1}Z`, { w: 0.25, tag: 'tb:symbol' });
+  path(`M${cx + R1} ${y}A${R1} ${R1} 0 1 0 ${cx - R1} ${y}A${R1} ${R1} 0 1 0 ${cx + R1} ${y}ZM${cx + R2} ${y}A${R2} ${R2} 0 1 0 ${cx - R2} ${y}A${R2} ${R2} 0 1 0 ${cx + R2} ${y}Z`, { w: 0.25, tag: 'tb:symbol' });
+  path(`M${x - 1} ${y}H${x + L + 1}M${cx - R1 - 1} ${y}H${cx + R1 + 1}M${cx} ${y - R1 - 1}V${y + R1 + 1}`, { w: 0.13, dash: [1.2, 0.5, 0.3, 0.5], tag: 'tb:symbol' });
+}
 // Section cutting line drawn on the view it was taken from: heavy ends, thin chain between, arrows showing the
 // viewing direction, and the section letter at each end.
 const SECTION_DIR = { front: { top: [0, -1], right: [1, 0] }, right: { top: [-1, 0], front: [-1, 0] }, top: { front: [0, 1], right: [0, 1] } };
@@ -521,6 +575,8 @@ function wireSheet() {
     dwCam = { x: P[0] - (P[0] - dwCam.x) * f, y: P[1] - (P[1] - dwCam.y) * f, w, h: dwCam.h * f }; renderSheet();
   }, { passive: false });
   let drag = null, lastTap = null;
+  // double-click the title block to edit it (a press on the paper starts a pan, so use the browser's dblclick)
+  sheetSvg.addEventListener('dblclick', e => { if (dwTool) return; const P = sheetPoint(e), [W, H] = sheetSize(); if (P[0] >= W - 10 - TB.w && P[0] <= W - 10 && P[1] >= H - 10 - TB.h && P[1] <= H - 10) dwSheetDialog(); });
   sheetSvg.addEventListener('pointerdown', e => {
     const P = sheetPoint(e);
     if (e.button === 1 || (e.button === 0 && !dwTool && !viewAt(P) && !e.target.closest('[data-tag^="d:"], [data-tag^="b:"], [data-tag^="n:"]'))) { drag = { pan: true, x: e.clientX, y: e.clientY, cam: { ...dwCam } }; sheetSvg.setPointerCapture(e.pointerId); return; }
@@ -665,6 +721,13 @@ function dwToggleHidden() {
   const v = dwSel?.type === 'view' && viewById(dwSel.id); if (!v) { toast('Select a view first'); return; }
   checkpoint(); v.hidden = !v.hidden; persist(); renderSheet();
 }
+// Switching the projection standard mirrors the projected views around their parents (top above ↔ below, right ↔ left).
+function setProjection(v) {
+  const D = dw(); if (!D || (D.projection || 'third') === v) return;
+  D.projection = v;
+  if (D.auto) relayoutAuto(); else for (const vw of D.views) if (vw.parent && PROJ_FLIP[vw.dir]) vw.dir = PROJ_FLIP[vw.dir];
+  renderSheet();
+}
 function dwSheetDialog() {
   const D = dw(), t = D.title || (D.title = {});
   const before = JSON.stringify(D);
@@ -673,13 +736,21 @@ function dwSheetDialog() {
       const sel = (id, opts, val, on) => { const s = h('select', { id }, ...opts.map(([v, l]) => h('option', { value: v, selected: String(v) === String(val) }, l))); s.addEventListener('change', () => on(s.value)); return s; };
       const txt = (id, key, label) => { const i = h('input', { type: 'text', id, value: (key ? t[key] : D.name) || '', autocomplete: 'off' }); i.addEventListener('input', () => { if (key) t[key] = i.value; else D.name = i.value; renderSheet(); }); return h('div', { class: 'row' }, h('label', { class: 'rl', for: id }, label), i); };
       return [section_('Sheet',
-        h('div', { class: 'row' }, h('label', { class: 'rl', for: 'dw-size' }, 'Size'), sel('dw-size', Object.keys(SHEETS).map(k => [k, k + ' landscape']), D.sheet, v => { D.sheet = v; dwFit(); renderSheet(); })),
+        h('div', { class: 'row' }, h('label', { class: 'rl', for: 'dw-size' }, 'Size'), sel('dw-size', [...Object.keys(SHEETS).map(k => [k, k + ' landscape (' + SHEETS[k].join(' × ') + ' mm)']), ['custom', 'Custom…']], D.sheet, v => { if (v === 'custom' && !D.size) D.size = [...sheetSize()]; D.sheet = v; if (D.auto) relayoutAuto(); dwFit(); renderSheet(); rerenderDialog(); })),
+        D.sheet === 'custom' ? h('div', { class: 'row' }, h('span', { class: 'rl' }, 'Width × height'), h('div', { style: 'display:flex;gap:6px;align-items:center' }, ...[0, 1].flatMap(i => {
+          const inp = h('input', { type: 'text', id: 'dw-size-' + 'wh'[i], value: String(D.size?.[i] ?? ''), inputmode: 'decimal', autocomplete: 'off', style: 'width:72px', 'aria-label': i ? 'Sheet height in mm' : 'Sheet width in mm' });
+          inp.addEventListener('input', () => { const v = +inp.value; if (v >= 50 && v <= 5000) { D.size[i] = v; if (D.auto) relayoutAuto(); dwFit(); renderSheet(); } });
+          return i ? [h('span', {}, '×'), inp, h('span', { class: 'note', style: 'margin:0' }, 'mm')] : [inp]; }))) : null,
+        h('div', { class: 'row' }, h('label', { class: 'rl', for: 'dw-proj' }, 'Projection'), sel('dw-proj', [['third', 'Third angle (ISO A, US)'], ['first', 'First angle (ISO E, Europe)']], D.projection || 'third', v => setProjection(v))),
         h('div', { class: 'row' }, h('label', { class: 'rl', for: 'dw-scale' }, 'Scale'), sel('dw-scale', SCALES.map(s => [s, scaleLabel(s)]), D.scale, v => {
           const s0 = D.scale, s1 = +v, [W, H] = sheetSize();      // keep views spread around the sheet centre
           for (const vw of D.views) { vw.x = W / 2 + (vw.x - W / 2) * s1 / s0; vw.y = H / 2 + (vw.y - H / 2) * s1 / s0; }
           D.scale = s1; D.auto = false; renderSheet(); }))),
         section_('Sheet name', txt('dw-sname', null, 'Name')),
-        section_('Title block', txt('dw-author', 'author', 'Drawn by'), txt('dw-part', 'partNo', 'Part no.'), txt('dw-mat', 'material', 'Material'), txt('dw-date', 'date', 'Date'))];
+        section_('Title block', txt('dw-dno', 'drawingNo', 'Drawing no.'), txt('dw-part', 'partNo', 'Part no.'), txt('dw-rev', 'revision', 'Revision'), txt('dw-mat', 'material', 'Material'), txt('dw-finish', 'finish', 'Finish'),
+          txt('dw-author', 'author', 'Drawn by'), txt('dw-checked', 'checked', 'Checked by'),
+          h('div', { class: 'row' }, h('label', { class: 'rl', for: 'dw-approval' }, 'Approval'), sel('dw-approval', ['Not approved', 'In review', 'Approved', 'Released'].map(x => [x, x]), t.approval || 'Not approved', v => { t.approval = v; renderSheet(); })),
+          txt('dw-approver', 'approvedBy', 'Approved by'), txt('dw-date', 'date', 'Date'))];
     },
     onOK: () => { if (JSON.stringify(dw()) !== before) { const now = JSON.stringify(dw()); replaceSheet(JSON.parse(before)); checkpoint(); replaceSheet(JSON.parse(now)); persist(); } renderSheet(); renderSheetTabs(); },
     onCancel: () => { replaceSheet(JSON.parse(before)); renderSheet(); },
