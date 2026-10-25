@@ -72,3 +72,18 @@ button.link { border: 0; background: none; padding: 0; color: var(--accent); cur
 .files a { display: flex; justify-content: space-between; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius); color: var(--ink); text-decoration: none; min-height: 40px; align-items: center; }
 .files a:hover { border-color: var(--accent); }
 .files .size { color: var(--muted); font-size: 12px; }
+
+.assist { display: grid; gap: 8px; margin: 0 0 18px; padding: 0 0 16px; border-bottom: 1px solid var(--line); }
+.assist[hidden] { display: none; }
+.assist > label { font-weight: 650; font-size: 14px; }
+.assist textarea { width: 100%; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg); padding: 8px 10px; font: inherit; resize: vertical; }
+.assistbar { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.photo { display: inline-flex; align-items: center; gap: 6px; min-height: 40px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.photo input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.photo span { border: 1px dashed var(--line); border-radius: var(--radius); padding: 8px 10px; }
+.photo input:focus-visible + span { outline: 2px solid var(--accent); }
+button.primary.small { width: auto; min-height: 40px; padding: 0 16px; }
+.assistnote { font-size: 13px; }
+.assistnote p { margin: 4px 0; }
+.assistnote ul { margin: 4px 0; padding-left: 18px; }
+.assistnote .muted { font-size: 12.5px; }

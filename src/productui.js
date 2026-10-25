@@ -215,7 +215,63 @@ function prodRules(pane, C, draw) {
     prodProblems(C, 'rules') || '',
     h('table', { class: 'grid prodgrid fixed' }, prodCols([150, 170, null, 150, 190, 130, 64]), h('thead', {}, h('tr', {}, ...['Rule', 'Target', 'Formula', 'Only when', 'Details', 'Now', ''].map(t => h('th', {}, t)))),
       h('tbody', {}, rows.length ? rows : h('tr', {}, h('td', { colspan: '7', class: 'note' }, 'No rules yet. Capturing a parameter on the Form tab adds one.')))),
-    h('div', { class: 'row prodbar' }, add));
+    h('div', { class: 'row prodbar' }, add),
+    prodAskAI(C, draw));
+}
+
+// ---------- Ask AI: draft rules from plain words; the proposal is checked by the rules engine before it can be added ----------
+let prodAI = { request: '', busy: false, result: null, error: '' };
+const AI_KEY = 'draftwork-ai-key', AI_MODEL = 'draftwork-ai-model';
+const aiGet = k => { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } };
+const aiSet = (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch (e) { /* storage blocked */ } };
+function prodAskAI(C, draw) {
+  const key = aiGet(AI_KEY);
+  const box = h('div', { class: 'prodai' });
+  if (!key) {
+    const k = h('input', { type: 'password', 'aria-label': 'Anthropic API key', placeholder: 'sk-ant-…', autocomplete: 'off', spellcheck: 'false' });
+    box.append(h('h4', {}, 'Ask AI to write rules'),
+      h('p', { class: 'note' }, 'Describe a change in plain words and Claude drafts the rules; Draftwork checks them against this design and your test cases before you add them. Uses your own Anthropic API key, kept only in this browser.'),
+      h('div', { class: 'row prodbar' }, k, h('button', { class: 'btn', onclick: () => { if (k.value.trim()) { aiSet(AI_KEY, k.value.trim()); draw(); } } }, 'Use this key')));
+    return box;
+  }
+  const req = h('textarea', { rows: '3', 'aria-label': 'Describe a change', placeholder: 'e.g. Hinges go heavy duty above 80 kg  ·  add a paint option at 350 each  ·  warn when the opening is over 3 m', spellcheck: 'true' }, prodAI.request);
+  req.addEventListener('input', () => { prodAI.request = req.value; });
+  const go = h('button', { class: 'btn go', disabled: prodAI.busy, onclick: async () => {
+    const request = req.value.trim(); if (!request) { req.focus(); return; }
+    prodAI = { request, busy: true, result: null, error: '' }; draw();
+    try {
+      const llm = DWR.createClaude({ apiKey: aiGet(AI_KEY), model: aiGet(AI_MODEL) || DWR.DEFAULT_MODEL, browser: true });
+      prodAI.result = await DWR.draftChanges({ request, config: prodConfig(prodWork), design: doc, llm });
+    } catch (e) { prodAI.error = e.message; }
+    prodAI.busy = false; draw();
+  } }, prodAI.busy ? 'Drafting…' : 'Draft');
+  box.append(h('h4', {}, 'Ask AI to write rules'), req,
+    h('div', { class: 'row prodbar' }, go,
+      h('input', { 'aria-label': 'Model', value: aiGet(AI_MODEL) || DWR.DEFAULT_MODEL, size: '18', spellcheck: 'false', onchange: e => aiSet(AI_MODEL, e.target.value.trim()) }),
+      h('button', { class: 'btn', onclick: () => { aiSet(AI_KEY, ''); draw(); } }, 'Forget key')));
+  if (prodAI.error) box.append(h('p', { class: 'note bad' }, prodAI.error));
+  const r = prodAI.result;
+  if (r) {
+    const p = r.proposal, n = p.inputs.length + p.variables.length + p.rules.length + Object.keys(p.tables).length + p.remove_rules.length;
+    const line = (label, o) => h('li', {}, h('b', {}, label + ' '), h('code', {}, JSON.stringify(o)));
+    box.append(h('div', { class: 'prodproposal' + (r.ok ? ' ok' : ' bad') },
+      h('p', {}, p.explanation || 'Proposed changes:'),
+      p.questions.length ? h('ul', { class: 'prodq' }, ...p.questions.map(q => h('li', {}, q))) : '',
+      n ? h('ul', { class: 'prodchanges' },
+        ...p.inputs.map(x => line('+ input', x)), ...p.variables.map(x => line('+ variable', x)),
+        ...Object.keys(p.tables).map(t => line('+ table', t)), ...p.rules.map(x => line('+ rule', x)),
+        ...p.remove_rules.map(i => line('− rule #' + i, prodWork.rules[i - 1] || '?'))) : h('p', { class: 'note' }, 'No changes proposed.'),
+      r.ok ? h('p', { class: 'note ok' }, `Checked: compiles, fits the design${r.check.tests ? `, ${r.check.tests.results.length} test case(s) still pass` : ''}${r.attempts > 1 ? ` (fixed after ${r.attempts - 1} retry)` : ''}.`)
+        : h('ul', { class: 'prodprobs' }, ...r.check.problems.map(x => h('li', {}, x))),
+      h('div', { class: 'row prodbar' },
+        h('button', { class: 'btn ok', disabled: !r.ok || !n, onclick: () => {
+          const merged = DWR.applyProposal(prodWork, p); delete merged.product;
+          prodWork = merged; prodAI = { request: '', busy: false, result: null, error: '' };
+          toast('Added to the product: press OK to keep it'); draw();
+        } }, 'Add to product'),
+        h('button', { class: 'btn', onclick: () => { prodAI.result = null; draw(); } }, 'Discard'))));
+  }
+  return box;
 }
 function prodNow(r, d) {
   if (!d) return '';

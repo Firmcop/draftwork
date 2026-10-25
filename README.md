@@ -42,6 +42,10 @@ The configurator runs without the modeler too:
 
 - [`packages/core`](packages/core) — headless rebuild and export (STEP, STL, drawing views, flat DXF) of a design driven by parameter values.
 - [`packages/rules`](packages/rules) — the rules engine: inputs, formulas, lookup tables and rules that turn answers into parameters, checks, BOM, price and text. The modeler's Product Configurator uses the same engine.
+- [`packages/ai`](packages/ai) — the AI layer: draft rules from plain words (checked by the rules engine before they can be added) and fill the form from a customer's description.
+- [`services/generator`](services/generator) — the configurator server: web page, product API, file generation with a cache, optional AI intake.
+- [`services/mcp`](services/mcp) — an MCP server so AI assistants can list, price and build your products.
+- [`products`](products) — your published products; the web configurator is live at https://firmcop.github.io/draftwork/configurator/.
 
 ```bash
 node packages/rules/bin/draftwork-configure.mjs packages/rules/examples/bearing-bracket/product.config.json --answer ShaftSize=20 --out out/

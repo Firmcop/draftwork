@@ -70,7 +70,34 @@ async function load(id) {
   };
   worker.postMessage({ type: 'init', design: product.design });
   update();
+  if (!STATIC) getJSON('./api/ai').then(a => { if (a.intake) setupAssist(); }).catch(() => {});
 }
+
+// "Describe what you need": the server's assistant fills in the options; the rules then price and check them as usual
+function setupAssist() {
+  $('#assist').hidden = false;
+  $('#photo').addEventListener('change', () => { const f = $('#photo').files[0]; $('#photoName').textContent = f ? f.name : 'Add a photo or sketch'; });
+  $('#assist').addEventListener('submit', async e => {
+    e.preventDefault();
+    const message = $('#need').value.trim(), file = $('#photo').files[0];
+    if (!message && !file) { $('#assistNote').textContent = 'Write a few words about what you need.'; return; }
+    if (file && file.size > 4.5e6) { $('#assistNote').textContent = 'That picture is too large (4.5 MB at most).'; return; }
+    $('#assistGo').disabled = true; $('#assistNote').textContent = 'Reading your description…';
+    try {
+      const images = file ? [{ mediaType: file.type, data: await base64(file) }] : [];
+      const r = await getJSON(`./api/products/${encodeURIComponent(product.id)}/intake`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ message, answers, images }) });
+      answers = r.answers; update();
+      const n = Object.keys(r.changed).length;
+      $('#assistNote').replaceChildren(
+        el('p', {}, r.summary || (n ? `Set ${n} option${n > 1 ? 's' : ''}.` : 'Nothing to change.')),
+        r.questions.length ? el('ul', {}, ...r.questions.map(q => el('li', {}, q))) : '',
+        r.ignored.length ? el('p', { class: 'muted' }, 'Not used: ' + r.ignored.join('; ')) : '',
+        el('p', { class: 'muted' }, 'Check the options below: the price and checks come from them.'));
+    } catch (err) { $('#assistNote').textContent = err.message; }
+    $('#assistGo').disabled = false;
+  });
+}
+const base64 = file => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1]); r.onerror = () => rej(new Error('Could not read the picture')); r.readAsDataURL(file); });
 
 const setView = t => { $('#viewStatus').textContent = t; };
 

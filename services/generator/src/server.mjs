@@ -17,6 +17,7 @@ import zlib from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { Catalog } from './catalog.mjs';
 import { Jobs, InputError, FORMATS } from './jobs.mjs';
+import { createClaude, intake, AIError } from '@draftwork/ai';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repo = path.resolve(here, '../../..');
@@ -30,13 +31,25 @@ function pkgDir(name) {
   }
 }
 const TYPES = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.wasm': 'application/wasm', '.svg': 'image/svg+xml', '.step': 'application/step', '.stl': 'model/stl', '.dxf': 'image/vnd.dxf', '.png': 'image/png' };
-const MAX_BODY = 256 * 1024;
+const MAX_BODY = 256 * 1024, MAX_INTAKE_BODY = 6 * 1024 * 1024;
+const IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 
 // core/dist/kernel.mjs imports 'three' and 'replicad' by package name; a Worker has no import map, so point them at
 // the vendor copies, relative to /core/dist/ (the same layout on the server and on a static host)
 export const coreImports = text => text.replace(/from 'three'/g, "from '../../vendor/three/build/three.module.js'").replace(/from 'replicad'/g, "from '../../vendor/replicad/replicad.js'");
 
-export function createServer({ productsDir, storageDir, appDir = path.join(repo, 'apps/configurator') } = {}) {
+export function createServer({ productsDir, storageDir, appDir = path.join(repo, 'apps/configurator'), llm, aiLimit = { per: 10 * 60 * 1000, max: 20 } } = {}) {
+  // customer intake by AI: on when the server has a model (an ANTHROPIC_API_KEY, or one passed in)
+  if (llm === undefined && process.env.ANTHROPIC_API_KEY) llm = createClaude({ apiKey: process.env.ANTHROPIC_API_KEY, model: process.env.DRAFTWORK_AI_MODEL || undefined, browser: false });
+  const aiUse = new Map();   // address → recent request times, to keep one visitor from running up the bill
+  const aiAllowed = req => {
+    const ip = req.socket.remoteAddress || '?', now = Date.now();
+    const recent = (aiUse.get(ip) || []).filter(t => now - t < aiLimit.per);
+    if (recent.length >= aiLimit.max) return false;
+    recent.push(now); aiUse.set(ip, recent);
+    if (aiUse.size > 10000) aiUse.clear();
+    return true;
+  };
   const catalog = new Catalog(productsDir);
   const jobs = new Jobs({ storageDir });
   // URL prefix → folder; /core/ files get their bare imports rewritten so a module Worker can load them
@@ -57,9 +70,9 @@ export function createServer({ productsDir, storageDir, appDir = path.join(repo,
   };
   const fail = (res, status, message, details) => send(res, status, { error: message, ...(details ? { details } : {}) });
 
-  async function readBody(req) {
+  async function readBody(req, max = MAX_BODY) {
     let size = 0; const chunks = [];
-    for await (const c of req) { size += c.length; if (size > MAX_BODY) throw new InputError('Request too large'); chunks.push(c); }
+    for await (const c of req) { size += c.length; if (size > max) throw new InputError('Request too large'); chunks.push(c); }
     if (!size) return {};
     try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch (e) { throw new InputError('The request body is not JSON'); }
   }
@@ -82,6 +95,20 @@ export function createServer({ productsDir, storageDir, appDir = path.join(repo,
         const r = p.project.evaluate(answers || {});
         return send(res, 200, { ok: r.ok, answers: Object.fromEntries(r.form.map(f => [f.name, f.value ?? null])), price: r.price, bom: r.bom, text: r.text, messages: r.messages });
       }
+      if (parts[2] === 'intake' && method === 'POST') {
+        if (!llm) return fail(res, 404, 'Describing a need is not switched on for this site');
+        if (!aiAllowed(req)) return fail(res, 429, 'Too many requests: please fill in the form, or try again in a few minutes');
+        const { message, answers, images } = await readBody(req, MAX_INTAKE_BODY);
+        const pics = (Array.isArray(images) ? images : []).slice(0, 3);
+        for (const im of pics) if (!IMAGE_TYPES.includes(im?.mediaType) || typeof im.data !== 'string') throw new InputError('Pictures must be JPEG, PNG, WebP or GIF');
+        try {
+          const r = await intake({ message: typeof message === 'string' ? message : '', images: pics, project: p.project, answers: answers && typeof answers === 'object' ? answers : {}, llm });
+          return send(res, 200, { answers: r.answers, changed: r.changed, ignored: r.ignored, questions: r.questions, summary: r.summary });
+        } catch (e) {
+          if (e instanceof AIError) return fail(res, 502, 'The assistant is not available right now: ' + e.message);
+          throw new InputError(e.message);
+        }
+      }
       if (parts[2] === 'jobs' && method === 'POST') {
         const { answers, formats } = await readBody(req);
         const job = await jobs.submit(p, answers || {}, Array.isArray(formats) ? formats : undefined);
@@ -101,6 +128,7 @@ export function createServer({ productsDir, storageDir, appDir = path.join(repo,
       }
     }
     if (parts[0] === 'formats' && method === 'GET') return send(res, 200, FORMATS);
+    if (parts[0] === 'ai' && parts.length === 1 && method === 'GET') return send(res, 200, { intake: !!llm });
     return fail(res, 404, 'Not found');
   }
 

@@ -95,3 +95,25 @@ test('the page and the libraries it imports are served, engine files gzipped', a
   assert.equal(wasm.headers.get('content-encoding'), 'gzip');
   assert.equal(wasm.headers.get('content-type'), 'application/wasm');
 });
+
+test('customer intake is off without a model, and on with one', async () => {
+  assert.deepEqual((await get('/api/ai')).body, { intake: false });
+  assert.equal((await post('/api/products/bearing-bracket/intake', { message: 'hi' })).status, 404);
+  const calls = [];
+  const llm = { ask: async req => { calls.push(req); return { answers: { ShaftSize: 20, Load: 'Heavy', Size: 'XL' }, questions: ['How many?'], summary: 'A heavy 20 mm bracket.' }; } };
+  const s2 = createServer({ productsDir: path.join(root, 'packages/rules/examples'), storageDir: storage, llm, aiLimit: { per: 60000, max: 2 } });
+  await new Promise(r => s2.listen(0, r));
+  const b2 = `http://localhost:${s2.address().port}`;
+  const p2 = async body => { const r = await fetch(b2 + '/api/products/bearing-bracket/intake', { method: 'POST', body: JSON.stringify(body) }); return { status: r.status, body: await r.json() }; };
+  try {
+    assert.deepEqual(await (await fetch(b2 + '/api/ai')).json(), { intake: true });
+    const r = await p2({ message: 'heavy duty, 20 mm shaft', answers: { Quantity: 5 }, images: [{ mediaType: 'image/png', data: 'iVBORw0KGgo=' }] });
+    assert.equal(r.status, 200);
+    assert.deepEqual(r.body.answers, { Quantity: 5, ShaftSize: 20, Load: 'Heavy' });
+    assert.deepEqual(r.body.ignored, ['Size: not an option of this product']);
+    assert.deepEqual(r.body.questions, ['How many?']);
+    assert.equal(calls[0].content[0].type, 'image');
+    assert.equal((await p2({ message: 'x', images: [{ mediaType: 'application/pdf', data: 'x' }] })).status, 422);
+    assert.equal((await p2({ message: 'third' })).status, 429, 'the rate limit holds');
+  } finally { s2.close(); }
+});

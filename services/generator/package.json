@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@draftwork/core": "0.1.0",
-    "@draftwork/rules": "0.1.0"
+    "@draftwork/rules": "0.1.0",
+    "@draftwork/ai": "0.1.0"
   }
 }
