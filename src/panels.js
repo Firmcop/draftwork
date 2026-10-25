@@ -651,7 +651,7 @@ function openModal(title, iconKey, body, buttons) {
   $('#modalBack').hidden = false;
   setTimeout(() => (m.querySelector('input, button.ok') || m).focus(), 0);
 }
-function closeModal() { $('#modalBack').hidden = true; $('#modal').replaceChildren(); }
+function closeModal() { $('#modalBack').hidden = true; $('#modal').replaceChildren(); $('#modal').classList.remove('wide'); }
 $('#modalBack').addEventListener('pointerdown', e => { if (e.target.id === 'modalBack') closeModal(); });
 
 function openParamsModal() {

@@ -30,11 +30,22 @@ Parametric CAD in the browser. Sketch on planes or faces, build solids with a fe
 | Drawing | Drawing workspace with several sheets (tabs): front/top/right/isometric views with exact hidden lines, section views with hatching, detail views (2× by default), centre marks and centrelines on holes, linear/diameter/radius/angle dimensions that follow model changes, with tolerances (±, deviation, limits, basic), precision and text overrides; balloons tied to the parts list, notes with leaders, parts list, title block (sheet n / N); export as a multi-page PDF plus SVG and DXF per sheet |
 | Inspect | Measure, section analysis, center of mass, properties, bill of materials (CSV), interference, zebra stripes, curvature comb |
 | Insert | SVG and DXF as sketches (exact lines, arcs, circles; curves as splines), canvas and decal images, derive bodies from another design |
-| Configure | Configuration table (parameter values and suppressed features per variant), rules that suppress features by condition; `if()` and comparisons in expressions |
+| Configure | Configuration table (parameter values and suppressed features per variant), rules that suppress features by condition; `if()` and comparisons in expressions. **Product Configurator**: turn a design into a configurable product — capture parameters as form inputs, CSV lookup tables, named formulas, rules (set parameter, suppress feature, choose component, checks, BOM and price lines, text), test cases with branch coverage, a Try it form with live model, price, BOM and Explain, and export as a bundle for `@draftwork/rules` and `@draftwork/core` |
 | Select | Window and crossing selection with hide/isolate/remove, selection filters |
 | Files | Project save/open (.json), STEP import, STEP and STL export (.zip) |
 
 Edge and face picks for fillet/chamfer/shell are stored as geometric signatures and re-matched after every rebuild, so they survive moderate upstream changes.
+
+## Configurator packages
+
+The configurator runs without the modeler too:
+
+- [`packages/core`](packages/core) — headless rebuild and export (STEP, STL, drawing views, flat DXF) of a design driven by parameter values.
+- [`packages/rules`](packages/rules) — the rules engine: inputs, formulas, lookup tables and rules that turn answers into parameters, checks, BOM, price and text. The modeler's Product Configurator uses the same engine.
+
+```bash
+node packages/rules/bin/draftwork-configure.mjs packages/rules/examples/bearing-bracket/product.config.json --answer ShaftSize=20 --out out/
+```
 
 ## Desktop app
 

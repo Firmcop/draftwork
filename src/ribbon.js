@@ -40,6 +40,7 @@ cmd('appearance', 'Appearance', 'appearance', { key: 'A', run: () => openAppeara
 cmd('params', 'Change Parameters', 'params', { run: () => openParamsModal() });
 // configure
 cmd('cfgtable', 'Configuration Table', 'configure', { run: () => openConfigTable() }); cmd('cfgrules', 'Configuration Rules', 'configure', { run: () => openConfigRules() });
+cmd('product', 'Product Configurator', 'configure', { run: () => openProduct() });
 // construct
 cmd('offsetplane', 'Offset Plane', 'plane', { run: () => startOffsetPlane() });
 cmd('planeangle', 'Plane at Angle', 'planeangle', { run: () => startPlaneAtAngle() }); cmd('midplane', 'Midplane', 'midplane', { run: () => startMidplane() }); cmd('planetangent', 'Tangent Plane', 'plane', { run: () => startTangentPlane() });
@@ -190,7 +191,7 @@ const TABS = {
   SOLID: [
     { name: 'CREATE', bar: ['sketch', 'extrude', 'revolve', 'sweep', 'loft', 'hole', 'box', 'patrect', 'mirror'], menu: ['sketch', 'form', 'derive', '-', 'extrude', 'revolve', 'sweep', 'loft', 'rib', 'web', 'emboss', '-', 'hole', 'thread', '-', 'box', 'cylinder', 'sphere', 'torus', 'coil', 'pipe', '-', { sub: 'Pattern', icon: 'patrect', items: ['patrect', 'patcirc', 'patpath'] }, 'mirror', '-', 'thicken', 'boundary'] },
     { name: 'MODIFY', bar: ['presspull', 'fillet', 'chamfer', 'shell', 'draft', 'combine', 'move', 'params'], menu: ['presspull', 'fillet', 'fullround', 'chamfer', 'shell', 'draft', 'scale', 'combine', '-', 'offsetface', 'replaceface', 'splitface', 'splitbody', 'silsplit', '-', 'move', 'align', 'delete', '-', 'material', 'appearance', '-', 'params'] },
-    { name: 'CONFIGURE', bar: ['cfgtable'], menu: ['cfgtable', 'cfgrules'] },
+    { name: 'CONFIGURE', bar: ['cfgtable', 'product'], menu: ['cfgtable', 'cfgrules', '-', 'product'] },
     { name: 'CONSTRUCT', bar: ['offsetplane', 'planeangle', 'axiscyl'], menu: ['offsetplane', 'planeangle', 'midplane', 'planetangent', 'plane3p', '-', 'axiscyl', 'axisedge', 'axis2p', 'axis2planes', '-', 'pointv', 'pointc', 'pointxyz'] },
     { name: 'INSPECT', bar: ['measure', 'section', 'com'], menu: ['measure', 'interference', '-', 'curvature', 'zebra', '-', 'section', 'com', '-', 'properties'] },
     { name: 'INSERT', bar: ['insstep', 'insmesh', 'inssvg', 'canvas'], menu: ['insstep', '-', 'insderive', 'decal', 'canvas', '-', 'insmesh', 'inssvg', 'insdxf'] },
