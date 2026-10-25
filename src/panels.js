@@ -597,7 +597,13 @@ function renderPalette() {
   const body = h('div', { class: 'dbody' });
   body.append(section_('Options',
     h('div', { class: 'btnrow', style: 'display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px' }, h('button', { class: 'btn', onclick: () => lookAtMatrix(sketchMatrix(sk)), html: icon('lookat') + 'Look At' })),
-    opt('Sketch grid', 'grid'), opt('Snap to 1 mm', 'snap'), opt('Show profiles', 'profiles'), opt('Show dimensions', 'dims')));
+    opt('Sketch grid', 'grid'), opt('Snap to 1 mm', 'snap'), opt('Show profiles', 'profiles'), opt('Show dimensions', 'dims'),
+    opt('Auto constraints', 'autoCons'), opt('Inference (H, V, ∥, ⊥, tangent)', 'infer')));
+  // snap categories (hold Ctrl / Cmd while clicking to place a point with no snapping at all)
+  const cat = (label, key) => { const id = 'snapcat-' + key, c = h('input', { type: 'checkbox', id, checked: sketchOpts.snapCats?.[key] !== false });
+    c.addEventListener('change', () => { (sketchOpts.snapCats ||= {})[key] = c.checked; snapCache = null; }); return h('label', { class: 'chk', for: id }, c, label); };
+  body.append(section_('Snap to', h('div', { class: 'snapcats' }, cat('Endpoints', 'endpoint'), cat('Midpoints', 'midpoint'), cat('Centers', 'center'), cat('Quadrants', 'quadrant'), cat('Intersections', 'intersection'), cat('On curve', 'nearest'), cat('Alignment', 'align')),
+    h('p', { class: 'note', style: 'margin:4px 0 0' }, 'Hold Ctrl (⌘ on a Mac) to place without snapping.')));
   const nameI = h('input', { type: 'text', id: 'sk-name', value: sk.name, autocomplete: 'off' });
   nameI.addEventListener('input', () => { checkpoint('skname'); sk.name = nameI.value; renderBrowser(); });
   const curPl = sk.plane && typeof sk.plane === 'object' ? '__face' : sk.plane;

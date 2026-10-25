@@ -91,7 +91,7 @@ let selFeature = null, selBody = null;
 let pick = null, measure = null, section = null, showCOM = false;
 let dlg = null;                     // open command dialog
 let visualStyle = 'edges', showGrid = true, navMode = 'orbit';
-let sketchOpts = { grid: true, snap: true, profiles: true, dims: true };
+let sketchOpts = { grid: true, snap: true, profiles: true, dims: true, autoCons: true, infer: true, snapCats: {} };
 let activeTab = 'SOLID';
 let engine = 'mesh', engineState = 'loading', engineMsg = '';
 const isBrep = () => engine === 'brep';
@@ -248,9 +248,18 @@ new ResizeObserver(() => {
   camera.aspect = w / hgt; camera.updateProjectionMatrix(); requestRender();
 }).observe(viewport);
 
-function visibleBox() {
+function visibleBox(withSketches = true) {
   const b = new THREE.Box3();
   for (const [id, body] of result.bodies) { if (bodyHidden(id)) continue; const g = bodyGeomOf(body); g.computeBoundingBox(); b.union(g.boundingBox); }
+  // sketches on screen count too, so Fit and the camera clipping planes include big sketches
+  if (withSketches) for (const sk of doc.features) {
+    if (sk.type !== 'sketch' || !sk.geo?.points?.length || !(sk.id === sketchId || doc.sketchShown?.[sk.id])) continue;
+    let M; try { M = sketchMatrix(sk); } catch (e) { continue; }
+    const v = new THREE.Vector3(), add = (x, y) => b.expandByPoint(v.set(x, y, 0).applyMatrix4(M));
+    const P = new Map(sk.geo.points.map(p => [p.id, p]));
+    for (const p of sk.geo.points) add(p.x, p.y);
+    for (const c of sk.geo.curves) if (c.kind === 'circle' && P.has(c.c)) { const q = P.get(c.c), r = Math.abs(+c.r || 0); add(q.x - r, q.y - r); add(q.x + r, q.y + r); }
+  }
   if (b.isEmpty()) b.set(new THREE.Vector3(-50, -50, 0), new THREE.Vector3(50, 50, 20));
   clipBox = b.clone();
   return b;
@@ -653,5 +662,5 @@ function loadStored() { try { return upgradeDoc(JSON.parse(localStorage.getItem(
 let toastTimer = null;
 function toast(msg) {
   const t = $('#toast'); t.textContent = msg; t.hidden = false;
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 2800);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, Math.max(2800, String(msg).length * 55));   // long messages stay longer
 }

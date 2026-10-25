@@ -85,7 +85,8 @@ function buildSystem(geo, drag) {
       case 'radius': res.push(v => [R(v, e[0]) - val]); break;
       case 'diameter': res.push(v => [2 * R(v, e[0]) - val]); break;
       case 'angle': res.push(v => {
-        const d1 = dir(L(v, e[0])), d2 = dir(L(v, e[1]));
+        // one line: its angle from the sketch x axis; two lines: the angle between them
+        const d1 = e.length === 1 ? [1, 0] : dir(L(v, e[0])), d2 = dir(L(v, e[e.length === 1 ? 0 : 1]));
         const ang = Math.atan2(d1[0] * d2[1] - d1[1] * d2[0], d1[0] * d2[0] + d1[1] * d2[1]) * (k.sign ?? 1);
         const target = val * Math.PI / 180;
         return [Math.atan2(Math.sin(ang - target), Math.cos(ang - target))];

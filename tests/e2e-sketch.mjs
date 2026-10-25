@@ -26,7 +26,7 @@ await page.click('#bMin'); await page.click('.node:has-text("Origin") .tw'); awa
 
 // rough quadrilateral starting on the origin
 await page.keyboard.press('l');
-for (const [x, y] of [[0, 0], [38, 3], [41, 22], [-2, 18], [0, 0]]) await clickAt(await sk(x, y));
+for (const [x, y] of [[0, 0], [38, 3], [41, 22], [-2, 14], [0, 0]]) await clickAt(await sk(x, y));   // corners chosen so no two sides are near parallel (inference would join them)
 let g = await geo();
 check(g && g.loops === 1, 'line tool closes a loop into one profile');
 check(g.dof === 6, `rough shape has 6 degrees of freedom (got ${g.dof})`);

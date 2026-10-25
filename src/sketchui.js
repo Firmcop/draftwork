@@ -1,6 +1,7 @@
 // ===== Constrained sketch editing: drawing tools, selection, dragging, constraints, dimensions =====
 // lineDraft (core) = { start, last, hover } while drawing a line chain; gdraw = in-progress drag/arc/shape.
 let geoSel = new Set(), geoHover = null, gdraw = null, geoCache = null, trimHover = null;
+var polySides = 6;   // polygon tool: number of sides (set in the heads-up input)
 const regionCache = new Map();   // non-active sketches: key -> state (small LRU)
 
 function geoOf(sk) { if (!sk.geo) sk.geo = emptyGeo(); return sk.geo; }
@@ -29,7 +30,21 @@ function profCount(sk) {
 function commitGeo(sk, g, o = {}) {
   const rg = resolvedGeo(g);
   let s; try { s = solveSketch(rg, { drag: o.drag || null }); } catch (e) { s = { ok: false }; }
-  if (!s.ok && !o.force) { if (!o.quiet) toast(o.msg || 'That conflicts with the existing constraints'); return false; }
+  if (!s.ok && !o.force) {
+    if (!o.quiet) {
+      const cul = conflictCulprits(sk, g);
+      if (cul.length) { geoSel = new Set(cul.map(k => k.id)); refreshOverlays(); toast((o.msg || 'That conflicts with the existing constraints') + '. In the way: ' + cul.map(consName).join(', ') + ' (highlighted). Delete one of them, or undo.'); }
+      else {
+        // no single constraint is to blame: point at the existing ones on the same elements
+        const old = new Set((sk.geo?.cons || []).map(k => k.id)), fresh = g.cons.filter(k => !old.has(k.id)), E = new Set(fresh.flatMap(k => k.e || []));
+        for (const k of fresh) for (const id of k.e || []) { const c = g.curves.find(x => x.id === id); if (c) curveRefs(c).forEach(r => E.add(r)); }
+        const rel = g.cons.filter(k => old.has(k.id) && (k.e || []).some(id => E.has(id))).slice(0, 6);
+        if (rel.length) { geoSel = new Set(rel.map(k => k.id)); refreshOverlays(); }
+        toast((o.msg || 'That conflicts with the existing constraints') + (rel.length ? '. Check: ' + rel.map(consName).join(', ') + ' (highlighted)' : ''));
+      }
+    }
+    return false;
+  }
   if (o.mustReduce) {
     // a new constraint must take away freedom; otherwise it duplicates what other constraints already decide
     const before = geoState(sk)?.analysis.dof ?? Infinity, after = analyzeSketch(rg, s).dof;
@@ -61,10 +76,81 @@ function nearestPoint(sk, x, y, tol, exclude) {
   for (const p of cands) { if (exclude?.has(p.id)) continue; const d = Math.hypot(p.x - x, p.y - y); if (d <= bd) { bd = d; best = p.id; } }
   return best;
 }
+// ---------- SnapEngine adapter: the solved sketch as a snap scene (see snapgeo.js) ----------
+var snapShow = null;   // marker under the cursor: { x, y, type, label, guides, glyph, ref }
+const DRAW_TOOLS = new Set(['line', 'spline', 'arc3', 'rect2', 'rectc', 'circle', 'polygon', 'slot', 'point']);
+let snapCache = null;
+function snapScene(sk) {
+  const st = geoState(sk), key = (st?.key || 'empty:' + sk.id);
+  if (snapCache?.key === key) return snapCache;
+  const g = sk.geo || emptyGeo(), pos = id => { const q = geoPos(sk, id); return { x: q.x, y: q.y }; };
+  const centers = new Set(g.curves.filter(c => c.c).map(c => c.c));
+  const points = [{ id: 'O', x: 0, y: 0 }, ...g.points.map(p => ({ id: p.id, ...pos(p.id), center: centers.has(p.id) }))];
+  const curves = [];
+  for (const c of g.curves) {
+    if (c.kind === 'line') curves.push({ id: c.id, kind: 'line', a: pos(c.a), b: pos(c.b) });
+    else if (c.kind === 'circle') curves.push({ id: c.id, kind: 'circle', c: pos(c.c), r: geoRadius(sk, c), ic: c.c });
+    else if (c.kind === 'arc') curves.push({ id: c.id, kind: 'arc', c: pos(c.c), r: geoRadius(sk, c), a: pos(c.a), b: pos(c.b), ic: c.c });
+  }
+  const sc = { key, points, curves };
+  try { sc.cands = snapCandidates(points, curves); } catch (e) { console.warn(e); sc.cands = points.map(p => ({ ...p, type: 'endpoint', refs: [] })); }
+  return (snapCache = sc);
+}
+// exact snap for a cursor position: points, midpoints, centers, quadrants, intersections, on-curve, alignment, grid
 function snapPoint(sk, hit, exclude) {
-  const id = nearestPoint(sk, hit.x, hit.y, hit.tol, exclude);
-  if (id) { const p = geoPos(sk, id); return { x: p.x, y: p.y, id }; }
-  return { x: snapV(hit.x), y: snapV(hit.y) };
+  const round = sketchOpts.snap ? snapV : v => Math.round(v * 100) / 100;
+  if (hit.exact) return { x: hit.x, y: hit.y, type: 'free', refs: [] };
+  if (hit.noSnap) return { x: Math.round(hit.x * 100) / 100, y: Math.round(hit.y * 100) / 100, type: 'free', refs: [] };
+  const sc = snapScene(sk);
+  return snapPick(sc, sc.cands, hit.x, hit.y, hit.tol, { cats: sketchOpts.snapCats || {}, exclude, grid: round });
+}
+// the point id for a snap: the existing point, or a new point plus the constraints that hold it where it snapped
+function snapRealize(g, sp) {
+  if (sp.id) return sp.id;
+  const id = addPoint(g, sp.x, sp.y);
+  if (sketchOpts.autoCons !== false) for (const c of snapConstraints(id, sp.refs)) g.cons.push({ id: cid(), ...c, _snap: true });
+  return id;
+}
+// commit; if constraints added by snapping or inference make the sketch unsolvable, keep the geometry without them
+function commitSnapped(sk, g, o = {}) {
+  const ids = new Set(g.cons.filter(c => c._snap).map(c => c.id)); g.cons.forEach(c => delete c._snap);
+  if (!ids.size) return commitGeo(sk, g, o);
+  if (commitGeo(sk, g, { ...o, quiet: true })) return true;
+  g.cons = g.cons.filter(c => !ids.has(c.id));
+  return commitGeo(sk, g, o);
+}
+// line tool target: snap, or (for a free position) horizontal / vertical / parallel / perpendicular / tangent inference
+function lineTarget(sk, hit) {
+  const sp = snapPoint(sk, hit);
+  if (!lineDraft || sp.id || hit.noSnap || (sp.type !== 'grid' && sp.type !== 'align') || sketchOpts.infer === false) return { sp, auto: null };
+  const lp = geoPos(sk, lineDraft.last), sc = snapScene(sk);
+  const lines = sc.curves.filter(c => c.kind === 'line');
+  const arcsAt = (sk.geo?.curves || []).filter(c => c.kind === 'arc' && (c.a === lineDraft.last || c.b === lineDraft.last)).map(c => ({ id: c.id, c: geoPos(sk, c.c) }));
+  const inf = inferLine(lp, { x: hit.x, y: hit.y }, lines, arcsAt, { tol: hit.tol });
+  if (!inf) return { sp, auto: null };
+  let { x, y } = inf; const guides = [];
+  if (inf.type === 'horizontal') { x = sp.alignX ?? snapV(x); if (sp.alignX != null) guides.push(...(sp.guides || []).filter(gd => gd[0].x === sp.alignX)); }
+  if (inf.type === 'vertical') { y = sp.alignY ?? snapV(y); if (sp.alignY != null) guides.push(...(sp.guides || []).filter(gd => gd[0].y === sp.alignY)); }
+  return { sp: { x, y, type: 'infer', refs: [], guides: guides.map(([a]) => [a, { x, y }]) }, auto: inf };
+}
+function setSnapShow(sp, auto) {
+  snapShow = !sp ? null : { x: sp.x, y: sp.y, type: sp.type, label: sp.label || '', guides: sp.guides || [], glyph: auto?.glyph || null, ref: auto?.ref || null, infer: auto?.type || null };
+}
+// Why a change cannot be solved: the existing constraints whose removal would make it solvable.
+function conflictCulprits(sk, g) {
+  const old = new Set((sk.geo?.cons || []).map(k => k.id)), out = [];
+  const cands = g.cons.filter(k => old.has(k.id)).slice(-80);
+  for (const k of cands) {
+    let s; try { s = solveSketch(resolvedGeo({ ...g, cons: g.cons.filter(x => x !== k) })); } catch (e) { s = { ok: false }; }
+    if (s.ok) out.push(k);
+    if (out.length >= 6) break;
+  }
+  return out;
+}
+function consName(k) {
+  const NAMES = { horizontal: 'Horizontal', vertical: 'Vertical', onLine: 'On line', onCircle: 'On circle', onSpline: 'On spline', hdist: 'Horizontal distance', vdist: 'Vertical distance', pdist: 'Distance', fix: 'Fix' };
+  const lab = NAMES[k.type] || CMD['k.c.' + k.type]?.label || CMD['k.' + k.type]?.label || (k.type[0].toUpperCase() + k.type.slice(1));
+  return DIM_TYPES.has(k.type) ? `${lab} ${typeof k.value === 'string' ? k.value : fmt(+k.value)}${k.type === 'angle' ? '°' : ''}` : lab;
 }
 function arcAngles(cc, a, b) {
   const a0 = Math.atan2(a.y - cc.y, a.x - cc.x); let a1 = Math.atan2(b.y - cc.y, b.x - cc.x);
@@ -102,7 +188,7 @@ const cid = () => 'k' + uid();
 
 // ---------- shapes built by drag tools ----------
 function buildShape(tool, s, e) {
-  const g = emptyGeo(), P = (pt) => pt.id || addPoint(g, pt.x, pt.y), L = (a, b, constr) => { const id = 'l' + uid(); g.curves.push({ id, kind: 'line', a, b, ...(constr ? { constr: true } : {}) }); return id; };
+  const g = emptyGeo(), P = (pt) => snapRealize(g, pt), L = (a, b, constr) => { const id = 'l' + uid(); g.curves.push({ id, kind: 'line', a, b, ...(constr ? { constr: true } : {}) }); return id; };
   const dx = e.x - s.x, dy = e.y - s.y, d = Math.hypot(dx, dy);
   switch (tool) {
     case 'rect2': case 'rectc': {
@@ -117,12 +203,14 @@ function buildShape(tool, s, e) {
     }
     case 'circle': {
       if (d < 0.5) return null;
-      g.curves.push({ id: 'c' + uid(), kind: 'circle', c: P(s), r: Math.round(snapV(d) || d) });
+      const cId = 'c' + uid();
+      g.curves.push({ id: cId, kind: 'circle', c: P(s), r: e.id ? Math.round(d * 1e6) / 1e6 : Math.round(snapV(d) || d) });
+      if (e.id && e.id !== s.id && sketchOpts.autoCons !== false) g.cons.push({ id: cid(), type: 'onCircle', e: [e.id, cId], _snap: true });   // through an existing point
       return g;
     }
     case 'polygon': {
       if (d < 0.5) return null;
-      const n = 6, c = P(s), circ = 'c' + uid(), a0 = Math.atan2(dy, dx);
+      const n = Math.max(3, Math.min(64, polySides | 0 || 6)), c = P(s), circ = 'c' + uid(), a0 = Math.atan2(dy, dx);
       g.curves.push({ id: circ, kind: 'circle', c, r: Math.round(d * 100) / 100, constr: true });
       const pts = Array.from({ length: n }, (_, i) => addPoint(g, s.x + d * Math.cos(a0 + i * 2 * Math.PI / n), s.y + d * Math.sin(a0 + i * 2 * Math.PI / n)));
       const ls = pts.map((p, i) => L(p, pts[(i + 1) % n]));
@@ -190,7 +278,7 @@ viewport.addEventListener('pointerdown', e => {
   if (sketchTool === 'trim') return trimClick(sk, hit);
   if (sketchTool === 'extend') return extendClick(sk, hit);
   // click, move, click: the second click finishes a shape started with a plain click
-  if (gdraw?.kind === 'shape' && gdraw.waiting) { gdraw.e = snapPoint(sk, hit); gdraw.waiting = false; window.removeEventListener('pointermove', onGeoMove); finishShape(gdraw); gdraw = null; refreshOverlays(); hudHide(); return; }
+  if (gdraw?.kind === 'shape' && gdraw.waiting) { if (!hud?.editing) gdraw.e = snapPoint(sk, hit); gdraw.waiting = false; window.removeEventListener('pointermove', onGeoMove); finishShape(gdraw); gdraw = null; refreshOverlays(); hudHide(); return; }
   gdraw = { kind: 'shape', tool: sketchTool, s: snapPoint(sk, hit), e: null, tol: hit.tol };
   window.addEventListener('pointermove', onGeoMove); window.addEventListener('pointerup', onGeoUp, { once: true });
 }, { capture: true });
@@ -198,7 +286,7 @@ viewport.addEventListener('pointerdown', e => {
 function onGeoMove(e) {
   if (!gdraw) return;
   const sk = featById(sketchId), hit = planeHit(e); if (!sk || !hit) return;
-  if (gdraw.kind === 'shape') { gdraw.e = snapPoint(sk, hit); refreshOverlays(); return; }
+  if (gdraw.kind === 'shape') { if (hud?.editing) return; gdraw.e = snapPoint(sk, hit); setSnapShow(gdraw.e); refreshOverlays(); return; }
   if (gdraw.kind === 'legacy') {
     const dx = snapV(hit.x - gdraw.start.x), dy = snapV(hit.y - gdraw.start.y);
     if (!gdraw.moved && (dx || dy)) { checkpoint(); gdraw.moved = true; viewport.classList.add('moving'); }
@@ -233,7 +321,7 @@ function finishShape(d, dims) {
   const frag = buildShape(d.tool, d.s, d.e); if (!frag) return false;
   if (dims) dims(frag);
   const g = mergeGeo(cloneGeo(sk.geo), frag);
-  if (commitGeo(sk, g)) { geoSel = new Set(frag.curves.filter(c => !c.constr).map(c => c.id)); return true; }
+  if (commitSnapped(sk, g)) { geoSel = new Set(frag.curves.filter(c => !c.constr).map(c => c.id)); return true; }
   return false;
 }
 function onGeoUp() {
@@ -249,25 +337,20 @@ function onGeoUp() {
 }
 function lineClick(sk, hit) {
   const g = cloneGeo(sk.geo);
-  const sp = snapPoint(sk, hit);
+  const { sp, auto } = lineTarget(sk, hit);
   if (!lineDraft) {
-    const id = sp.id || addPoint(g, sp.x, sp.y);
-    if (!sp.id) commitGeo(sk, g, { noRegen: true });
+    const id = snapRealize(g, sp);
+    if (!sp.id) commitSnapped(sk, g, { noRegen: true });
     lineDraft = { start: id, last: id, hover: null };
     defaultHint(); refreshOverlays(); return;
   }
-  let id = sp.id, auto = null;
+  let id = sp.id;
   if (id === lineDraft.last) return;
-  if (!id) {
-    const lp = geoPos(sk, lineDraft.last); let { x, y } = sp; const dx = x - lp.x, dy = y - lp.y;
-    if (Math.abs(dy) <= Math.max(hit.tol * 0.5, Math.abs(dx) * 0.035)) { y = lp.y; auto = 'horizontal'; }
-    else if (Math.abs(dx) <= Math.max(hit.tol * 0.5, Math.abs(dy) * 0.035)) { x = lp.x; auto = 'vertical'; }
-    id = addPoint(g, x, y);
-  }
+  if (!id) id = snapRealize(g, sp);
   const lid = 'l' + uid();
   g.curves.push({ id: lid, kind: 'line', a: lineDraft.last, b: id });
-  if (auto) g.cons.push({ id: cid(), type: auto, e: [lid] });
-  if (!commitGeo(sk, g)) return;
+  if (auto && sketchOpts.autoCons !== false) g.cons.push({ id: cid(), type: auto.type, e: auto.type === 'horizontal' || auto.type === 'vertical' ? [lid] : [lid, auto.ref], _snap: true });
+  if (!commitSnapped(sk, g)) return;
   if (id === lineDraft.start) lineDraft = null; else lineDraft.last = id;
   defaultHint(); refreshOverlays();
 }
@@ -276,17 +359,17 @@ function lineClick(sk, hit) {
 function splineClick(sk, hit) {
   const g = cloneGeo(sk.geo), sp = snapPoint(sk, hit);
   if (!lineDraft) {
-    const id = sp.id || addPoint(g, sp.x, sp.y);
-    if (!sp.id) commitGeo(sk, g, { noRegen: true });
+    const id = snapRealize(g, sp);
+    if (!sp.id) commitSnapped(sk, g, { noRegen: true });
     lineDraft = { start: id, last: id, hover: null, spline: null };
     defaultHint(); refreshOverlays(); return;
   }
   let id = sp.id;
   if (id === lineDraft.last) { endLineChain(); return; }
-  if (!id) id = addPoint(g, sp.x, sp.y);
+  if (!id) id = snapRealize(g, sp);
   if (!lineDraft.spline) { const sid = 's' + uid(); g.curves.push({ id: sid, kind: 'spline', pts: [lineDraft.start, id], a: lineDraft.start, b: id }); lineDraft.spline = sid; }
   else { const c = g.curves.find(x => x.id === lineDraft.spline); if (!c) { lineDraft = null; return; } c.pts.push(id); c.b = id; }
-  if (!commitGeo(sk, g)) return;
+  if (!commitSnapped(sk, g)) return;
   if (id === lineDraft.start) lineDraft = null; else lineDraft.last = id;
   defaultHint(); refreshOverlays();
 }
@@ -295,20 +378,24 @@ function arcClick(sk, hit) {
   gdraw ||= { kind: 'arc', pts: [] };
   gdraw.pts.push(sp);
   if (gdraw.pts.length < 3) { defaultHint(); refreshOverlays(); return; }
-  const [a, b, m] = gdraw.pts; gdraw = null;
+  const [a, b, m] = gdraw.pts, gdraw0R = gdraw.radius || 0, gdraw0C = gdraw.chord || 0; gdraw = null;
   const arc = arcFrom3(a, b, m);
   if (!arc || Math.hypot(a.x - b.x, a.y - b.y) < 0.1) { toast('Those points do not make an arc'); refreshOverlays(); return; }
   const g = cloneGeo(sk.geo);
-  const ia = a.id || addPoint(g, a.x, a.y), ib = b.id || addPoint(g, b.x, b.y), ic = addPoint(g, arc.c.x, arc.c.y);
+  const ia = snapRealize(g, a), ib = snapRealize(g, b), ic = addPoint(g, arc.c.x, arc.c.y);
   const id = 'a' + uid();
   g.curves.push(arc.ccw ? { id, kind: 'arc', c: ic, a: ia, b: ib } : { id, kind: 'arc', c: ic, a: ib, b: ia });
-  commitGeo(sk, g); geoSel = new Set([id]); defaultHint();
+  if (gdraw0C) g.cons.push({ id: cid(), type: 'distance', e: [ia, ib], value: Math.round(gdraw0C * 1e6) / 1e6 });
+  if (gdraw0R) g.cons.push({ id: cid(), type: 'radius', e: [id], value: Math.round(gdraw0R * 1e6) / 1e6 });
+  commitSnapped(sk, g); geoSel = new Set([id]); defaultHint();
 }
 function sketchHover(e) {
   const sk = featById(sketchId), hit = planeHit(e); if (!sk || !hit) return;
   let changed = false;
-  if (lineDraft) { const sp = snapPoint(sk, hit); lineDraft.hover = sp; changed = true; }
-  if (gdraw?.kind === 'arc') { gdraw.hover = snapPoint(sk, hit); changed = true; }
+  if (hud?.editing) return;   // typed values drive the preview until Enter or Esc
+  if (lineDraft) { const t = lineTarget(sk, hit); lineDraft.hover = { ...t.sp, auto: t.auto }; setSnapShow(t.sp, t.auto); changed = true; }
+  else if (gdraw?.kind === 'arc') { gdraw.hover = snapPoint(sk, hit); setSnapShow(gdraw.hover); changed = true; }
+  else if (DRAW_TOOLS.has(sketchTool) && !gdraw) { setSnapShow(snapPoint(sk, hit)); changed = true; }
   if (sketchTool === 'select' && !gdraw) { const gp = pickGeo(sk, hit), id = gp?.id || null; if (id !== geoHover) { geoHover = id; changed = true; } }
   if (sketchTool === 'extend') { const pl = extendPlan(sk, hit), key = pl ? pl.curve.id + pl.end : null; if (key !== (trimHover?.key ?? null)) { trimHover = pl ? { ext: pl, key } : null; changed = true; } }
   if (sketchTool === 'trim') { const tp = trimPiece(sk, hit); const key = tp ? (tp.key || tp.curve.id + ':' + tp.t0) : null; if (key !== (trimHover?.key ?? null)) { trimHover = tp ? { ...tp, key } : null; changed = true; } }
@@ -370,6 +457,7 @@ function drawGeo(sk, grp, active) {
   if (!active) return;
   // previews
   const prevCol = colors.select;
+  if (snapShow && DRAW_TOOLS.has(sketchTool)) drawSnapMarker(sk, grp, zoom);
   if (lineDraft?.hover && sketchTool === 'spline') {
     const c = lineDraft.spline && sk.geo.curves.find(x => x.id === lineDraft.spline), ids = c ? c.pts : [lineDraft.start];
     const P = [...ids.map(id => { const q = posOf(id); return [q.x, q.y]; }), [lineDraft.hover.x, lineDraft.hover.y]];
@@ -420,6 +508,7 @@ function consAnchor(sk, k, zoom, stack) {
     if (k.type === 'pdist') { const p = P(e[0]), l = C(e[1]); if (!l) return null; const a = P(l.a), b = P(l.b), dx = b.x - a.x, dy = b.y - a.y, L = dx * dx + dy * dy || 1, t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / L, f = { x: a.x + t * dx, y: a.y + t * dy }; return { x: (p.x + f.x) / 2 + 6 * zoom, y: (p.y + f.y) / 2 + 6 * zoom, leader: [[p.x, p.y], [f.x, f.y]] }; }
     if (k.type === 'distance' || k.type === 'hdist' || k.type === 'vdist') { const a = P(e[0]), b = P(e[1]); const dx = b.x - a.x, dy = b.y - a.y, L = Math.hypot(dx, dy) || 1, off = 20 * zoom; return { x: (a.x + b.x) / 2 + dy / L * off, y: (a.y + b.y) / 2 - dx / L * off, leader: [[a.x, a.y], [b.x, b.y]] }; }
     if (k.type === 'radius' || k.type === 'diameter') { const c = C(e[0]); if (!c) return null; const cc = P(c.c), r = geoRadius(sk, c); let t = Math.PI / 4; if (c.kind === 'arc') { const [a0, a1] = arcAngles(cc, P(c.a), P(c.b)); t = (a0 + a1) / 2; } return { x: cc.x + (r + 12 * zoom) * Math.cos(t), y: cc.y + (r + 12 * zoom) * Math.sin(t), leader: [[cc.x, cc.y], [cc.x + r * Math.cos(t), cc.y + r * Math.sin(t)]] }; }
+    if (k.type === 'angle' && e.length === 1) { const l1 = C(e[0]); if (!l1) return null; const m1 = lineMid(l1), off = 22 * zoom; return { x: m1.x + m1.nx * off, y: m1.y + m1.ny * off }; }
     if (k.type === 'angle') { const l1 = C(e[0]), l2 = C(e[1]); if (!l1 || !l2) return null; const m1 = lineMid(l1), m2 = lineMid(l2); return { x: (m1.x + m2.x) / 2, y: (m1.y + m2.y) / 2 }; }
     return null;
   }
@@ -920,4 +1009,15 @@ function extendClick(sk, hit) {
   if (att) g.cons.push(att);
   trimHover = null;
   if (!commitGeo(sk, g, { quiet: true })) { g.cons = g.cons.filter(k => k !== att); commitGeo(sk, g, { msg: 'Could not extend without breaking other constraints' }); }
+}
+
+// snap marker (distinct per type), inference glyph, alignment guides and the line an inference refers to
+function drawSnapMarker(sk, grp, zoom) {
+  const m = snapShow, show = m.type !== 'grid' && m.type !== 'free';
+  if (show || m.glyph) {
+    const el = h('div', { class: 'snapmk snap-' + m.type, 'data-snap': m.type, 'data-infer': m.infer || '', title: m.label || '' }, m.glyph ? h('span', { class: 'snapglyph' }, m.glyph) : null);
+    const o = new CSS2DObject(el); o.position.set(m.x, m.y, 0.13); grp.add(o);
+  }
+  for (const [a, b] of m.guides || []) grp.add(line([[a.x, a.y, 0.1], [b.x, b.y, 0.1]], colors.select, { depthTest: false, order: 8, dashed: true, dash: 3 * zoom, gap: 3 * zoom, opacity: 0.75 }));
+  if (m.ref) { const c = snapScene(sk).curves.find(cv => cv.id === m.ref); if (c?.kind === 'line') grp.add(line([[c.a.x, c.a.y, 0.1], [c.b.x, c.b.y, 0.1]], colors.select, { depthTest: false, order: 8, opacity: 0.9 })); }
 }

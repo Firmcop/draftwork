@@ -25,11 +25,9 @@ const SK_TOOLS2 = new Set(['point', 'text', 'mirror', 'cpattern', 'project']);
 function pointClick(sk, hit) {
   const sp = snapPoint(sk, hit);
   if (sp.id) { toast('There is already a point there'); return; }
-  const g = cloneGeo(sk.geo || emptyGeo()), id = addPoint(g, sp.x, sp.y);
-  // a point dropped on a curve stays on it
-  const gp = pickGeo(sk, hit);
-  if (gp?.curve && gp.curve.kind !== 'spline') g.cons.push({ id: cid(), type: gp.curve.kind === 'line' ? 'onLine' : 'onCircle', e: [id, gp.curve.id] });
-  if (!commitGeo(sk, g, { quiet: true })) { g.cons.pop(); commitGeo(sk, g); }
+  // a point dropped on a midpoint, quadrant, intersection or curve keeps that relationship (see snapRealize)
+  const g = cloneGeo(sk.geo || emptyGeo()); snapRealize(g, sp);
+  commitSnapped(sk, g);
 }
 
 // ---------- text ----------

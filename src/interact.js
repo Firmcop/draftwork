@@ -351,14 +351,14 @@ function startMeasure() {
 }
 function openSectionDialog() {
   const prev = section ? { ...section } : null;
-  if (!section) { const b = visibleBox(); section = { axis: 'Z', offset: +fix(b.getCenter(new THREE.Vector3()).z, 1).replace(/,/g, ''), flip: false }; }
+  if (!section) { const b = visibleBox(false); section = { axis: 'Z', offset: +fix(b.getCenter(new THREE.Vector3()).z, 1).replace(/,/g, ''), flip: false }; }
   section.hidden = false;
   const apply = () => { updateScene(); renderBrowser(); };
   openPanelDialog({ title: 'Section Analysis', icon: 'section', help: 'Cuts the view, not the model.',
     body: () => {
-      const b = visibleBox(), lo = b.min[section.axis.toLowerCase()], hi = b.max[section.axis.toLowerCase()];
+      const b = visibleBox(false), lo = b.min[section.axis.toLowerCase()], hi = b.max[section.axis.toLowerCase()];
       const seg = h('div', { class: 'seg', role: 'group', 'aria-label': 'Section plane' });
-      for (const [v, t] of [['X', 'YZ (X)'], ['Y', 'XZ (Y)'], ['Z', 'XY (Z)']]) seg.append(h('button', { type: 'button', 'aria-pressed': String(section.axis === v), onclick: () => { section.axis = v; const bb = visibleBox(); section.offset = +((bb.min[v.toLowerCase()] + bb.max[v.toLowerCase()]) / 2).toFixed(1); apply(); rerenderDialog(); } }, t));
+      for (const [v, t] of [['X', 'YZ (X)'], ['Y', 'XZ (Y)'], ['Z', 'XY (Z)']]) seg.append(h('button', { type: 'button', 'aria-pressed': String(section.axis === v), onclick: () => { section.axis = v; const bb = visibleBox(false); section.offset = +((bb.min[v.toLowerCase()] + bb.max[v.toLowerCase()]) / 2).toFixed(1); apply(); rerenderDialog(); } }, t));
       const num = h('input', { type: 'number', id: 'sec-off', step: '0.5', value: String(section.offset), style: 'width:100%;height:28px;border:1px solid var(--line);border-radius:3px;background:var(--raised);padding:0 6px;font-family:var(--font-data)' });
       const rng = h('input', { type: 'range', id: 'sec-rng', min: String(Math.floor(lo - 1)), max: String(Math.ceil(hi + 1)), step: '0.5', value: String(section.offset), style: 'width:100%', 'aria-label': 'Section position' });
       num.addEventListener('input', () => { if (isFinite(+num.value)) { section.offset = +num.value; rng.value = num.value; apply(); } });
@@ -490,7 +490,7 @@ function finishSketch(silent) {
   scheduleRegen(0);
 }
 function setSketchTool(t) {
-  sketchTool = t; if (t !== 'mirror' && t !== 'cpattern') skOp = null; lineDraft = null; drag = null; gdraw = null; trimHover = null;
+  sketchTool = t; if (t !== 'mirror' && t !== 'cpattern') skOp = null; lineDraft = null; drag = null; gdraw = null; trimHover = null; snapShow = null;
   viewport.classList.toggle('drawing', mode === 'sketch' && t !== 'select');
   renderRibbon(); defaultHint(); refreshOverlays();
 }
@@ -661,7 +661,8 @@ function planeHit(e) {
   p.applyMatrix4(M.clone().invert());
   const r = renderer.domElement.getBoundingClientRect();
   const mmPerPx = camera.position.distanceTo(controls.target) * 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) / r.height;
-  return { x: p.x, y: p.y, tol: mmPerPx * 8 };
+  // Ctrl / Cmd held: no snapping or inference (temporary override)
+  return { x: p.x, y: p.y, tol: mmPerPx * 8, noSnap: !!(e.ctrlKey || e.metaKey) };
 }
 const snap = v => sketchOpts.snap ? Math.round(v) : Math.round(v * 100) / 100;
 function distToPoly(p, poly) {
