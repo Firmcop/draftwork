@@ -531,3 +531,13 @@ table.grid tr.sel td { background: color-mix(in srgb, var(--accent) 22%, transpa
 .snapcats { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; }
 .skhud-f input.bad { outline: 2px solid var(--err); outline-offset: -1px; background: var(--err-soft); }
 .skhud-tip { align-self: center; font-size: 10.5px; color: var(--muted); padding: 0 4px; white-space: nowrap; }
+
+/* assembly reference markers (joint origin picking) */
+.refmk { width: 10px; height: 10px; box-sizing: border-box; pointer-events: none; position: relative; opacity: .8; }
+.refmk.active { width: 15px; height: 15px; opacity: 1; filter: drop-shadow(0 0 2px rgba(0,0,0,.35)); }
+.ref-vertex, .ref-origin { border: 2px solid var(--select); background: color-mix(in srgb, var(--select) 22%, transparent); }
+.ref-midpoint { background: var(--select); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.ref-center { border: 2px solid var(--select); border-radius: 50%; }
+.ref-center::after { content: ''; position: absolute; inset: 30%; border-radius: 50%; background: var(--select); }
+.ref-axis { border: 2px dashed var(--select); border-radius: 50%; }
+.ref-face { border: 2px solid var(--accent); transform: rotate(45deg); background: color-mix(in srgb, var(--accent) 18%, transparent); }

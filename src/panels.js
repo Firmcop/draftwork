@@ -57,7 +57,7 @@ function renderBrowser() {
   if (comps().length && add(1, { key: 'components', icon: 'folder', label: 'Components', sub: String(comps().length) })) {
     for (const c of comps()) {
       const own = c.bodies.map(id => result.bodies.get(id)).filter(Boolean);
-      if (add(2, { key: 'c:' + c.id, icon: 'component', label: c.name + (c.grounded ? ' (grounded)' : ''), sub: String(own.length), renameKey: 'c:' + c.id,
+      if (add(2, { key: 'c:' + c.id, icon: 'component', label: c.name + (c.grounded ? ' (grounded)' : ' · ' + compMotion(c).text), sub: String(own.length), renameKey: 'c:' + c.id,
         onRename: v => { checkpoint(); c.name = v.trim() || c.name; persist(); }, onDbl: () => { renaming = 'c:' + c.id; renderBrowser(); },
         menu: () => [{ label: 'Rename', icon: 'params', action: () => { renaming = 'c:' + c.id; renderBrowser(); } },
           { label: c.grounded ? 'Unground' : 'Ground', icon: 'component', action: () => toggleGround(c.id) },

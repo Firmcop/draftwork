@@ -150,7 +150,7 @@ await W(3000); await page.click('#vcHome'); await W(800);
 await page.click('.rlabel:has-text("ASSEMBLE")'); await W(200); await page.click('.menu .mi:has-text("As-built Joint")'); await W(600);
 await page.mouse.click(...Object.values(await scr(6.5, 0, 8))); await W(800);
 let jd = await page.evaluate(() => window.__dw.doc().joints.at(-1));
-check(jd?.a?.kind === 'edge', 'as-built: the pivot hole rim is the origin (' + (jd?.a?.kind || 'nothing') + ')');
+check(jd?.a?.kind === 'ref' && jd.a.ref.type === 'center', 'as-built: the pivot hole centre is the origin (' + (jd?.a?.ref?.type || jd?.a?.kind || 'nothing') + ')');
 await page.mouse.click(...Object.values(await scr(-15, -15, 5))); await W(800);
 a = await asm();
 check(a.joints.at(-1).endsWith(':ok') && !a.comps.find(c => c.name === 'Arm').moved, 'as-built joint keeps the arm exactly where it is');

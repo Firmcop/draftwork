@@ -55,11 +55,46 @@ Status: **done** = implemented and covered by automated tests · **partial** = w
 | Units and expressions | existing | document units; `mm cm m in ft`, parameters |
 | B6 acceptance list | done | `tests/e2e-precision.mjs` |
 
-## Modules C, D — next phases
+## Module D — assembly placement (Phase 2, v0.38)
+
+| Requirement | Status | Notes |
+|---|---|---|
+| D1 vertices and endpoints | done | from line edges; cylinder seams excluded |
+| D1 edge midpoints | done | |
+| D1 circle and arc centres, hole centres | done | offered from anywhere along the rim |
+| D1 cylinder and hole axes | done | |
+| D1 planar face centres | done | |
+| D1 face corners | done | (the face's vertices) |
+| D1 component origins / local coordinate systems | done | |
+| D1 edge intersections, named points, work planes, construction axes | open | |
+| D1 geometry decides accuracy, cursor only chooses | done | screen distance ranks candidates; positions come from B-rep signatures |
+| D2 highlight and distinct markers | done | square, triangle, circle-dot, dashed circle (axis), diamond (face) |
+| D2 pick on moving part, then stationary part; preview | existing + done | the parts move live; Cancel restores |
+| D2 suggest a joint | done | two axes → cylindrical, axis/centre pairs → revolute, two corners → ball, two faces → rigid; applied until the user chooses a type |
+| D2 numeric offsets / clearance | existing | offset along the joint direction, plus each joint value |
+| D2 feedback: selected references, joint, remaining DOF | done | hint names reference, body and component; dialog states the remaining motion |
+| D3 shaft-to-hole, hole-centre, flush faces, offset placement | done | through centre/axis references and offsets |
+| D3 centering between faces, frame members, hole patterns | open | |
+| D4 rigid, revolute, slider, cylindrical, planar | existing | |
+| D4 ball | done | angle, pitch, roll about the shared point |
+| D4 grounded component | existing | |
+| D4 no joint from a temporary snap | done | joints are made only on OK |
+| D5 respects grounded parts, loops, limits | existing | |
+| D5 incompatible joints | done | both sides fixed → error; both on the same part → error |
+| D5 under-constrained feedback | done | browser shows free / n DOF / fully constrained |
+| D5 over-constrained loops | existing | loops that cannot close are flagged |
+| D5 save and reopen | done | references stored with their source signatures; tested after reload |
+| D6 selection cycling | done | Tab / Shift+Tab |
+| D6 configurable snap categories, temporary override | open | (sketch has both; assembly not yet) |
+
+Verification: `node --test tests/asmref.test.mjs` and `node scripts/build.mjs && node tests/e2e-placement.mjs`.
+By hand: two components, Assemble ▸ Joint (J), hover a corner: a square marker and “Vertex on …” in the hint; Tab cycles;
+click, then click a corner on the other part: Ball is suggested and the corners meet exactly.
+
+## Module C and later phases
 
 | Phase | Scope | Status |
 |---|---|---|
-| 2 Assembly placement | 3D reference detection (vertices, edge midpoints, hole centres and axes, face points), type markers, selection cycling, point/axis alignment preview, numeric offsets, joint suggestion, rigid/revolute/ground, save/reopen | open (joints exist; origins only on flat faces and round edges) |
 | 3 Core drawings | drawing from selected component/body/face, first-angle, A1/A0/custom sheets, title block fields (revision, finish, approval) | open (base/projected views, dimensions, PDF exist) |
 | 4 Manufacturing drawings | out-of-date detection with controlled update preserving annotations, revision record, exploded/auxiliary/broken views | open (section, detail, BOM, balloons, DXF exist) |
 | 5 Advanced | ball/planar suggestions, alignment inference, GD&T, datum, surface finish, welding symbols, drawing checks | open |

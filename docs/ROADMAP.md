@@ -47,6 +47,7 @@ Next
 - [x] v0.35 Sketch and navigation: plane-picking cursor with highlighted plane/face and tip; origin planes laid out as a corner; click-move-click shapes; heads-up size input while drawing (type, Tab, Enter → dimensions); sketches stay visible after Finish until used; Fusion keyboard shortcuts (S Model Toolbox, V, Shift+J, Shift+N, 1, L/R/C from the model, Ctrl+N/O/B/[/], Ctrl+Alt+V/B/N/P/R, Ctrl+C/V bodies, drawing and simulation keys, Shift+middle-drag orbit); camera clipping follows the model so big imports stay visible
 - [x] v0.36 Desktop app: installable web app (manifest, icons, standalone window, offline cache via service worker, update notice) published to GitHub Pages on every push; File → Install Desktop App; native installer (Tauri) planned when file-system integration is needed
 - [x] v0.37 Precision sketching (spec Phase 1): SnapEngine with exact endpoint/midpoint/center/quadrant/intersection/on-curve/alignment/grid snaps and distinct markers; snapped points keep their relationship as constraints; line inference (H, V, parallel, perpendicular, tangent); Auto constraints and per-category snap switches; Ctrl to place without snapping; conflict messages name the constraints in the way; live preview of typed sizes; polygon sides, circle radius entry, arc chord and radius; one-line angle dimensions; Fit and camera clipping include sketches
+- [x] v0.38 Assembly placement (spec Phase 2): joint origins on vertices, edge midpoints, circle/hole centres, cylinder axes, face centres and component origins, derived from the B-rep and re-found after rebuilds; markers per type with Tab cycling; joint type suggestions; ball joint; remaining degrees of freedom in the browser and joint dialog; joints between two fixed parts flagged
 - [ ] Desktop packaging (Tauri)
 
 ## Phase 2 — Drawings, assemblies, animation *(started)*
@@ -64,7 +65,7 @@ Done
 - [x] As-built joints (join parts where they sit); rigid groups; components, groups and joints shown in the timeline
 
 Next
-- [ ] Motion links; contact sets; joint origins at arbitrary points (between two faces, on a vertex)
+- [ ] Joint origins between two faces and on construction planes/axes (vertices, midpoints and axes done in v0.38)
 - [ ] Components as separate designs (external references); assembly steps placed between features in the timeline
 - [x] 2D drawings: standard views with exact hidden lines, associative dimensions (linear, diameter), title block, PDF/SVG export
 - [x] Drawings: section views with hatching, centre marks, radius and angle dimensions, parts list

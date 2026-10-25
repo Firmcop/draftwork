@@ -10,9 +10,12 @@ const JOINT_TYPES = {
   slider: { label: 'Slider', dofs: ['distance'] },
   cylindrical: { label: 'Cylindrical', dofs: ['angle', 'distance'] },
   planar: { label: 'Planar', dofs: ['x', 'y', 'angle'] },
+  ball: { label: 'Ball', dofs: ['angle', 'pitch', 'roll'] },
 };
-const DOF_UNITS = { angle: '°', distance: 'mm', x: 'mm', y: 'mm' };
-const DEFAULT_LIMIT = { angle: { min: -90, max: 90 }, distance: { min: 0, max: 20 }, x: { min: -20, max: 20 }, y: { min: -20, max: 20 } };
+const DOF_UNITS = { angle: '°', distance: 'mm', x: 'mm', y: 'mm', pitch: '°', roll: '°' };
+const DOF_LABEL = { angle: 'Angle', distance: 'Distance', x: 'X', y: 'Y', pitch: 'Pitch', roll: 'Roll' };
+const isAngK = k => k === 'angle' || k === 'pitch' || k === 'roll';
+const DEFAULT_LIMIT = { angle: { min: -90, max: 90 }, distance: { min: 0, max: 20 }, x: { min: -20, max: 20 }, y: { min: -20, max: 20 }, pitch: { min: -45, max: 45 }, roll: { min: -45, max: 45 } };
 let compXf = new Map();            // component id -> Matrix4 (as-modeled -> assembled)
 let jointStatus = new Map();       // joint id -> { state: 'ok' | 'warn' | 'error', msg }
 let jointPreview = null;           // { id, values } while animating, without touching the document
@@ -63,6 +66,13 @@ function endFrame(end) {
   if (!end) return null;
   const rec = result.bodies.get(end.body); if (!rec) return null;
   if (end.kind === 'frame') return new THREE.Matrix4().fromArray(end.frame);
+  if (end.kind === 'ref') {
+    // vertex, edge midpoint, circle centre, axis, face centre (asmref.js), re-found on the rebuilt body
+    let r = { p: end.ref.p, z: end.ref.z, x: end.ref.x };
+    if (rec.shape && end.ref.type !== 'origin') { r = resolveRef(end.ref, [...brepSigMap(rec, 'edge').values()], [...brepSigMap(rec, 'face').values()]); if (!r) return null; }
+    const F = refFrame(r.p, r.z, r.x);
+    return new THREE.Matrix4().makeBasis(new THREE.Vector3(...F.x), new THREE.Vector3(...F.y), new THREE.Vector3(...F.z)).setPosition(...F.o);
+  }
   let sig = end.sig;
   if (rec.shape) { sig = rematchEnd(rec, end); if (!sig) return null; }
   return frameFromSig(sig, end.kind);
@@ -87,7 +97,8 @@ function motionOf(j) {
   const t = j.type;
   if (t === 'slider' || t === 'cylindrical') m.multiply(new THREE.Matrix4().makeTranslation(0, 0, jval(j, 'distance')));
   if (t === 'planar') m.multiply(new THREE.Matrix4().makeTranslation(jval(j, 'x'), jval(j, 'y'), 0));
-  if (t === 'revolute' || t === 'cylindrical' || t === 'planar') m.multiply(new THREE.Matrix4().makeRotationZ(THREE.MathUtils.degToRad(jval(j, 'angle'))));
+  if (t === 'revolute' || t === 'cylindrical' || t === 'planar' || t === 'ball') m.multiply(new THREE.Matrix4().makeRotationZ(THREE.MathUtils.degToRad(jval(j, 'angle'))));
+  if (t === 'ball') m.multiply(new THREE.Matrix4().makeRotationY(THREE.MathUtils.degToRad(jval(j, 'pitch')))).multiply(new THREE.Matrix4().makeRotationX(THREE.MathUtils.degToRad(jval(j, 'roll'))));
   if (!j.flip) m.multiply(new THREE.Matrix4().makeRotationX(Math.PI));     // origins face each other (faces touch)
   return m;
 }
@@ -134,6 +145,7 @@ function solveAssembly(o = {}) {
     if (!j.a || !j.b) { jointStatus.set(j.id, { state: 'error', msg: 'Pick both joint origins' }); continue; }
     const ka = compKey(j.a.body), kb = compKey(j.b.body);
     if (ka === kb) { jointStatus.set(j.id, { state: 'error', msg: 'Both origins are on ' + compLabel(ka) + '. Make one body a component first.' }); continue; }
+    if (fixedKey(ka) && fixedKey(kb)) { jointStatus.set(j.id, { state: 'error', msg: 'Both parts are fixed (' + compLabel(ka) + ' and ' + compLabel(kb) + '), so this joint cannot move either. Unground one of them.' }); continue; }
     const Fa = endFrame(j.a), Fb = endFrame(j.b);
     if (!Fa || !Fb) { jointStatus.set(j.id, { state: 'error', msg: 'A joint origin no longer exists. Edit the joint and pick it again.' }); continue; }
     todo.push({ j, ka, kb, Fa, Fb });
@@ -144,7 +156,7 @@ function solveAssembly(o = {}) {
     const vars = [];
     // held: the joint being edited or dragged, and any joint whose document value changed since the last solve
     const held = id => id === o.hold || (jointLive.has(id) && jointLive.get(id).base !== docKey(joints().find(j => j.id === id)));
-    for (const t of todo) for (const k of JOINT_TYPES[t.j.type].dofs) if (!isFollower(t.j.id, k)) vars.push({ id: t.j.id, j: t.j, k, s: k === 'angle' ? Math.PI / 180 : 1, w: held(t.j.id) ? 1e6 : 1 });
+    for (const t of todo) for (const k of JOINT_TYPES[t.j.type].dofs) if (!isFollower(t.j.id, k)) vars.push({ id: t.j.id, j: t.j, k, s: isAngK(k) ? Math.PI / 180 : 1, w: held(t.j.id) ? 1e6 : 1 });
     if (vars.length) {
       iterVals = new Map(todo.map(t => [t.j.id, {}]));
       for (const v of vars) iterVals.get(v.id)[v.k] = jval(v.j, v.k);
@@ -244,7 +256,7 @@ function newJoint(asBuilt = false) {
   if (!isBrep()) { toast(engineState === 'loading' ? 'The exact geometry engine is still loading. Try again in a moment.' : 'Joints need the exact geometry engine, which could not start here: ' + engineMsg); return; }
   if (!comps().length) { toast('Make a component first (Assemble ▸ New Component). Bodies outside components stay fixed.'); return; }
   const snap = JSON.stringify(doc); checkpoint();
-  const j = { id: uid(), name: (asBuilt ? 'As-built Joint ' : 'Joint ') + (joints().length + 1), type: 'rigid', a: null, b: null, angle: 0, distance: 0, x: 0, y: 0, offset: 0, flip: !!asBuilt, ...(asBuilt ? { asBuilt: true } : {}) };
+  const j = { id: uid(), name: (asBuilt ? 'As-built Joint ' : 'Joint ') + (joints().length + 1), type: 'rigid', a: null, b: null, angle: 0, distance: 0, x: 0, y: 0, pitch: 0, roll: 0, offset: 0, flip: !!asBuilt, ...(asBuilt ? { asBuilt: true } : {}) };
   joints().push(j);
   openJointDialog(j.id, snap, 'a');
 }
@@ -256,23 +268,27 @@ function openJointDialog(id, snap, stage) {
   const set = (k, v) => { const j = J(); if (!j) return; checkpoint('joint-' + id + '-' + k); j[k] = v; assemblyChanged(id); };
   const setLimit = (k, f, v) => { const j = J(); if (!j) return; checkpoint('jlim-' + id + '-' + k + f); j.limits ||= {}; j.limits[k] ||= { on: false, ...DEFAULT_LIMIT[k] }; j.limits[k][f] = v; assemblyChanged(id); };
   openPanelDialog({ title: 'Joint', icon: 'joint', okLabel: 'OK',
-    help: 'Pick an origin on the part that moves, then an origin on the part it attaches to. Origins sit at the center of a flat face or of a round edge.',
+    help: 'Pick an origin on the part that moves, then an origin on the part it attaches to. Origins can be a corner, an edge midpoint, a hole or circle centre, a cylinder axis or a face centre: hover to see them, Tab to cycle when they overlap. Snapping only helps you pick; the joint is made when you click OK.',
     body: () => {
       const j = J(); if (!j) return [];
       const st = jointStatus.get(j.id);
-      const desc = e => !e ? 'Not picked' : (e.kind === 'frame' ? 'As it sits now, with' : e.kind === 'edge' ? 'Round edge' : 'Face center') + ' on ' + bodyName(e.body) + (compOfBody(e.body) ? ' (' + compOfBody(e.body).name + ')' : ' (fixed)');
+      const desc = e => !e ? 'Not picked' : (e.kind === 'frame' ? 'As it sits now, with' : e.kind === 'ref' ? REF_LABEL[e.ref.type] : e.kind === 'edge' ? 'Round edge' : 'Face center') + ' on ' + bodyName(e.body) + (compOfBody(e.body) ? ' (' + compOfBody(e.body).name + ')' : ' (fixed)');
       const endRow = (k, label) => h('div', { class: 'row' }, h('span', { class: 'rl' }, label), h('div', {},
-        h('div', { class: 'note', style: 'margin:0' }, jointEdit?.stage === k ? (j.asBuilt && k === 'b' ? 'Click the part it stays with…' : 'Click a flat face or a round edge on the model…') : desc(j[k])),
+        h('div', { class: 'note', style: 'margin:0' }, jointEdit?.stage === k ? (j.asBuilt && k === 'b' ? 'Click the part it stays with…' : 'Hover the model: corners, edge midpoints, hole centres, axes and faces light up. Tab cycles, click picks.') : desc(j[k])),
         h('button', { class: 'btn', type: 'button', id: 'jp-' + k, style: 'margin-top:4px', 'aria-pressed': String(jointEdit?.stage === k), onclick: () => { jointEdit.stage = k; rerenderDialog(); defaultHint(); } }, j[k] ? 'Pick again' : 'Pick')));
       const typeSel = h('select', { id: 'jt-type' }, ...Object.entries(JOINT_TYPES).map(([v, t]) => h('option', { value: v, selected: j.type === v }, t.label)));
-      typeSel.addEventListener('change', () => { set('type', typeSel.value); rerenderDialog(); });
+      typeSel.addEventListener('change', () => { const jj = J(); if (jj) jj.typeSet = true; set('type', typeSel.value); rerenderDialog(); });
+      const sug = j.a && j.b && !j.asBuilt ? suggestJoint(endType(j.a), endType(j.b)) : null;
+      const sugRow = sug ? h('p', { class: 'note', id: 'jt-suggest' }, 'Suggested: ' + JOINT_TYPES[sug.type].label + '. ' + sug.why + '. ',
+        sug.type !== j.type ? h('button', { class: 'btn', type: 'button', id: 'jt-use', onclick: () => { const jj = J(); if (jj) jj.typeSet = true; set('type', sug.type); rerenderDialog(); } }, 'Use ' + JOINT_TYPES[sug.type].label) : null) : null;
+      const dofRow = j.a && j.b && st?.state !== 'error' ? h('p', { class: 'note', id: 'jt-dof' }, dofSummary(j)) : null;
       const num = (k, label, unit, o = {}) => {
         const inp = h('input', { type: 'text', id: 'jv-' + k, value: String(j[k] ?? 0), autocomplete: 'off', inputmode: 'decimal' });
         inp.addEventListener('input', () => set(k, /^-?\d*\.?\d+$/.test(inp.value.trim()) ? +inp.value : inp.value));
         const row = h('div', { class: 'row' }, h('label', { class: 'rl', for: 'jv-' + k }, label), h('div', { class: 'exin' }, inp, h('span', { class: 'val' }), h('span', { class: 'u' }, unit)));
         if (!o.slider) return row;
-        const [lo, hi] = limitOf(j, k) || (k === 'angle' ? [-180, 180] : [-100, 100]);
-        const sl = h('input', { type: 'range', min: String(lo), max: String(hi), step: k === 'angle' ? '1' : '0.5', value: String(jval(j, k)), 'aria-label': label + ' slider', style: 'width:100%' });
+        const [lo, hi] = limitOf(j, k) || (isAngK(k) ? [-180, 180] : [-100, 100]);
+        const sl = h('input', { type: 'range', min: String(lo), max: String(hi), step: isAngK(k) ? '1' : '0.5', value: String(jval(j, k)), 'aria-label': label + ' slider', style: 'width:100%' });
         sl.addEventListener('input', () => { inp.value = sl.value; set(k, +sl.value); });
         const L = j.limits?.[k] || { on: false, ...DEFAULT_LIMIT[k] };
         const on = h('input', { type: 'checkbox', id: 'jl-' + k, checked: !!L.on }); on.addEventListener('change', () => { setLimit(k, 'on', on.checked); rerenderDialog(); });
@@ -287,7 +303,8 @@ function openJointDialog(id, snap, stage) {
       return [
         section_('Position', endRow('a', j.asBuilt ? 'Moving part' : 'Moves'), endRow('b', j.asBuilt ? 'Stays with' : 'Attaches to'), j.asBuilt ? h('p', { class: 'note' }, 'As-built: the parts stay where they are; the joint origin is on the moving part.') : null, st?.msg ? h('p', { class: 'note', style: 'color:var(--err)' }, st.msg) : null),
         section_('Motion', h('div', { class: 'row' }, h('label', { class: 'rl', for: 'jt-type' }, 'Type'), typeSel),
-          ...dofs.map(k => num(k, k === 'angle' ? 'Angle' : k === 'distance' ? 'Distance' : k.toUpperCase(), DOF_UNITS[k], { slider: true })),
+          sugRow, dofRow,
+          ...dofs.map(k => num(k, DOF_LABEL[k] || k, DOF_UNITS[k], { slider: true })),
           num('offset', 'Offset', 'mm'), j.asBuilt ? null : h('label', { class: 'chk', for: 'jt-flip' }, flip, 'Flip (same direction instead of facing)'),
           dofs.length ? h('div', { class: 'row' }, h('span', { class: 'rl' }), animBtn) : null),
         section_('Name', h('div', { class: 'row' }, h('label', { class: 'rl', for: 'jt-name' }, 'Name'), nameI)),
@@ -323,19 +340,108 @@ function jointPickAt(e) {
     checkpoint(); j.b = asBuiltBase(j, body); jointEdit.stage = null;
     assemblyChanged(); rerenderDialog(); defaultHint(); return true;
   }
-  let end = null;
-  const eh = brepEdgeHit(e);
-  if (eh?.sig?.type === 'CIRCLE' && eh.sig.cc) end = { body: eh.body, kind: 'edge', sig: eh.sig };
-  if (!end) { const fh = brepFaceHit(e); if (fh?.sig) { if (fh.sig.type !== 'PLANE') { toast('Pick a flat face or a round edge'); return true; } end = { body: fh.body, kind: 'face', sig: fh.sig }; } }
-  if (!end) return true;
+  // the highlighted reference under the cursor (Tab may have chosen another one of the overlapping candidates)
+  const near = refHover && Math.hypot(refHover.x - e.clientX, refHover.y - e.clientY) < 3 ? refHover : refHoverAt(e);
+  const cand = near?.list[near.idx];
+  if (!cand) { if (near?.body) toast('Nothing to join to there: pick a corner, edge, round edge or flat face'); return true; }
+  const { d, w, ...ref } = cand;
+  const end = { body: near.body, kind: 'ref', ref };
+  refHover = null;
   const other = jointEdit.stage === 'a' ? j.b : j.a;
   if (other && compKey(other.body) === compKey(end.body)) { toast('Both origins would be on ' + compLabel(compKey(end.body)) + '. Pick a different part.'); return true; }
   checkpoint();
   j[jointEdit.stage] = end;
   if (j.asBuilt && jointEdit.stage === 'a' && j.b) j.b = asBuiltBase(j, j.b.body);     // re-anchor to the new origin
   jointEdit.stage = jointEdit.stage === 'a' && !j.b ? 'b' : null;
+  // suggest the joint type from the two references (only until the user chooses one)
+  if (j.a && j.b && !j.asBuilt && !j.typeSet) j.type = suggestJoint(endType(j.a), endType(j.b)).type;
   assemblyChanged(); rerenderDialog(); defaultHint();
   return true;
+}
+const endType = e => !e ? null : e.kind === 'ref' ? e.ref.type : e.kind === 'edge' ? 'center' : e.kind === 'face' ? 'face' : 'frame';
+
+// ---------- AssemblyPlacementEngine: references under the cursor while a joint origin is picked ----------
+let refHover = null;   // { x, y, body, list: [ref + { d, w: world point }], idx }
+function refHoverAt(e) {
+  raycaster.setFromCamera(ndcOf(e), camera); scene.updateMatrixWorld();
+  const meshes = []; for (const [, sb] of shownBodies) if (sb.mesh.visible && sb.rec.shape) meshes.push(sb.mesh);
+  const hit = raycaster.intersectObjects(meshes, false)[0];
+  if (!hit) return null;
+  const body = hit.object.userData.body, sb = shownBodies.get(body), rec = sb.rec, Bx = bodyXf(body), Bi = Bx.clone().invert();
+  const face = brepSigMap(rec, 'face').get(brepMeshOf(rec).triFace[hit.faceIndex]);
+  const nW = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : new THREE.Vector3(0, 0, 1);
+  const nM = nW.clone().transformDirection(Bi);
+  const r = renderer.domElement.getBoundingClientRect(), px = mmPerPx();
+  const refs = bodyRefs([...brepSigMap(rec, 'edge').values()], face, [nM.x, nM.y, nM.z]);
+  // the component's own origin (its local coordinate system moves with it)
+  if (compOfBody(body)) refs.push({ type: 'origin', p: [0, 0, 0], z: [0, 0, 1], x: [1, 0, 0], src: { kind: 'origin' } });
+  const cands = [];
+  for (const ref of refs) {
+    const w = new THREE.Vector3(...ref.p).applyMatrix4(Bx);
+    // hidden references (behind the face under the cursor) are not offered
+    if (ref.type !== 'face' && ref.type !== 'axis' && ref.type !== 'origin' && w.distanceTo(raycaster.ray.origin) > hit.distance + Math.max(1, px * 6)) continue;
+    const scr = v => { const q = v.clone().project(camera); return Math.hypot(r.left + (q.x + 1) / 2 * r.width - e.clientX, r.top + (1 - q.y) / 2 * r.height - e.clientY); };
+    let d = scr(w);
+    // a circle's centre is offered from anywhere along its edge too (a hole's centre is in empty space)
+    if (ref.type === 'center' && ref.src.sig.p) {
+      const c = new THREE.Vector3(...ref.p), ax = new THREE.Vector3(...ref.src.sig.ax).normalize(), u = new THREE.Vector3(...ref.src.sig.p).sub(c), vv = ax.clone().cross(u);
+      for (let i = 0; i < 24; i++) { const t = i / 24 * Math.PI * 2; d = Math.min(d, scr(c.clone().addScaledVector(u, Math.cos(t)).addScaledVector(vv, Math.sin(t)).applyMatrix4(Bx))); }
+    }
+    cands.push({ ...ref, d, w: [w.x, w.y, w.z] });
+  }
+  const list = rankRefs(cands, 16).slice(0, 8);
+  return { x: e.clientX, y: e.clientY, body, list, idx: 0 };
+}
+function refHoverHint() {
+  const c = refHover?.list[refHover.idx]; if (!c) return null;
+  const n = refHover.list.length;
+  const comp = compOfBody(refHover.body);
+  return REF_LABEL[c.type] + ' on ' + bodyName(refHover.body) + (comp ? ' (' + comp.name + ')' : ' (fixed)') + (n > 1 ? ' · Tab for the next one (' + (refHover.idx + 1) + ' of ' + n + ')' : '') + ' · click to pick';
+}
+// registered after every module has loaded (assembly.js runs before the viewport exists)
+queueMicrotask(() => viewport.addEventListener('pointermove', e => {
+  if (!jointEdit?.stage || (joints().find(x => x.id === jointEdit.id)?.asBuilt && jointEdit.stage === 'b')) { if (refHover) { refHover = null; drawToolsOverlay(); } return; }
+  if (e.buttons) return;
+  const prevKey = refHover ? refHover.body + ':' + refHover.list.map(c => c.type + c.p.join(',')).join('|') : '';
+  const nh = refHoverAt(e), key = nh ? nh.body + ':' + nh.list.map(c => c.type + c.p.join(',')).join('|') : '';
+  if (nh && key === prevKey) nh.idx = refHover.idx;    // same candidates: keep the one Tab chose
+  refHover = nh;
+  setHint(refHoverHint() || jointHint() || '');
+  if (key !== prevKey || !nh) drawToolsOverlay(); requestRender();
+}));
+window.addEventListener('keydown', e => {
+  if (e.key !== 'Tab' || !jointEdit?.stage || !refHover || refHover.list.length < 2) return;
+  if (e.target.closest?.('input, select, textarea')) return;
+  e.preventDefault(); e.stopImmediatePropagation();
+  refHover.idx = (refHover.idx + (e.shiftKey ? -1 : 1) + refHover.list.length) % refHover.list.length;
+  setHint(refHoverHint()); drawToolsOverlay(); requestRender();
+}, true);
+// markers for the references under the cursor; the one a click would pick is drawn larger
+function drawRefMarkers(group) {
+  if (!refHover || !jointEdit?.stage) return;
+  refHover.list.forEach((c, i) => {
+    const el = h('div', { class: 'refmk ref-' + c.type + (i === refHover.idx ? ' active' : ''), 'data-ref': c.type, 'data-active': String(i === refHover.idx), title: REF_LABEL[c.type] });
+    const o = new CSS2DObject(el); o.position.set(...c.w); group.add(o);
+    if (i === refHover.idx && (c.type === 'axis' || c.type === 'center' || c.type === 'face')) {
+      const Bx = bodyXf(refHover.body), z = new THREE.Vector3(...c.z).transformDirection(Bx), p = new THREE.Vector3(...c.w), L = Math.max(4, mmPerPx() * 40);
+      group.add(line([p.clone().addScaledVector(z, c.type === 'axis' ? -L : 0), p.clone().addScaledVector(z, L)], colors.select, { depthTest: false, dashed: c.type === 'axis', dash: L / 8, gap: L / 12 }));
+    }
+  });
+}
+// What a component can still do: grounded / fixed, the motion its placing joint allows, or free (no joint yet)
+function compMotion(c) {
+  const k = keyOfComp(c);
+  if (c.grounded) return { dof: 0, text: 'grounded' };
+  if (fixedKey(k)) return { dof: 0, text: 'fixed' };
+  const t = assemblyDriver.get(k);
+  if (!t) return { dof: 6, text: 'free: not joined yet' };
+  const n = JOINT_DOF[t.j.type] ?? 0, loop = [...jointStatus.values()].some(s => s.loop);
+  return { dof: n, text: n ? n + ' DOF · ' + JOINT_TYPES[t.j.type].label.toLowerCase() + (loop ? ' (a loop may hold it further)' : '') : 'fully constrained' };
+}
+const MOTION_TEXT = { rigid: 'cannot move', revolute: 'turns about the axis', slider: 'slides along the axis', cylindrical: 'turns about and slides along the axis', planar: 'slides and turns on the plane', ball: 'turns in any direction about the point' };
+function dofSummary(j) {
+  const ka = compKey(j.a.body), n = JOINT_DOF[j.type] ?? 0;
+  return 'With this joint, ' + compLabel(ka) + ' ' + MOTION_TEXT[j.type] + ' (' + n + ' degree' + (n === 1 ? '' : 's') + ' of freedom' + (n ? ' left' : '') + ').';
 }
 function jointHint() {
   const j = jointEdit && joints().find(x => x.id === jointEdit.id);
@@ -375,6 +481,7 @@ function stopJointAnim() {
 
 // ---------- overlay: joint origins ----------
 function drawJointOverlay(group) {
+  drawRefMarkers(group);
   const show = jointEdit ? [jointEdit.id] : selJoint ? [selJoint] : [];
   for (const id of show) {
     const j = joints().find(x => x.id === id); if (!j) continue;
@@ -434,7 +541,7 @@ function partDragMove(e) {
   D.moved = true; viewport.classList.add('moving');
   const m = dragMeasure(e), type = D.j.type, v = { ...D.start };
   const slide = type === 'slider' || (type === 'cylindrical' && e.shiftKey);
-  const turn = type === 'revolute' || (type === 'cylindrical' && !e.shiftKey) || (type === 'planar' && e.shiftKey);
+  const turn = type === 'revolute' || type === 'ball' || (type === 'cylindrical' && !e.shiftKey) || (type === 'planar' && e.shiftKey);
   if (slide) { if (m.t != null && D.ref.t != null) v.distance = D.start.distance + (m.t - D.ref.t); }
   else if (turn) {
     if (m.ang != null && D.lastAng != null) { let da = m.ang - D.lastAng; if (da > Math.PI) da -= 2 * Math.PI; if (da < -Math.PI) da += 2 * Math.PI; D.turned += da; D.lastAng = m.ang; }
@@ -458,7 +565,7 @@ function partDragMove(e) {
     if (hit) { setHint('Contact: ' + bodyName(hit[0]) + ' touches ' + bodyName(hit[1])); return; }
   } else { jointPreview = { id: D.j.id, values: v }; solveAssembly({ hold: D.j.id }); }
   applyBodyTransforms(); drawToolsOverlay(); requestRender();
-  setHint(JOINT_TYPES[type].label + ' · ' + D.dofs.map(k => (k === 'angle' ? fmt(v[k]) + '°' : fmt(v[k]) + ' mm')).join(', ') + (type === 'cylindrical' || type === 'planar' ? ' · hold Shift to ' + (type === 'planar' ? 'turn' : 'slide') : ''));
+  setHint(JOINT_TYPES[type].label + ' · ' + D.dofs.map(k => (isAngK(k) ? fmt(v[k]) + '°' : fmt(v[k]) + ' mm')).join(', ') + (type === 'cylindrical' || type === 'planar' ? ' · hold Shift to ' + (type === 'planar' ? 'turn' : 'slide') : ''));
 }
 function partDragEnd() {
   window.removeEventListener('pointermove', partDragMove);

@@ -24,7 +24,7 @@ Parametric CAD in the browser. Sketch on planes or faces, build solids with a fe
 | Additive | FFF slicer: printer and material presets, layer height, perimeters, top/bottom solid layers, sparse infill, skirt, orientation; layer-by-layer preview, print time and filament estimate, Marlin G-code |
 | Nest | Pack parts onto sheets: sheet-metal flat patterns or top-view outlines, quantities, gap, 90° rotations, parts inside holes, several sheets, utilisation, DXF export |
 | Bodies | Multiple solid, surface and mesh bodies with New Body / Join / Cut / Intersect |
-| Assemble | Components; rigid groups; joints and as-built joints (rigid, revolute, slider, cylindrical, planar) on face centers and round edges; limits; closed loops (linkages); drag parts to move them; drive and animate joints; motion links (gear and rack ratios); contact sets that stop dragged parts where they touch |
+| Assemble | Components; rigid groups; joints and as-built joints (rigid, revolute, slider, cylindrical, planar, ball) with origins on corners, edge midpoints, circle and hole centres (picked from the rim), cylinder axes, face centres and component origins, each with its own marker under the cursor (Tab cycles overlapping ones); the joint type is suggested from the two origins (two axes → revolute or cylindrical, two corners → ball, two faces → rigid); the browser shows each component's remaining degrees of freedom; a joint between two fixed parts is flagged; limits; closed loops (linkages); drag parts to move them; drive and animate joints; motion links (gear and rack ratios); contact sets that stop dragged parts where they touch |
 | Parameters | User parameters and expressions in any field (`width/2 - edge`, `sqrt(…)`, `sin(…)` …) |
 | Construct | Offset plane, plane at angle, midplane, tangent plane, plane through 3 points; axis through cylinder, along edge, through two points, at two planes; point at vertex, circle centre or coordinates |
 | Drawing | Drawing workspace with several sheets (tabs): front/top/right/isometric views with exact hidden lines, section views with hatching, detail views (2× by default), centre marks and centrelines on holes, linear/diameter/radius/angle dimensions that follow model changes, with tolerances (±, deviation, limits, basic), precision and text overrides; balloons tied to the parts list, notes with leaders, parts list, title block (sheet n / N); export as a multi-page PDF plus SVG and DXF per sheet |
@@ -92,6 +92,7 @@ src/
   drawing.js     drawing workspace: views, dimensions, title block, PDF writer
   icons.js       icon set
   core.js        document model, state, undo/redo, three.js scene, display, mass properties
+  asmref.js      assembly references (vertices, midpoints, centres, axes, faces), re-found after rebuilds; joint suggestions
   snapgeo.js     snap candidates, curve intersections, alignment and line inference (pure geometry, unit tested)
   solver.js      sketch geometry, constraint solver (minimum-norm Gauss-Newton), DOF analysis, loop detection
   ribbon.js      command registry, workspace tabs, ribbon, menus
