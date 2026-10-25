@@ -192,6 +192,14 @@ export class Model {
     return this.host.handle('project', { items, kinds });
   }
 
+  /**
+   * Display meshes of the last rebuild for a 3D preview: one per visible solid, as plain typed arrays
+   * ({ id, name, pos: Float32Array xyz, nrm: Float32Array, idx: Uint32Array }) that can cross to a page from a Worker.
+   */
+  meshes(opts = {}) {
+    return this.pick(opts.bodies).map(b => { const m = this.meshCache.get(b.tok); return m && { id: b.id, name: b.name, pos: m.pos, nrm: m.nrm, idx: m.idx }; }).filter(Boolean);
+  }
+
   /** A JSON-friendly copy of the design with the current parameter values and suppression applied. */
   toJSON() { return structuredClone(this.doc); }
 

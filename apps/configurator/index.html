@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Configurator</title>
+<link rel="stylesheet" href="/style.css">
+<script type="importmap">
+{ "imports": { "three": "/vendor/three/build/three.module.js", "three/addons/": "/vendor/three/examples/jsm/" } }
+</script>
+<script type="module" src="/app.mjs"></script>
+</head>
+<body>
+<header class="top">
+  <div class="brand">
+    <span class="mark" aria-hidden="true"></span>
+    <div>
+      <h1 id="title">Configurator</h1>
+      <p id="subtitle" class="muted">Loading product…</p>
+    </div>
+  </div>
+  <label class="picker" id="pickerWrap" hidden>Product <select id="picker"></select></label>
+</header>
+
+<main class="layout">
+  <section class="viewer" aria-label="3D preview">
+    <div id="view" class="canvas"></div>
+    <div class="viewbar">
+      <span id="viewStatus" class="muted" role="status">Starting the 3D engine…</span>
+      <button type="button" id="fit" class="ghost">Fit view</button>
+    </div>
+  </section>
+
+  <section class="panel" aria-label="Options">
+    <h2>Options</h2>
+    <form id="form" class="form" novalidate></form>
+    <p class="muted small"><button type="button" id="reset" class="link">Reset to defaults</button> · <button type="button" id="share" class="link">Copy link to this configuration</button></p>
+  </section>
+
+  <section class="panel summary" aria-label="Quote">
+    <div id="messages"></div>
+    <h2 id="partTitle">Your configuration</h2>
+    <p id="partNumber" class="muted mono"></p>
+    <table class="price" id="price"></table>
+    <details id="bomWrap" class="bom"><summary>Parts list</summary><table id="bom"></table></details>
+    <div class="actions">
+      <button type="button" id="generate" class="primary">Get drawings and CAD files</button>
+      <p id="jobStatus" class="muted small" role="status"></p>
+      <ul id="files" class="files"></ul>
+    </div>
+  </section>
+</main>
+</body>
+</html>
