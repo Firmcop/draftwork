@@ -31,13 +31,14 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshBVH } from 'three-mesh-bvh';
 `;
-// The configurator's rules engine (packages/rules), wrapped in one namespace so its names never meet the app's.
+// The configurator's rules engine (packages/rules) and its AI drafting (packages/ai), wrapped in one namespace so its names never meet the app's.
 const rulesSrc = f => fs.readFileSync(path.join(root, 'packages/rules/src', f), 'utf8');
 const rules = `// ---- rules engine (packages/rules) ----
 const DWR = (() => {
 ${strip(rulesSrc('expr.mjs'))}
 ${strip(rulesSrc('project.mjs'))}
-return { compile, parse, evaluate, analyze, display, parseCSV, normalizeTable, RULE_KINDS, FUNCTIONS };
+${['llm', 'describe', 'draft'].map(f => strip(fs.readFileSync(path.join(root, 'packages/ai/src', f + '.mjs'), 'utf8'))).join('\n')}
+return { compile, parse, evaluate, analyze, display, parseCSV, normalizeTable, RULE_KINDS, FUNCTIONS, createClaude, draftChanges, checkProposal, applyProposal, DEFAULT_MODEL };
 })();
 `;
 const js = header + rules + MODULES.map(m => `// ---- ${m} ----\n` + strip(src(m + '.js'))).join('\n') + '\n// ---- engine (runs in a worker) ----\n' + engineFactory;

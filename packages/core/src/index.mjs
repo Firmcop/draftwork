@@ -17,14 +17,18 @@ export function createEngine(opts = {}) {
   return enginePromise;
 }
 
-async function loadOC({ wasmBinary, opencascade } = {}) {
+// OpenCascade reports progress (e.g. while writing STEP) through print(); by default it would go to stdout, which
+// belongs to the program using the core (an MCP server speaks its protocol there). Send it to stderr / the console.
+const quietPrint = msg => { if (globalThis.process?.stderr?.write) globalThis.process.stderr.write(msg + '\n'); else console.debug(msg); };
+
+async function loadOC({ wasmBinary, opencascade, print = quietPrint } = {}) {
   const factory = opencascade || (await import('replicad-opencascadejs')).default;
   if (!wasmBinary) {
     const [{ readFile }, { createRequire }] = await Promise.all([import('node:fs/promises'), import('node:module')]);
     const require = createRequire(import.meta.url);
     wasmBinary = await readFile(require.resolve('replicad-opencascadejs/wasm'));
   }
-  return factory({ wasmBinary });
+  return factory({ wasmBinary, print, printErr: print });
 }
 
 class Engine {

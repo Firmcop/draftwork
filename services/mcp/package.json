@@ -1,0 +1,10 @@
+{
+  "name": "@draftwork/mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The Draftwork configurator as an MCP server: AI assistants can list, describe, price and build your products.",
+  "type": "module",
+  "bin": { "draftwork-mcp": "./server.mjs" },
+  "scripts": { "test": "node --test test/mcp.test.mjs" },
+  "dependencies": { "@draftwork/core": "0.1.0", "@draftwork/rules": "0.1.0", "@draftwork/generator": "0.1.0" }
+}

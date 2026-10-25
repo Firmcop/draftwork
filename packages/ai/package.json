@@ -1,0 +1,11 @@
+{
+  "name": "@draftwork/ai",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The configurator's AI layer: draft rules from plain language and fill the form from a customer's description, always checked by the rules engine.",
+  "type": "module",
+  "main": "./src/index.mjs",
+  "exports": { ".": "./src/index.mjs" },
+  "scripts": { "test": "node --test test/ai.test.mjs" },
+  "dependencies": { "@draftwork/rules": "0.1.0" }
+}

@@ -32,6 +32,15 @@
   </section>
 
   <section class="panel" aria-label="Options">
+    <form id="assist" class="assist" hidden>
+      <label for="need">Describe what you need</label>
+      <textarea id="need" rows="3" maxlength="4000" placeholder="e.g. Twelve brackets for a 20 mm shaft, heavy use, no cover plate"></textarea>
+      <div class="assistbar">
+        <label class="photo"><input type="file" id="photo" accept="image/jpeg,image/png,image/webp"> <span id="photoName">Add a photo or sketch</span></label>
+        <button type="submit" id="assistGo" class="primary small">Fill in the options</button>
+      </div>
+      <div id="assistNote" class="assistnote" role="status"></div>
+    </form>
     <h2>Options</h2>
     <form id="form" class="form" novalidate></form>
     <p class="muted small"><button type="button" id="reset" class="link">Reset to defaults</button> · <button type="button" id="share" class="link">Copy link to this configuration</button></p>
