@@ -199,18 +199,19 @@ class Project {
 
     const model = { params: {}, suppressed: {}, components: {} };
     for (const name of this.order) if (this.nodes.get(name).kind === 'param' && values.has(name)) model.params[name] = values.get(name);
-    const bom = [], priceLines = [], text = {}, outcomes = new Map();
+    const bom = [], priceLines = [], text = {}, outcomes = new Map(), byRule = new Map();
+    for (const name of this.order) { const n = this.nodes.get(name); if (n.kind === 'param') byRule.set(n.def.id || `param:${name}`, values.has(name) ? values.get(name) : null); }
     const truth = (f, source) => { const r = run(f, source); if (!r.ok) return null; try { return toBool(r.v); } catch (e) { msg('error', `${describe(source)}: ${e.message}`, source); return null; } };
     for (const rule of this.rules) {
       const source = { kind: rule.kind, name: rule.where.name, rule: rule.id };
       const f = rule.formulas;
-      if (f.when) { const w = truth(f.when, source); outcomes.set(rule.id + ':when', w); if (!w) continue; }
+      if (f.when) { const w = truth(f.when, source); outcomes.set(rule.id + ':when', w); if (!w) { byRule.set(rule.id, { off: true }); continue; } }
       switch (rule.kind) {
-        case 'suppress': { const v = truth(f.expr, source); if (v !== null) { model.suppressed[rule.def.feature] = v; outcomes.set(rule.id, v); } break; }
-        case 'component': { const r = run(f.expr, source); if (r.ok) model.components[rule.def.slot] = display(r.v); break; }
+        case 'suppress': { const v = truth(f.expr, source); if (v !== null) { model.suppressed[rule.def.feature] = v; outcomes.set(rule.id, v); byRule.set(rule.id, v); } break; }
+        case 'component': { const r = run(f.expr, source); if (r.ok) { model.components[rule.def.slot] = display(r.v); byRule.set(rule.id, display(r.v)); } break; }
         case 'validate': {
           const v = truth(f.expr, source); if (v === null) break;
-          outcomes.set(rule.id, v);
+          outcomes.set(rule.id, v); byRule.set(rule.id, v);
           if (!v) msg(rule.def.level === 'warning' ? 'warning' : rule.def.level === 'info' ? 'info' : 'error', this.fill(rule.message, run, source), source);
           break;
         }
@@ -219,16 +220,17 @@ class Project {
           let item = rule.def.item;
           if (f.item) { const r = run(f.item, source); if (!r.ok) break; item = display(r.v); }
           if (typeof q.v !== 'number' || !(q.v >= 0)) { msg('error', `${describe(source)}: quantity must be a number of 0 or more, got ${display(q.v)}`, source); break; }
+          byRule.set(rule.id, { item, qty: q.v });
           if (q.v > 0) bom.push({ item, qty: q.v, unit: rule.def.unit || 'ea', ...(rule.def.description ? { description: rule.def.description } : {}) });
           break;
         }
         case 'price': {
           const r = run(f.expr, source); if (!r.ok) break;
           if (typeof r.v !== 'number' || !Number.isFinite(r.v)) { msg('error', `${describe(source)}: a price line needs a number, got ${display(r.v)}`, source); break; }
-          priceLines.push({ line: rule.def.line, amount: round2(r.v) });
+          priceLines.push({ line: rule.def.line, amount: round2(r.v) }); byRule.set(rule.id, round2(r.v));
           break;
         }
-        case 'text': { const r = run(f.expr, source); if (r.ok) text[rule.def.name] = display(r.v); break; }
+        case 'text': { const r = run(f.expr, source); if (r.ok) { text[rule.def.name] = display(r.v); byRule.set(rule.id, display(r.v)); } break; }
       }
     }
     const total = round2(priceLines.reduce((s, l) => s + l.amount, 0));
@@ -244,6 +246,7 @@ class Project {
       explain: name => this.explain(name, values, how),
     };
     Object.defineProperty(result, 'outcomes', { value: outcomes, enumerable: false });
+    Object.defineProperty(result, 'byRule', { value: byRule, enumerable: false });   // each rule's own result, by rule id
     return result;
   }
 

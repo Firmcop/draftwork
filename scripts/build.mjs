@@ -13,7 +13,7 @@ const pkg = name => JSON.parse(fs.readFileSync(path.join(root, 'node_modules', n
 
 const strip = s => s.split('\n').filter(l => !/^import /.test(l)).map(l => l.replace(/^export /, '')).join('\n');
 // Concatenation order matters: later modules use functions from earlier ones.
-const MODULES = ['font', 'solver', 'kernel', 'engineclient', 'icons', 'assembly', 'drawing', 'drawing2', 'construct', 'modify', 'surfaceui', 'sheetui', 'plasticui', 'meshui', 'insert', 'assembly2', 'configure', 'core', 'ribbon', 'panels', 'interact', 'sketchui', 'sketchtools', 'sketchhud', 'inspect', 'formui', 'camcore', 'camui', 'slicer', 'printui', 'nest', 'nestui', 'fea', 'simui', 'library', 'ui2'];
+const MODULES = ['font', 'solver', 'kernel', 'engineclient', 'icons', 'assembly', 'drawing', 'drawing2', 'construct', 'modify', 'surfaceui', 'sheetui', 'plasticui', 'meshui', 'insert', 'assembly2', 'configure', 'productui', 'core', 'ribbon', 'panels', 'interact', 'sketchui', 'sketchtools', 'sketchhud', 'inspect', 'formui', 'camcore', 'camui', 'slicer', 'printui', 'nest', 'nestui', 'fea', 'simui', 'library', 'ui2'];
 // The exact kernel runs in a Web Worker: solver + kernel + brep + host wrapped in one self-contained async function.
 // The page sends engineFactory.toString() to the worker, or calls it directly when workers are blocked.
 const ENGINE = ['font', 'solver', 'kernel', 'brep', 'brepsurf', 'brepsheet', 'brepplastic', 'meshops', 'enginehost'];
@@ -31,7 +31,16 @@ import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer
 import { toCreasedNormals } from 'three/addons/utils/BufferGeometryUtils.js';
 import { MeshBVH } from 'three-mesh-bvh';
 `;
-const js = header + MODULES.map(m => `// ---- ${m} ----\n` + strip(src(m + '.js'))).join('\n') + '\n// ---- engine (runs in a worker) ----\n' + engineFactory;
+// The configurator's rules engine (packages/rules), wrapped in one namespace so its names never meet the app's.
+const rulesSrc = f => fs.readFileSync(path.join(root, 'packages/rules/src', f), 'utf8');
+const rules = `// ---- rules engine (packages/rules) ----
+const DWR = (() => {
+${strip(rulesSrc('expr.mjs'))}
+${strip(rulesSrc('project.mjs'))}
+return { compile, parse, evaluate, analyze, display, parseCSV, normalizeTable, RULE_KINDS, FUNCTIONS };
+})();
+`;
+const js = header + rules + MODULES.map(m => `// ---- ${m} ----\n` + strip(src(m + '.js'))).join('\n') + '\n// ---- engine (runs in a worker) ----\n' + engineFactory;
 
 // Keep the import map in step with installed versions.
 const versions = { three: pkg('three'), 'three-mesh-bvh': pkg('three-mesh-bvh'), 'three-bvh-csg': pkg('three-bvh-csg'), replicad: pkg('replicad'), 'replicad-opencascadejs': pkg('replicad-opencascadejs') };

@@ -449,3 +449,59 @@ table.grid tr.sel td { background: color-mix(in srgb, var(--accent) 22%, transpa
 .shortcuts dl { display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; margin: 0; font-size: 12.5px; }
 .shortcuts dt { white-space: nowrap; }
 .shortcuts kbd { font: 11px "IBM Plex Mono", ui-monospace, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 3px; padding: 0 4px; background: var(--bg, transparent); }
+
+/* ---------- Product Configurator ---------- */
+.modal.wide { width: min(1180px, 100%); }
+.prod { display: flex; flex-direction: column; min-height: 0; flex: 1 1 auto; overflow: hidden; }
+.prodhead { display: flex; align-items: center; gap: 12px; padding: 8px 12px 0; flex-wrap: wrap; }
+.prodtabs { flex: 0 1 auto; }
+.prodtabs button { padding: 4px 12px; }
+.prodbadge { display: inline-grid; place-items: center; min-width: 16px; height: 16px; margin-left: 6px; padding: 0 4px; border-radius: 8px; background: var(--err); color: #fff; font-size: 10.5px; font-weight: 600; }
+.prodstatus { margin: 0; }
+.note.bad, td.bad { color: var(--err); }
+.note.ok, td.ok { color: var(--ok); }
+.prodpane { flex: 1 1 auto; min-height: 300px; }
+.prodgrid td.wide { width: 34%; }
+.prodgrid select { width: 100%; height: 26px; border: 1px solid var(--line); border-radius: 3px; background: var(--raised); }
+.prodgrid input:disabled { opacity: .45; }
+.prodgrid tr.err td { background: var(--err-soft, #FBE9E7); }
+.prodgrid td.nowrap { white-space: nowrap; }
+.prodgrid .iconbtn { display: inline-grid; }
+.prodprobs { margin: 4px 0 8px; padding: 6px 10px 6px 26px; border: 1px solid var(--err); border-radius: 3px; color: var(--err); font-size: 12px; }
+.prodbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; }
+.prodbar select { width: auto; max-width: 260px; height: 30px; }
+.prodbar input:not([type]) { width: auto; height: 30px; border: 1px solid var(--line); border-radius: 3px; background: var(--raised); padding: 0 6px; }
+.prodcur { margin-left: auto; font-size: 12px; }
+.prodtable { border: 1px solid var(--line); border-radius: 4px; padding: 8px; margin: 8px 0; }
+.prodtable.err { border-color: var(--err); }
+.prodtable .row { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; }
+.prodtable .row input { width: 180px; flex: 0 0 auto; height: 28px; border: 1px solid var(--line); border-radius: 3px; background: var(--raised); padding: 0 6px; font-family: var(--font-data); }
+.prodtable .row .note { flex: 1 1 auto; }
+.prodtable textarea { width: 100%; box-sizing: border-box; font: 12px/1.45 var(--font-data, monospace); border: 1px solid var(--line); border-radius: 3px; background: var(--raised); color: inherit; padding: 6px; resize: vertical; }
+.prodtry { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(300px, 1.3fr); gap: 20px; align-items: start; }
+@media (max-width: 760px) { .prodtry { grid-template-columns: 1fr; } }
+.prodfield { display: grid; grid-template-columns: 1fr; gap: 3px; margin: 8px 0; }
+.prodfield label { font-size: 12px; font-weight: 600; }
+.prodfield input:not([type="checkbox"]), .prodfield select { height: 30px; border: 1px solid var(--line); border-radius: 3px; background: var(--raised); padding: 0 6px; }
+.prodfield input[type="checkbox"] { width: 18px; height: 18px; justify-self: start; }
+.prodfield .note { margin: 0; }
+.prodout > * { margin-bottom: 12px; }
+.prodmsgs { list-style: none; margin: 0; padding: 0; font-size: 12px; }
+.prodmsgs li { padding: 5px 8px; border-left: 3px solid var(--muted); margin-bottom: 4px; background: var(--raised); }
+.prodmsgs li.error { border-color: var(--err); }
+.prodmsgs li.warning { border-color: var(--planned, #E5B34E); }
+.prodmsgs li b { text-transform: uppercase; font-size: 10.5px; letter-spacing: .04em; margin-right: 4px; }
+.prodout tr.total td { font-weight: 600; border-top: 2px solid var(--line); }
+.prodtext { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 12px; margin: 0; }
+.prodtext dt { color: var(--muted); }
+.prodtext dd { margin: 0; }
+.prodexplain .row { display: flex; gap: 8px; align-items: center; }
+.prodexplain select { height: 28px; }
+.prodtree, .prodtree ul { list-style: none; margin: 4px 0 0; padding-left: 14px; font-size: 12px; }
+.prodtree { padding-left: 0; }
+.prodtree li { margin: 2px 0; }
+.prodtree code { font-family: var(--font-data, monospace); }
+.prodgrid.fixed { table-layout: fixed; }
+.prodgrid.fixed td { overflow: hidden; }
+.prodgrid.fixed td.num { text-overflow: ellipsis; }
+.prodgrid.fixed td.note { overflow-wrap: anywhere; }
