@@ -1,4 +1,5 @@
-# Publishes the installable desktop app (dist/site) to GitHub Pages on every push to main.
+# Publishes the installable desktop app (dist/site) and the web configurator (dist/site/configurator) to GitHub Pages
+# on every push to main.
 # One-time setup: repository Settings → Pages → Build and deployment → Source: GitHub Actions.
 name: Desktop app (GitHub Pages)
 on:
@@ -26,6 +27,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: node scripts/build.mjs
+      - run: node scripts/build-configurator.mjs   # dist/site/configurator: the web configurator, no server
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -99,7 +99,7 @@ self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.a
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V && k.startsWith('draftwork-')).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', e => {
   const u = new URL(e.request.url);
-  if (e.request.method !== 'GET') return;
+  if (e.request.method !== 'GET' || u.pathname.includes('/configurator/')) return;   // the configurator is its own site
   const same = u.origin === location.origin, page = same && (e.request.mode === 'navigate' || u.pathname.endsWith('/') || u.pathname.endsWith('index.html'));
   if (page) { e.respondWith(fetch(e.request).then(r => { const c = r.clone(); caches.open(V).then(x => x.put(e.request, c)); return r; }).catch(() => caches.match(e.request).then(r => r || caches.match('index.html')))); return; }
   if (same || /(^|\\.)(jsdelivr\\.net|unpkg\\.com|googleapis\\.com|gstatic\\.com)$/.test(u.hostname)) {
