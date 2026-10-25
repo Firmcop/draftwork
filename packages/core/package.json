@@ -1,0 +1,20 @@
+{
+  "name": "@draftwork/core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Headless Draftwork: drive a parametric design with values and rules, rebuild it with the exact kernel, export STEP, STL, drawings and flat patterns.",
+  "type": "module",
+  "main": "./src/index.mjs",
+  "exports": { ".": "./src/index.mjs" },
+  "bin": { "draftwork-core": "./bin/draftwork-core.mjs" },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node build.mjs && node --test test/core.test.mjs",
+    "sample": "node build.mjs && node bin/draftwork-core.mjs --sample --set boss_h=35 --set width=120 --suppress \"Bolt circle\" --out out/sample"
+  },
+  "peerDependencies": {
+    "replicad": "1.1.0",
+    "replicad-opencascadejs": "1.1.0",
+    "three": "0.184.0"
+  }
+}
