@@ -1,0 +1,4 @@
+material,density_kg_m3,per_kg,machining_min,rate_per_min
+Aluminium 6061,2700,650,14,45
+Steel S275,7850,190,22,45
+Stainless 304,8000,720,30,45

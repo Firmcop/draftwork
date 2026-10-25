@@ -1,0 +1,189 @@
+{
+ "version": 2,
+ "name": "Bearing bracket",
+ "units": "mm",
+ "material": "Aluminum 6061",
+ "rollback": null,
+ "bodyMeta": {},
+ "showOrigin": false,
+ "sketchShown": {},
+ "planeHidden": {
+  "pl1": true,
+  "pl2": true
+ },
+ "params": [
+  {
+   "name": "width",
+   "expr": "100",
+   "comment": "Plate length along X"
+  },
+  {
+   "name": "depth",
+   "expr": "60",
+   "comment": "Plate width along Y"
+  },
+  {
+   "name": "thickness",
+   "expr": "10",
+   "comment": "Plate thickness"
+  },
+  {
+   "name": "boss_d",
+   "expr": "40",
+   "comment": "Boss diameter"
+  },
+  {
+   "name": "boss_h",
+   "expr": "25",
+   "comment": "Boss height above the plate"
+  },
+  {
+   "name": "bore_d",
+   "expr": "12",
+   "comment": "Shaft clearance bore"
+  },
+  {
+   "name": "edge",
+   "expr": "12",
+   "comment": "Mounting hole inset from the edges"
+  }
+ ],
+ "features": [
+  {
+   "id": "s1",
+   "type": "sketch",
+   "name": "Base profile",
+   "plane": "XY",
+   "offset": 0,
+   "profiles": [
+    {
+     "id": "p1",
+     "kind": "rect",
+     "cx": 0,
+     "cy": 0,
+     "w": "width",
+     "h": "depth",
+     "r": 8,
+     "rot": 0
+    }
+   ]
+  },
+  {
+   "id": "e1",
+   "type": "extrude",
+   "name": "Base plate",
+   "sketch": "s1",
+   "distance": "thickness",
+   "direction": "one",
+   "op": "new"
+  },
+  {
+   "id": "pl1",
+   "type": "plane",
+   "name": "Plate top",
+   "base": "XY",
+   "offset": "thickness"
+  },
+  {
+   "id": "s2",
+   "type": "sketch",
+   "name": "Boss profile",
+   "plane": "pl1",
+   "offset": 0,
+   "profiles": [
+    {
+     "id": "p2",
+     "kind": "circle",
+     "cx": 0,
+     "cy": 0,
+     "r": "boss_d/2"
+    }
+   ]
+  },
+  {
+   "id": "e2",
+   "type": "extrude",
+   "name": "Boss",
+   "sketch": "s2",
+   "distance": "boss_h",
+   "direction": "one",
+   "op": "join"
+  },
+  {
+   "id": "h1",
+   "type": "hole",
+   "name": "Mounting hole",
+   "plane": "pl1",
+   "offset": 0,
+   "cx": "width/2 - edge",
+   "cy": "depth/2 - edge",
+   "diameter": 8,
+   "depth": "thickness",
+   "cbore": false,
+   "tip": false,
+   "tipAngle": 118
+  },
+  {
+   "id": "pt1",
+   "type": "pattern",
+   "name": "Mounting holes",
+   "kind": "linear",
+   "source": "h1",
+   "axis": "X",
+   "count": 2,
+   "spacing": "-(width - 2*edge)",
+   "axis2": "Y",
+   "count2": 2,
+   "spacing2": "-(depth - 2*edge)",
+   "angle": 360
+  },
+  {
+   "id": "pl2",
+   "type": "plane",
+   "name": "Boss top",
+   "base": "pl1",
+   "offset": "boss_h"
+  },
+  {
+   "id": "h2",
+   "type": "hole",
+   "name": "Bearing seat",
+   "plane": "pl2",
+   "offset": 0,
+   "cx": 0,
+   "cy": 0,
+   "diameter": "bore_d",
+   "depth": "thickness + boss_h",
+   "cbore": true,
+   "cbDiameter": 22,
+   "cbDepth": 7,
+   "tip": false,
+   "tipAngle": 118
+  },
+  {
+   "id": "h3",
+   "type": "hole",
+   "name": "M3 tap hole",
+   "plane": "pl2",
+   "offset": 0,
+   "cx": 16,
+   "cy": 0,
+   "diameter": 2.5,
+   "depth": 8,
+   "cbore": false,
+   "tip": true,
+   "tipAngle": 118
+  },
+  {
+   "id": "pt2",
+   "type": "pattern",
+   "name": "Bolt circle",
+   "kind": "circular",
+   "source": "h3",
+   "axis": "Z",
+   "count": 4,
+   "angle": 360,
+   "spacing": 20
+  }
+ ]
+}

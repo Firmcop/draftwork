@@ -1,0 +1,27 @@
+{
+  "name": "@draftwork/rules",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The configurator's rules engine: inputs, formulas, lookup tables and rules that turn answers into Draftwork parameters, validation, BOM, price and text.",
+  "type": "module",
+  "main": "./src/index.mjs",
+  "exports": {
+    ".": "./src/index.mjs",
+    "./node": "./src/node.mjs"
+  },
+  "bin": {
+    "draftwork-configure": "./bin/draftwork-configure.mjs"
+  },
+  "scripts": {
+    "test": "node --test test/expr.test.mjs test/project.test.mjs test/example.test.mjs",
+    "example": "node bin/draftwork-configure.mjs examples/bearing-bracket/product.config.json --answer ShaftSize=20 --answer Load=Heavy --answer Quantity=12 --out out/example"
+  },
+  "peerDependencies": {
+    "@draftwork/core": "0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@draftwork/core": {
+      "optional": true
+    }
+  }
+}
