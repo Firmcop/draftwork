@@ -65,7 +65,9 @@ async function startEngine() {
 
 // ---- results ----
 function ingestMesh(p) { if (p) { shapeData.set(p.tok, { p }); meshWanted.delete(p.tok); if (!p.fsig) sigQueue.push(p.tok), pumpSigs(); } }
-const sigQueue = [], sigWanted = new Set(); let sigBusy = false;
+const sigQueue = [], sigWanted = new Set(); let sigBusy = false, sigWaiters = [];
+function sigsNeededNow() { return typeof doc !== 'undefined' && !!(doc.joints?.length || doc.drawing || doc.cam); }
+function sigsDrained() { return !sigBusy && !sigQueue.length ? Promise.resolve() : new Promise(res => sigWaiters.push(res)); }
 async function pumpSigs() {
   if (sigBusy) return; sigBusy = true;
   try {
@@ -75,7 +77,7 @@ async function pumpSigs() {
       try { const r = await engineCall('sigs', { tok: t }); const d2 = shapeData.get(t); if (r && d2) { d2.p.fsig = r.fsig; d2.p.esig = r.esig; delete d2.fsigM; delete d2.esigM; } } catch (e) { }
       sigWanted.delete(t);
     }
-  } finally { sigBusy = false; }
+  } finally { sigBusy = false; const w = sigWaiters; sigWaiters = []; w.forEach(f => f()); }
 }
 function proxy(b) {
   const k = `${b.id}|${b.shape}|${b.name}|${b.feature}`;
@@ -87,6 +89,8 @@ async function engineRegen(features, rollback) {
   for (const t of r.freed) shapeData.delete(t);
   if (r.derived?.length) engineCall('derived', { keys: r.derived }).then(list => { for (const [k, brep] of list) if (brep.length) { payloadSave('res:' + k, brep); derivedLoaded.add(k); } }).catch(() => { });
   r.meshes.forEach(ingestMesh);
+  // joints, drawing references and CAM setups read face/edge data as soon as the rebuild finishes: fetch it first for those
+  if (sigsNeededNow()) await sigsDrained();
   for (const [t, pos, idx, groups] of r.meshData || []) {
     const flat = new Float32Array(idx.length * 3); for (let i = 0; i < idx.length; i++) { flat[3 * i] = pos[3 * idx[i]]; flat[3 * i + 1] = pos[3 * idx[i] + 1]; flat[3 * i + 2] = pos[3 * idx[i] + 2]; }
     const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(flat, 3)); g.computeVertexNormals();
