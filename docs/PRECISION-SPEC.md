@@ -183,3 +183,16 @@ node scripts/build.mjs && node tests/e2e-precision.mjs
 By hand: open a part, Create Sketch on XY, press L. Hover near the origin, a line's middle, a circle's centre or top,
 or where two lines cross: each shows its own marker, and clicking places the point exactly there. Draw a line almost level:
 H appears and the line snaps level. Type `3000`, Tab, `30`, Enter: a 3000 mm line at 30°, with both values kept as dimensions.
+
+## Speed (v0.43)
+
+Precision work on imported and inserted models depends on them loading quickly. Measured on a 1.3 MB STEP file (31 solids) and a 97-feature inserted design:
+
+| Step | Before | After |
+|---|---|---|
+| Undo entry / saved document with the file | 1.3 MB each | about 2 KB |
+| STEP import | 4.8–5.6 s | 3.7 s |
+| Reading the import on reopen | 1.2 s (STEP parse) | 0.16 s (cached BREP) |
+| Insert a design already built or saved | 7.5 s | 1.2 s |
+
+Picking signatures are computed after the shapes appear, so references resolve a moment later on large imports; display meshes use an angular tolerance of 0.35 rad (about 18 segments per circle). Exact geometry, measurements and exports are unchanged. `tests/e2e-perf.mjs` guards each of these.

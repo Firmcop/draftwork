@@ -86,7 +86,7 @@ function activeSketch() {
 function newProfileFeature(type) {
   const sk = activeSketch();
   if (!sk) { toast('Create a sketch with a closed profile first'); return; }
-  const snap = JSON.stringify(doc); checkpoint();
+  const snap = leanJSON(doc); checkpoint();
   const op = bodiesAtInsert().length ? 'join' : 'new';
   const f = type === 'extrude'
     ? { id: uid(), type, name: nextName(type), sketch: sk.id, distance: 10, direction: 'one', op, target: null }
@@ -114,7 +114,7 @@ const PLACED_DEFAULTS = {
 };
 function startPlaced(type) {
   startPick({ prompt: type === 'hole' ? 'Click a flat face or plane where the hole goes' : `Click a plane or flat face to place the ${TYPE[type].label.toLowerCase()}`, planes: true, faces: true, then: c => {
-    const snap = JSON.stringify(doc); checkpoint();
+    const snap = leanJSON(doc); checkpoint();
     const f = { id: uid(), type, name: nextName(type), plane: c.plane, offset: c.offset || 0, flip: !!c.flip, cx: c.local ? c.local.x : 0, cy: c.local ? c.local.y : 0, ...PLACED_DEFAULTS[type] };
     if (type !== 'hole') { f.op = bodiesAtInsert().length && c.face ? 'join' : 'new'; f.target = null; }
     insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
@@ -128,7 +128,7 @@ function repositionPlaced(f) {
 }
 function startOffsetPlane() {
   startPick({ prompt: 'Select a plane or flat face to offset from', planes: true, faces: true, then: c => {
-    const snap = JSON.stringify(doc); checkpoint();
+    const snap = leanJSON(doc); checkpoint();
     const f = { id: uid(), type: 'plane', name: nextName('plane'), base: c.plane, offset: fmt((c.offset || 0) + (c.flip ? -10 : 10)) * 1, flip: !!c.flip };
     insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
   } });
@@ -142,7 +142,7 @@ function lastSolidBefore() {
 function newRepeat(type, kind) {
   const src = lastSolidBefore();
   if (!src) { toast('Create a solid feature first, then pattern or mirror it'); return; }
-  const snap = JSON.stringify(doc); checkpoint();
+  const snap = leanJSON(doc); checkpoint();
   const f = type === 'pattern'
     ? { id: uid(), type, name: nextName(type), kind, source: src.id, axis: kind === 'circular' ? 'Z' : 'X', count: kind === 'circular' ? 4 : 3, angle: 360, spacing: 20, axis2: 'Y', count2: 1, spacing2: 20 }
     : { id: uid(), type, name: nextName(type), source: src.id, plane: 'YZ' };
@@ -152,7 +152,7 @@ function newMove() {
   const bodies = bodiesAtInsert();
   if (!bodies.length) { toast('There is no body to move yet'); return; }
   const body = selBody && bodies.includes(selBody) ? selBody : bodies[bodies.length - 1];
-  const snap = JSON.stringify(doc); checkpoint();
+  const snap = leanJSON(doc); checkpoint();
   const f = { id: uid(), type: 'move', name: nextName('move'), body, copy: false, dx: 0, dy: 0, dz: 0, rx: 0, ry: 0, rz: 0 };
   insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
 }
@@ -160,14 +160,14 @@ function newCombine() {
   const bodies = bodiesAtInsert();
   if (bodies.length < 2) { toast('Combine needs at least two bodies. Use New Body when you extrude or add a box.'); return; }
   const target = selBody && bodies.includes(selBody) ? selBody : bodies[0];
-  const snap = JSON.stringify(doc); checkpoint();
+  const snap = leanJSON(doc); checkpoint();
   const f = { id: uid(), type: 'combine', name: nextName('combine'), target, tools: bodies.filter(b => b !== target).slice(0, 1), op: 'join', keep: false };
   insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
 }
 function newEdgeFeature(type) {
   if (!isBrep()) { toast(engineState === 'loading' ? 'The exact geometry engine is still loading. Try again in a moment.' : `${TYPE[type].label} needs the exact geometry engine, which could not start here: ${engineMsg}`); return; }
   if (!bodiesAtInsert().length) { toast('There is no body yet'); return; }
-  const snap = JSON.stringify(doc); checkpoint();
+  const snap = leanJSON(doc); checkpoint();
   const f = { id: uid(), type, name: nextName(type), edges: [], ...(type === 'fillet' ? { radius: 2 } : type === 'chamfer' ? { distance: 1 } : type === 'draft' ? { angle: 3, neutral: 'XY', neutralOffset: 0, flipPull: false } : type === 'presspull' ? { distance: 5 } : type === 'offsetface' ? { distance: 2 } : type === 'fullround' ? {} : type === 'thicken' ? { thickness: 2, side: 'out', op: 'new' } : type === 'thread' ? { modeled: false, pitch: 0, full: true, lefthand: false } : type === 'replaceface' ? { target: 'XY' } : type === 'splitface' ? { tool: 'YZ' } : type === 'lip' ? { mode: 'lip', width: 'pl_wall/2', height: 2, clearance: 'pl_clearance' } : { thickness: 2 }) };
   insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
   toast(type === 'fullround' ? 'Click the face to round over, between two parallel side faces (for example the top of a rib)' : type === 'offsetface' ? 'Click the faces to offset' : type === 'presspull' ? 'Click a face to push or pull' : type === 'thread' ? 'Click the cylindrical face of a hole or shaft' : type === 'splitface' ? 'Click the faces to split, then choose the splitting plane' : type === 'lip' ? 'Click the flat rim face around the opening' : type === 'thicken' ? 'Click the faces to thicken' : type === 'replaceface' ? 'Click the flat face to replace' : type === 'shell' ? 'Click the faces to open' : type === 'draft' ? 'Click the faces to taper' : 'Click the edges to ' + (type === 'fillet' ? 'round' : 'bevel'));
@@ -220,7 +220,7 @@ function newSweep(pipe) {
   const sel = selFeature && featById(selFeature);
   const path = paths.includes(sel) ? sel : paths[paths.length - 1];
   const profileSk = doc.features.slice(0, end).filter(g => g.type === 'sketch' && g.id !== path.id && profCount(g) === 1).pop();
-  const snap = JSON.stringify(doc); checkpoint();
+  const snap = leanJSON(doc); checkpoint();
   const f = { id: uid(), type: 'sweep', name: nextName('sweep'), path: path.id, pathIndex: 0, profileKind: pipe || !profileSk ? 'circle' : 'sketch', profile: profileSk?.id || null, diameter: 8, wall: pipe ? 1 : 0, op: bodiesAtInsert().length ? 'join' : 'new', target: null };
   insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
 }
@@ -229,7 +229,7 @@ function newLoft() {
   const end = insertIndex();
   const cands = doc.features.slice(0, end).filter(g => g.type === 'sketch' && profCount(g) === 1 && statusOf(g.id).state === 'ok');
   if (cands.length < 2) { toast('Loft needs two sketches with one closed profile each, on different planes'); return; }
-  const snap = JSON.stringify(doc); checkpoint();
+  const snap = leanJSON(doc); checkpoint();
   const f = { id: uid(), type: 'loft', name: nextName('loft'), sketches: cands.slice(-2).map(s => s.id), ruled: false, op: bodiesAtInsert().length ? 'join' : 'new', target: null };
   insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
 }
@@ -241,7 +241,12 @@ function ensureImports() {
     if (f.type !== 'import' || !f.file || importsRead.has(f.file) || importPending.has(f.file)) continue;
     const file = doc.files?.[f.file]; if (!file) continue;
     importPending.add(f.file);
-    brepImportSTEP(f.file, file.text).catch(e => { importsRead.add(f.file); toast('Could not read ' + file.name + ': ' + occMsg(e)); })
+    Promise.resolve(payloadsReady).then(async () => {
+      const brep = await cachedPayload('brep:' + f.file);           // parsed before: no STEP parsing
+      if (brep?.length) return brepImportCached(f.file, brep);
+      if (typeof file.text !== 'string') throw new Error('the file contents were not saved with this design; import it again');
+      return brepImportSTEP(f.file, file.text);
+    }).catch(e => { importsRead.add(f.file); toast('Could not read ' + file.name + ': ' + occMsg(e)); })
       .finally(() => { importPending.delete(f.file); scheduleRegen(0); });
   }
 }
@@ -866,6 +871,7 @@ async function loadEngine() {
 // ---------- boot ----------
 function start(data) {
   doc = upgradeDoc(data?.doc) || loadStored() || sampleDoc();
+  payloadsReady = Promise.resolve().then(() => hydrateDoc(doc)).then(() => { try { drawToolsOverlay(); requestRender(); } catch (e) { } });   // file contents and drawing views saved outside the document
   $('#docTitle').textContent = doc.name;
   readTheme(); updateUndoButtons(); renderRibbon(); renderNavbar(); renderBrowser(); renderTimeline(); defaultHint();
   $('#tlInfo').textContent = 'Building…';
@@ -878,6 +884,8 @@ if (location.hostname === 'localhost') window.__dw = {
   screen: (x, y, z) => { const v = new THREE.Vector3(x, y, z).project(camera), r = renderer.domElement.getBoundingClientRect(); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; },
   sketchScreen: (x, y) => { const v = new THREE.Vector3(x, y, 0).applyMatrix4(sketchMatrix(featById(sketchId))).project(camera), r = renderer.domElement.getBoundingClientRect(); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; },
   doc: () => JSON.parse(JSON.stringify(doc)),
+  engineTimings: () => engineCall('timings').then(t => Object.fromEntries(Object.entries(t).map(([k, v]) => [k, Math.round(v)]))),
+  sizes: () => ({ doc: JSON.stringify(doc).length, lean: leanJSON(doc).length, undoLast: history.undo.at(-1)?.length || 0, undoTotal: history.undo.reduce((a, x) => a + x.length, 0), stored: (localStorage.getItem(STORE_KEY) || '').length }),
   engine: () => engineMode,
   sheetPt: (X, Y) => { const r = sheetSvg.getBoundingClientRect(); return { x: r.left + (X - dwCam.x) / dwCam.w * r.width, y: r.top + (Y - dwCam.y) / dwCam.h * r.height }; },
   sheet: (kind, x, y) => { const v = dw()?.views.find(w => w.kind === kind); if (!v) return null; const P = viewXf(v).toSheet([x, y]), r = sheetSvg.getBoundingClientRect(); return { x: r.left + (P[0] - dwCam.x) / dwCam.w * r.width, y: r.top + (P[1] - dwCam.y) / dwCam.h * r.height }; },

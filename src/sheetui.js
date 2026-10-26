@@ -9,7 +9,7 @@ const sheetBodies = () => [...(result.sheets || new Map()).keys()].filter(id => 
 function newSheet(type) {
   if (!needExact(TYPE[type].label)) return;
   const end = insertIndex(), sel = selFeature && featById(selFeature);
-  const snap = JSON.stringify(doc); checkpoint();
+  const snap = leanJSON(doc); checkpoint();
   ensureSheetParams();
   const rules = { thickness: 'sm_thickness', bendRadius: 'sm_bend_radius', kFactor: 'sm_kfactor' };
   let f;

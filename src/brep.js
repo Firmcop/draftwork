@@ -1055,6 +1055,8 @@ const EDGE_TYPES = new Set(['fillet', 'chamfer', 'shell', 'draft', 'presspull', 
 const FACE_PICK = new Set(['shell', 'draft', 'presspull', 'thicken', 'replaceface', 'thread', 'emboss', 'splitface', 'lip', 'fullround', 'offsetface']);
 // Imported STEP shapes, parsed once per file (async) and reused by every rebuild: fileId -> Shape3D[]
 const importShapes = new Map();
+// finished results of inserted designs, by a hash of the design's features and parameters (loaded from the page's cache)
+const deriveShapes = new Map();
 function brepStep(f, out) {
   out.before.set(f.id, [...out.bodies.keys()]);
   if (EDGE_TYPES.has(f.type) || FACE_PICK.has(f.type) || SURF_FACE_PICK.has(f.type) || SURF_EDGE_PICK.has(f.type) || f.type === 'patch' || f.type === 'flange' || f.type === 'lip') out.beforeBodies.set(f.id, new Map(out.bodies));
@@ -1157,10 +1159,16 @@ function brepStep(f, out) {
       /* display only */
     } else if (f.type === 'derive') {
       if (!Array.isArray(f.sub)) throw new Error('The derived design is missing');
-      const sub = regenerateBrep(f.sub), errs = [...sub.status.values()].filter(s => s.state === 'error').length;
-      if (!sub.bodies.size) throw new Error('The derived design has no bodies' + (errs ? ` (${errs} of its features fail)` : ''));
+      // a saved result of this exact design is used as it is; otherwise its timeline is rebuilt (and the result kept)
+      let shapes = f.resKey ? deriveShapes.get(f.resKey) : null;
+      if (!shapes) {
+        const sub = regenerateBrep(f.sub), errs = [...sub.status.values()].filter(s => s.state === 'error').length;
+        if (!sub.bodies.size) throw new Error('The derived design has no bodies' + (errs ? ` (${errs} of its features fail)` : ''));
+        shapes = [...sub.bodies.values()].map(b => b.shape);
+        if (f.resKey && !errs) { deriveShapes.set(f.resKey, shapes.map(s => s.clone())); (out.derivedNew ||= []).push(f.resKey); }
+      }
       let k = 0;
-      for (const [, b] of sub.bodies) { let s = b.shape.clone(); if (+f.dx || +f.dy || +f.dz) s = s.translate([+f.dx || 0, +f.dy || 0, +f.dz || 0]); bNew(out, f.id + (k ? ':' + k : ''), T(s), f.id); k++; }
+      for (const shape of shapes) { let s = shape.clone(); if (+f.dx || +f.dy || +f.dz) s = s.translate([+f.dx || 0, +f.dy || 0, +f.dz || 0]); bNew(out, f.id + (k ? ':' + k : ''), T(s), f.id); k++; }
     } else if (EDGE_TYPES.has(f.type)) {
       edgeFeature(f, out);
     } else if (MODIFY_TYPES.has(f.type)) {
@@ -1197,7 +1205,7 @@ function brepMeshOf(rec) {
   if (rec._mesh) return rec._mesh;
   const s = rec.shape;
   let size = 100; try { const [a, b] = s.boundingBox.bounds; size = Math.max(b[0] - a[0], b[1] - a[1], b[2] - a[2]); } catch (e) { }
-  const tol = Math.min(0.1, Math.max(0.01, size / 2000)), opts = { tolerance: tol, angularTolerance: 0.25 };
+  const tol = Math.min(0.1, Math.max(0.01, size / 2000)), opts = { tolerance: tol, angularTolerance: 0.35 };   // ~18 segments per circle; 0.25 doubled meshing time
   const m = s.mesh(opts), em = s.meshEdges(opts);
   const display = new THREE.BufferGeometry();
   display.setAttribute('position', new THREE.Float32BufferAttribute(m.vertices, 3));

@@ -76,7 +76,7 @@ function constructPickAt(e) {
 
 // ---- commands ----
 function needExact(what) { if (isBrep()) return true; toast(engineState === 'loading' ? 'The exact geometry engine is still loading. Try again in a moment.' : what + ' needs the exact geometry engine, which could not start here: ' + engineMsg); return false; }
-function addConstruct(f) { const snap = JSON.stringify(doc); checkpoint(); insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0); }
+function addConstruct(f) { const snap = leanJSON(doc); checkpoint(); insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0); }
 function startPlaneAtAngle() {
   startPick({ prompt: 'Select the plane or flat face to start from', planes: true, faces: true, then: c => addConstruct({ id: uid(), type: 'plane', mode: 'angle', name: nextName('plane'), base: c.plane, axis: 'u', angle: 45, offset: 0, flip: false }) });
 }

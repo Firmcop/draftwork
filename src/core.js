@@ -124,7 +124,7 @@ function checkpoint(tag = null) {
   const now = Date.now();
   if (tag && tag === lastTag && now - lastTime < 1500) { lastTime = now; return; }
   lastTag = tag; lastTime = now;
-  history.undo.push(JSON.stringify(doc));
+  history.undo.push(leanJSON(doc));   // file contents and drawing views are referenced, not copied
   if (history.undo.length > 200) history.undo.shift();
   history.redo.length = 0;
   markDirty(); updateUndoButtons();
@@ -132,12 +132,12 @@ function checkpoint(tag = null) {
 function undo() {
   if (dlg) closeDialog(false);
   if (!history.undo.length) return;
-  history.redo.push(JSON.stringify(doc)); doc = JSON.parse(history.undo.pop()); lastTag = null; afterDocReplace(); toast('Undo');
+  history.redo.push(leanJSON(doc)); doc = reviveDoc(JSON.parse(history.undo.pop())); lastTag = null; afterDocReplace(); toast('Undo');
 }
 function redo() {
   if (dlg) closeDialog(false);
   if (!history.redo.length) return;
-  history.undo.push(JSON.stringify(doc)); doc = JSON.parse(history.redo.pop()); lastTag = null; afterDocReplace(); toast('Redo');
+  history.undo.push(leanJSON(doc)); doc = reviveDoc(JSON.parse(history.redo.pop())); lastTag = null; afterDocReplace(); toast('Redo');
 }
 function updateUndoButtons() { $('#abUndo').disabled = !history.undo.length; $('#abRedo').disabled = !history.redo.length; }
 let dirty = false;
@@ -656,8 +656,8 @@ function finishRegen() {
 const STORE_KEY = 'draftwork.doc.v2';
 let persistTimer = null;
 let persistWarned = false;
-function persist() { clearTimeout(persistTimer); persistTimer = setTimeout(() => { if (typeof persistSession === 'function') persistSession(); try { localStorage.setItem(STORE_KEY, JSON.stringify(doc)); } catch (e) { if (!persistWarned) { persistWarned = true; toast('This design is too large to keep in the browser. Save the project file to keep your work.'); } } }, 500); }
-function loadStored() { try { return upgradeDoc(JSON.parse(localStorage.getItem(STORE_KEY) || 'null')); } catch (e) { return null; } }
+function persist() { clearTimeout(persistTimer); persistTimer = setTimeout(() => { if (typeof persistSession === 'function') persistSession(); try { localStorage.setItem(STORE_KEY, leanJSON(doc)); } catch (e) { if (!persistWarned) { persistWarned = true; toast('This design is too large to keep in the browser. Save the project file to keep your work.'); } } }, 500); }
+function loadStored() { try { return reviveDoc(upgradeDoc(JSON.parse(localStorage.getItem(STORE_KEY) || 'null'))); } catch (e) { return null; } }
 
 let toastTimer = null;
 function toast(msg) {

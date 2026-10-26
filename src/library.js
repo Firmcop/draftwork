@@ -22,20 +22,22 @@ function designBlock(id) {
 }
 
 // ---------- storage ----------
-var LIB = { db: null, ready: null, mem: { projects: new Map(), designs: new Map(), versions: new Map(), meta: new Map() } };
+var LIB = { db: null, ready: null, mem: { projects: new Map(), designs: new Map(), versions: new Map(), meta: new Map(), payloads: new Map() } };
 function libOpen() {
   if (LIB.ready) return LIB.ready;
   LIB.ready = new Promise(res => {
     try {
-      const r = indexedDB.open('draftwork', 1);
-      r.onupgradeneeded = () => { const d = r.result; d.createObjectStore('projects', { keyPath: 'id' }); d.createObjectStore('designs', { keyPath: 'id' }); d.createObjectStore('versions', { keyPath: 'id' }).createIndex('design', 'design'); d.createObjectStore('meta', { keyPath: 'k' }); };
+      const r = indexedDB.open('draftwork', 2);
+      r.onupgradeneeded = () => { const d = r.result, has = n => d.objectStoreNames.contains(n);
+        if (!has('projects')) d.createObjectStore('projects', { keyPath: 'id' }); if (!has('designs')) d.createObjectStore('designs', { keyPath: 'id' }); if (!has('versions')) d.createObjectStore('versions', { keyPath: 'id' }).createIndex('design', 'design'); if (!has('meta')) d.createObjectStore('meta', { keyPath: 'k' });
+        if (!has('payloads')) d.createObjectStore('payloads', { keyPath: 'k' }); };
       r.onsuccess = () => { LIB.db = r.result; res(LIB.db); };
       r.onerror = () => res(null); r.onblocked = () => res(null);
     } catch (e) { res(null); }
   });
   return LIB.ready;
 }
-const keyOf = s => s === 'meta' ? 'k' : 'id';
+const keyOf = s => s === 'meta' || s === 'payloads' ? 'k' : 'id';
 async function libTx(store, mode, fn) {
   const db = await libOpen();
   if (!db) return fn(null);
@@ -126,14 +128,15 @@ function renderTabs() {
 // session: the other open tabs survive a reload (the active one is in the regular autosave)
 function persistSession() {
   try {
-    const others = tabs.map((t, i) => i === tabIdx ? null : { doc: t.doc, dirty: t.dirty });
+    const others = tabs.map((t, i) => i === tabIdx ? null : { doc: leanDoc(t.doc), dirty: t.dirty });
     localStorage.setItem(SESSION_KEY, JSON.stringify({ tabs: others, active: tabIdx }));
   } catch (e) { }
 }
 function restoreSession() {
   let s = null; try { s = JSON.parse(localStorage.getItem(SESSION_KEY) || 'null'); } catch (e) { }
   if (!s || !Array.isArray(s.tabs) || s.tabs.length < 2 || !(s.active >= 0 && s.active < s.tabs.length)) { tabs = [{ doc, history, dirty }]; tabIdx = 0; return; }
-  tabs = s.tabs.map((t, i) => i === s.active ? { doc, history: { undo: history.undo, redo: history.redo }, dirty } : (t && upgradeDoc(t.doc) ? { doc: upgradeDoc(t.doc), history: { undo: [], redo: [] }, dirty: !!t.dirty } : null)).filter(Boolean);
+  tabs = s.tabs.map((t, i) => i === s.active ? { doc, history: { undo: history.undo, redo: history.redo }, dirty } : (t && upgradeDoc(t.doc) ? { doc: reviveDoc(upgradeDoc(t.doc)), history: { undo: [], redo: [] }, dirty: !!t.dirty } : null)).filter(Boolean);
+  const ready0 = payloadsReady; payloadsReady = (async () => { await ready0; for (const t of tabs) if (t.doc !== doc) await hydrateDoc(t.doc); prunePayloads(tabs.map(t => t.doc)); })();
   tabIdx = Math.max(0, tabs.findIndex(t => t.doc === doc));
 }
 
@@ -185,7 +188,17 @@ async function commitVersion(o) {
   const v = { id: uid(), design: rec.id, n: rec.version, date: now, label: o.label || '', doc: d };
   rec.latest = v.id;
   await libPut('versions', v); await libPut('designs', rec);
+  cacheDesignResult(d);
   return { rec, doc: d };
+}
+// the saved design's bodies in the engine's own format, for fast inserts (only when the model rebuilt without errors)
+async function cacheDesignResult(d) {
+  try {
+    if (!isBrep() || !result?.bodies?.size || [...result.status.values()].some(s => s.state === 'error')) return;
+    const toks = [...result.bodies.values()].map(b => b.shape).filter(Boolean); if (!toks.length) return;
+    const brep = await engineCall('serialize', { toks });
+    if (brep.every(Boolean)) payloadSave('res:' + designResultKey(d), brep);
+  } catch (e) { }
 }
 // Save: first save asks for name, part number and location; later saves ask for a version description
 async function saveCmd() {

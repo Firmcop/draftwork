@@ -192,7 +192,7 @@ function startCanvas(kind = 'canvas') {
   startPick({ prompt: kind === 'decal' ? 'Click the flat face to put the decal on' : 'Select a plane or flat face for the canvas', planes: kind !== 'decal', faces: true, then: async c => {
     const got = await pickFile('image/png,image/jpeg,image/webp,image/gif', 'url'); if (!got) return;
     if (got.file.size > 8e6) { toast('Use an image under 8 MB'); return; }
-    const fileId = uid(), snap = JSON.stringify(doc); checkpoint();
+    const fileId = uid(), snap = leanJSON(doc); checkpoint();
     doc.files ||= {}; doc.files[fileId] = { name: got.file.name, url: got.data, kind: 'image' };
     const f = { id: uid(), type: kind, name: got.file.name.replace(/\.\w+$/, ''), file: fileId, plane: c.plane, offset: (c.offset || 0) + (kind === 'decal' ? 0.02 : 0), flip: !!c.flip, cx: c.local?.x || 0, cy: c.local?.y || 0, width: 50, angle: 0, opacity: kind === 'decal' ? 1 : 0.6, mirror: false };
     insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
@@ -201,7 +201,7 @@ function startCanvas(kind = 'canvas') {
 function drawCanvases(group) {
   for (const f of doc.features) {
     if ((f.type !== 'canvas' && f.type !== 'decal') || f.suppressed || f.hidden || doc.rollback != null && featIndex(f.id) > doc.rollback) continue;
-    const file = doc.files?.[f.file]; if (!file) continue;
+    const file = doc.files?.[f.file]; if (!file || typeof file.url !== 'string') continue;   // (an image still loading from the payload store waits)
     let t = canvasTex.get(f.file);
     if (!t) {
       t = { tex: new THREE.TextureLoader().load(file.url, tx => { t.aspect = tx.image.height / tx.image.width || 1; requestRender(); updateScene(); }), aspect: 1 };
@@ -221,17 +221,19 @@ async function startDerive() {
   if (!needExact('Insert Derive')) return;
   const got = await pickFile('.json,application/json', true); if (!got) return;
   let sub; try { sub = JSON.parse(got.data); if (!Array.isArray(sub.features)) throw new Error('no features'); } catch (e) { toast('That is not a Draftwork design file'); return; }
-  const fileId = uid(), snap = JSON.stringify(doc); checkpoint();
+  const fileId = uid(), snap = leanJSON(doc); checkpoint();
   doc.files ||= {}; doc.files[fileId] = { name: got.file.name, design: { name: sub.name, params: sub.params || [], features: sub.features }, kind: 'design' };
   const f = { id: uid(), type: 'derive', name: (sub.name || got.file.name.replace(/\.json$/i, '')), file: fileId, dx: 0, dy: 0, dz: 0 };
   insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
 }
+// the key under which a design's finished geometry is kept: its features and parameters
+function designResultKey(d) { return dwHash(JSON.stringify([d.features || [], d.params || []])) + ':' + (d.features || []).length; }
 // the derived design's own features, resolved with its own parameters, travel with the feature to the engine
 function expandDerive(features) {
   return features.map(f => {
     if (f.type !== 'derive') return f;
     const d = doc.files?.[f.file]?.design; if (!d) return { ...f, error: 'The derived design is missing' };
-    try { return { ...f, sub: resolveFeatures(d.features, evalParams(d.params || []).vars) }; } catch (e) { return { ...f, error: 'The derived design could not be read: ' + e.message }; }
+    try { return { ...f, sub: resolveFeatures(d.features, evalParams(d.params || []).vars), resKey: designResultKey(d) }; } catch (e) { return { ...f, error: 'The derived design could not be read: ' + e.message }; }
   });
 }
 function insertDialog(f, idx, out, placement) {

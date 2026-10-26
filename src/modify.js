@@ -2,7 +2,7 @@
 // Split Body, Scale, Thicken, Replace Face, Align, Pattern on Path, Boundary Fill.
 function newModify(type, fields) {
   if (!needExact(TYPE[type]?.label || 'This tool')) return null;
-  const snap = JSON.stringify(doc); checkpoint();
+  const snap = leanJSON(doc); checkpoint();
   const f = { id: uid(), type, name: nextName(type), ...fields };
   insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
   return f;
@@ -108,7 +108,7 @@ function startEmboss() {
   if (!needExact('Emboss')) return;
   const sks = doc.features.filter(g => g.type === 'sketch');
   if (!sks.length) { toast('Sketch the shape or text to emboss first'); return; }
-  const snap = JSON.stringify(doc); checkpoint();
+  const snap = leanJSON(doc); checkpoint();
   const f = { id: uid(), type: 'emboss', name: nextName('emboss'), sketch: sks.at(-1).id, edges: [], depth: 1, mode: 'emboss' };
   insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
   toast('Click the face to emboss onto');

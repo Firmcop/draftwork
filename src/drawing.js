@@ -234,6 +234,7 @@ function dwItemsForComp(cid) {
 }
 async function dwRefresh(force) {
   if (!isBrep()) return;
+  await payloadsReady;                                   // the stored views may still be loading from the browser database
   const groups = dwGroups(), R = doc.drawing, fp = modelFingerprint();
   const allCams = Object.assign({}, ...groups.map(g => g.cams)), allSecs = groups.flatMap(g => g.secs);
   const covers = c => c && groups.every(g => g.keys.every(k => k in c.raw && (!allCams[k] || c.camKeys?.[k] === JSON.stringify(allCams[k])))) && allSecs.every(sc => ('sec:' + sc.id) in c.raw && c.secKeys?.[sc.id] === sectionKey(sc));

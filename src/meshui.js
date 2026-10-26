@@ -21,7 +21,7 @@ function startInsertMesh() {
       toast('Reading ' + file.name + '…');
       try {
         const n = await engineMeshFile(fileId, file.name, data, binary); importsRead.add(fileId);
-        const snap = JSON.stringify(doc); checkpoint();
+        const snap = leanJSON(doc); checkpoint();
         doc.files ||= {}; doc.files[fileId] = { name: file.name, data, binary, kind: 'mesh' };
         const f = { id: uid(), type: 'meshinsert', name: file.name.replace(/\.(stl|obj)$/i, ''), file: fileId, units: 'mm', center: true, upY: false };
         insertFeature(f); await doRegen(); setView('fit'); openFeatureDialog(f.id, true, snap);
@@ -37,7 +37,7 @@ function ensureMeshImports() {
     if (f.type !== 'meshinsert' || !f.file || importsRead.has(f.file) || importPending.has(f.file)) continue;
     const file = doc.files?.[f.file]; if (!file) continue;
     importPending.add(f.file);
-    engineMeshFile(f.file, file.name, file.data, file.binary).then(() => importsRead.add(f.file)).catch(e => { importsRead.add(f.file); toast('Could not read ' + file.name + ': ' + (e.message || e)); })
+    Promise.resolve(payloadsReady).then(() => { if (file.data == null) throw new Error('the file contents were not saved with this design; insert it again'); return engineMeshFile(f.file, file.name, file.data, file.binary); }).then(() => importsRead.add(f.file)).catch(e => { importsRead.add(f.file); toast('Could not read ' + file.name + ': ' + (e.message || e)); })
       .finally(() => { importPending.delete(f.file); scheduleRegen(0); });
   }
 }
@@ -51,7 +51,7 @@ function newMesh(type) {
     const body = selBody && meshes.includes(selBody) ? selBody : meshes.at(-1);
     f = { body, ...({ facegroups: { angle: 20 }, meshrepair: { tolerance: 0.0001, fill: true }, remesh: { edge: 0 }, reduce: { mode: 'percent', percent: 50, count: 1000 }, smooth: { iterations: 5, strength: 0.5, keepEdges: true }, meshconvert: { method: 'prismatic', keep: false }, meshplane: { tool: 'XY', keep: 'positive', fill: true } }[type]) };
   }
-  const snap = JSON.stringify(doc); checkpoint();
+  const snap = leanJSON(doc); checkpoint();
   f = { id: uid(), type, name: nextName(type), ...f };
   insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
 }

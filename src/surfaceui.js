@@ -26,7 +26,7 @@ function newSurface(type) {
     case 'unstitch': if (!bodies.length) return toast('There is no body yet'); f = { body: pickBody(bodies) }; break;
     case 'reverse': if (!surfs.length) return toast('There is no surface body'); f = { body: pickBody(surfs) }; break;
   }
-  const snap = JSON.stringify(doc); checkpoint();
+  const snap = leanJSON(doc); checkpoint();
   f = { id: uid(), type, name: nextName(type), ...(SURF_FACE_UI.has(type) || SURF_EDGE_UI.has(type) ? { edges: [] } : {}), ...f };
   insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
   if (SURF_FACE_UI.has(type)) toast('Click the faces on the model');

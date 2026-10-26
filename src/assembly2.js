@@ -12,7 +12,7 @@ const isFollower = (jid, k) => links().some(l => l.b === jid && l.kb === k && !l
 function openMotionLink(id) {
   const js = joints().filter(j => JOINT_TYPES[j.type].dofs.length);
   if (js.length < 2) { toast('A motion link needs two joints that can move'); return; }
-  const snap = JSON.stringify(doc); checkpoint();
+  const snap = leanJSON(doc); checkpoint();
   let L = id ? links().find(l => l.id === id) : null;
   if (!L) { L = { id: uid(), name: 'Motion Link ' + (links().length + 1), a: js[0].id, ka: JOINT_TYPES[js[0].type].dofs[0], b: js[1].id, kb: JOINT_TYPES[js[1].type].dofs[0], ratio: 1, offset: 0, reverse: false }; links().push(L); }
   const dofOpts = jid => { const j = joints().find(x => x.id === jid); return j ? JOINT_TYPES[j.type].dofs.map(k => [k, k === 'angle' ? 'Angle' : k === 'distance' ? 'Distance' : k.toUpperCase()]) : []; };
@@ -26,7 +26,7 @@ function openMotionLink(id) {
         h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn', type: 'button', onclick: () => { doc.motionLinks = links().filter(x => x !== L); closeDialog(true); changed(); renderBrowser(); } }, 'Delete link'))),
     ],
     onOK: () => { if (L.a === L.b) doc.motionLinks = links().filter(x => x !== L); changed(); renderBrowser(); },
-    onCancel: () => { doc = JSON.parse(snap); afterDocReplace(); },
+    onCancel: () => { doc = reviveDoc(JSON.parse(snap)); afterDocReplace(); },
   });
   changed();
 }

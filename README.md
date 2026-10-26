@@ -33,6 +33,7 @@ Parametric CAD in the browser. Sketch on planes or faces, build solids with a fe
 | Configure | Configuration table (parameter values and suppressed features per variant), rules that suppress features by condition; `if()` and comparisons in expressions. **Product Configurator**: turn a design into a configurable product — capture parameters as form inputs, CSV lookup tables, named formulas, rules (set parameter, suppress feature, choose component, checks, BOM and price lines, text), test cases with branch coverage, a Try it form with live model, price, BOM and Explain, and export as a bundle for `@draftwork/rules` and `@draftwork/core` |
 | Select | Window and crossing selection with hide/isolate/remove, selection filters |
 | Files | Project save/open (.json), STEP import, STEP and STL export (.zip) |
+| Speed | Imported files and stored drawing views are kept out of the document, undo history and session save (held once in browser storage); STEP files are parsed once and reopened from the engine's own format; inserted designs reuse their saved result instead of rebuilding their timeline; picking data is computed in the background after the shapes appear |
 
 Edge and face picks for fillet/chamfer/shell are stored as geometric signatures and re-matched after every rebuild, so they survive moderate upstream changes.
 

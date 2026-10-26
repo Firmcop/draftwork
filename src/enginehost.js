@@ -41,6 +41,21 @@ function faceOutline(face, kind) {
   }
   return d.trim();
 }
+// Face and edge signatures cross to the page as packed numbers (one row per face / edge), not thousands of objects:
+// copying objects between threads blocked the page for over a second on big imports.
+const FACE_SIG_KEYS = [['c', 3], ['n', 3], ['ax', 3], ['ap', 3], ['r', 1]];
+const EDGE_SIG_KEYS = [['p', 3], ['len', 1], ['a', 3], ['b', 3], ['cc', 3], ['ax', 3]];
+function packSigs(map, keys) {
+  const width = keys.reduce((a, [, n]) => a + n, 0), n = map.size, h = new Float64Array(n), d = new Float64Array(n * width).fill(NaN), t = new Uint8Array(n), types = [];
+  let i = 0;
+  for (const [hash, s] of map) {
+    h[i] = hash; let ti = types.indexOf(s.type); if (ti < 0) { ti = types.length; types.push(s.type); } t[i] = ti;
+    let o = i * width;
+    for (const [k, len] of keys) { const v = s[k]; if (v != null) { if (len === 1) d[o] = v; else for (let j = 0; j < len; j++) d[o + j] = v[j]; } o += len; }
+    i++;
+  }
+  return { packed: true, keys, width, h, d, t, types };
+}
 const TRUE_VIEW = { front: 'front', back: 'back', top: 'bottom', bottom: 'top', right: 'left', left: 'right' };
 function engineHost(RCmod) {
   let cacheArr = [];
@@ -54,7 +69,9 @@ function engineHost(RCmod) {
   function meshPayload(t, full) {
     const rec = { shape: shapeOf.get(t) };
     if (!rec.shape) return null;
+    let t1 = performance.now();
     const m = brepMeshOf(rec);
+    tAdd('mesh', performance.now() - t1);
     const idx = m.display.index.array;
     const p = {
       tok: t,
@@ -66,9 +83,9 @@ function engineHost(RCmod) {
       segEdge: Float64Array.from(m.segEdge),
     };
     if (full) {
-      p.fsig = [...brepSigMap(rec, 'face')];
-      p.esig = [...brepSigMap(rec, 'edge')];
+      t1 = performance.now();
       const pr = brepProps(rec);
+      tAdd('props', performance.now() - t1);
       p.props = { volume: pr.volume, area: pr.area, com: [pr.com.x, pr.com.y, pr.com.z], surface: pr.surface };
     }
     m.display.dispose?.(); m.edgeGeom.dispose?.();
@@ -100,7 +117,7 @@ function engineHost(RCmod) {
       mbodies: [...res.mbodies].map(([id, m]) => [id, { name: m.name, feature: m.feature, tok: mtok(m), stats: mstat(m), groupCount: m.groupCount || 0 }]),
       sheets: [...res.sheet].filter(([id]) => res.bodies.has(id)).map(([id, r]) => [id, { t: r.t, R: r.R, k: r.k, unfolded: !!r.unfolded }]),
       sketches: [...res.sketches].map(([id, s]) => [id, { matrix: Array.from(s.matrix.elements), feature: s.feature }]),
-      freed,
+      freed, derived: res.derivedNew || [],
     };
     // bodies get their display mesh, signatures and mass properties right away; tool previews are fetched on demand
     const need = [];
@@ -114,7 +131,14 @@ function engineHost(RCmod) {
     return out;
   }
 
+  // time spent per operation (and inside them: meshing, signatures), read with the 'timings' op
+  const timing = {}, tAdd = (k, ms) => { timing[k] = (timing[k] || 0) + ms; };
   async function handle(op, a) {
+    if (op === 'timings') { const t = { ...timing }; for (const k in timing) delete timing[k]; return t; }
+    const t0 = performance.now();
+    try { return await handleOp(op, a); } finally { tAdd(op, performance.now() - t0); }
+  }
+  async function handleOp(op, a) {
     try {
       if (op === 'init') {
         const glue = await import(a.urls.occ);
@@ -134,7 +158,13 @@ function engineHost(RCmod) {
       if (op === 'meshfile') { const bin = a.binary ? Uint8Array.from(atob(a.data), c => c.charCodeAt(0)) : null; importMeshes.set(a.fileId, /\.obj$/i.test(a.name) ? parseOBJ(a.data) : parseSTL(bin || new TextEncoder().encode(a.data))); cacheArr = []; return importMeshes.get(a.fileId).idx.length / 3; }
       if (op === 'flat') { const r = lastRes?.sheet.get(a.body); return r ? sheetFlatData(r) : null; }
       if (op === 'mesh') { const t = a.tok; const p = meshPayload(t, true); if (p) shipped.add(t); return p; }
-      if (op === 'import') { const n = await brepImportSTEP(a.fileId, a.text); cacheArr = []; return n; }
+      if (op === 'import') { const n = await brepImportSTEP(a.fileId, a.text); cacheArr = []; return a.wantBrep ? { n, brep: (importShapes.get(a.fileId) || []).map(s => s.serialize()) } : n; }
+      // cached geometry: an import or an inserted design's result, in the engine's own format (no STEP parsing, no rebuild)
+      if (op === 'importbrep') { importShapes.set(a.fileId, a.brep.map(s => RC.deserializeShape(s))); cacheArr = []; return a.brep.length; }
+      if (op === 'derivebrep') { deriveShapes.set(a.key, a.brep.map(s => RC.deserializeShape(s))); return a.brep.length; }
+      if (op === 'derived') return a.keys.map(k => [k, (deriveShapes.get(k) || []).map(s => s.serialize())]);
+      if (op === 'serialize') return a.toks.map(t => shapeOf.get(t)?.serialize() || null);
+      if (op === 'sigs') { const rec = { shape: shapeOf.get(a.tok) }; if (!rec.shape) return null; let t1 = performance.now(); const r = { fsig: packSigs(brepSigMap(rec, 'face'), FACE_SIG_KEYS), esig: packSigs(brepSigMap(rec, 'edge'), EDGE_SIG_KEYS) }; tAdd('signatures', performance.now() - t1); return r; }
       if (op === 'step') {
         if (a.items.some(x => !shapeOf.get(x.tok))) throw new Error('That body is no longer available. Try again after the rebuild.');
         const temp = [];
@@ -246,9 +276,10 @@ function engineHost(RCmod) {
   // buffers that can move to the page without copying
   function transfers(r) {
     const out = [];
-    const add = p => { if (p) for (const k of ['pos', 'nrm', 'idx', 'triFace', 'seg', 'segEdge']) if (p[k]?.buffer) out.push(p[k].buffer); };
+    const add = p => { if (!p) return; for (const k of ['pos', 'nrm', 'idx', 'triFace', 'seg', 'segEdge']) if (p[k]?.buffer) out.push(p[k].buffer); for (const s of [p.fsig, p.esig]) if (s?.packed) out.push(s.h.buffer, s.d.buffer, s.t.buffer); };
     if (r?.meshes) r.meshes.forEach(add); else if (r?.tok) add(r);
     if (r instanceof Uint8Array) out.push(r.buffer);
+    if (r?.fsig?.packed) for (const s of [r.fsig, r.esig]) out.push(s.h.buffer, s.d.buffer, s.t.buffer);
     return out;
   }
   return { handle, transfers };

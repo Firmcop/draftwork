@@ -288,7 +288,7 @@ const opOptions = [['join', 'Join'], ['cut', 'Cut'], ['intersect', 'Intersect'],
 // ---------- command dialog ----------
 function openFeatureDialog(fid, isNew, snapshot) {
   if (dlg) closeDialog(true);
-  dlg = { fid, isNew, snapshot: snapshot || JSON.stringify(doc), undoLen: history.undo.length };
+  dlg = { fid, isNew, snapshot: snapshot || leanJSON(doc), undoLen: history.undo.length };
   selFeature = fid;
   rerenderDialog(); updateScene(); renderTimeline(); renderBrowser();
 }
@@ -527,7 +527,7 @@ function featureFields(f, idx) {
     }
     case 'import': {
       const file = doc.files?.[f.file];
-      out.push(section_('File', h('dl', { class: 'stat' }, h('dt', {}, 'Name'), h('dd', {}, file?.name || 'missing'), h('dt', {}, 'Size'), h('dd', {}, file ? fix(file.text.length / 1024, 0) + ' KB' : '—'),
+      out.push(section_('File', h('dl', { class: 'stat' }, h('dt', {}, 'Name'), h('dd', {}, file?.name || 'missing'), h('dt', {}, 'Size'), h('dd', {}, file ? fix((file.text?.length || 0) / 1024, 0) + ' KB' : '—'),
         h('dt', {}, 'Bodies'), h('dd', {}, String([...result.bodies.values()].filter(b => b.feature === f.id).length))),
         h('p', { class: 'note' }, 'Imported geometry is fixed. Add features after it to change it.')));
       break;
@@ -554,7 +554,7 @@ function closeDialog(ok, silent) {
   if (!ok && !silent) {
     const changed = d.isNew || history.undo.length > d.undoLen;
     if (changed) {
-      doc = JSON.parse(d.snapshot);
+      doc = reviveDoc(JSON.parse(d.snapshot));
       history.undo.length = d.isNew ? Math.max(0, d.undoLen - 1) : d.undoLen;
       lastTag = null;
       if (d.isNew) selFeature = null;

@@ -273,12 +273,12 @@ function toggleJointSuppressed(id) { const j = joints().find(x => x.id === id); 
 function newJoint(asBuilt = false) {
   if (!isBrep()) { toast(engineState === 'loading' ? 'The exact geometry engine is still loading. Try again in a moment.' : 'Joints need the exact geometry engine, which could not start here: ' + engineMsg); return; }
   if (!comps().length) { toast('Make a component first (Assemble ▸ New Component). Bodies outside components stay fixed.'); return; }
-  const snap = JSON.stringify(doc); checkpoint();
+  const snap = leanJSON(doc); checkpoint();
   const j = { id: uid(), name: (asBuilt ? 'As-built Joint ' : 'Joint ') + (joints().length + 1), type: 'rigid', a: null, b: null, angle: 0, distance: 0, x: 0, y: 0, pitch: 0, roll: 0, offset: 0, flip: !!asBuilt, ...(asBuilt ? { asBuilt: true } : {}) };
   joints().push(j);
   openJointDialog(j.id, snap, 'a');
 }
-function editJoint(id) { const snap = JSON.stringify(doc); openJointDialog(id, snap, null); }
+function editJoint(id) { const snap = leanJSON(doc); openJointDialog(id, snap, null); }
 function openJointDialog(id, snap, stage) {
   stopJointAnim();
   jointEdit = { id, stage };
@@ -340,7 +340,7 @@ function openJointDialog(id, snap, stage) {
       if (j && (!j.a || !j.b)) { doc.joints = joints().filter(x => x.id !== id); toast('The joint needs two origins, so it was not added'); }
       jointEdit = null; persist(); assemblyChanged(); renderBrowser(); defaultHint();
     },
-    onCancel: () => { stopJointAnim(); jointEdit = null; doc = JSON.parse(snap); afterDocReplace(); assemblyChanged(); defaultHint(); },
+    onCancel: () => { stopJointAnim(); jointEdit = null; doc = reviveDoc(JSON.parse(snap)); afterDocReplace(); assemblyChanged(); defaultHint(); },
   });
   assemblyChanged(); defaultHint();
 }

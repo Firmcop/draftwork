@@ -64,14 +64,28 @@ async function startEngine() {
 }
 
 // ---- results ----
-function ingestMesh(p) { if (p) { shapeData.set(p.tok, { p }); meshWanted.delete(p.tok); } }
+function ingestMesh(p) { if (p) { shapeData.set(p.tok, { p }); meshWanted.delete(p.tok); if (!p.fsig) sigQueue.push(p.tok), pumpSigs(); } }
+const sigQueue = [], sigWanted = new Set(); let sigBusy = false;
+async function pumpSigs() {
+  if (sigBusy) return; sigBusy = true;
+  try {
+    while (sigQueue.length) {
+      const t = sigQueue.shift(), d = shapeData.get(t); if (!d || d.p.fsig || sigWanted.has(t)) continue;
+      sigWanted.add(t);
+      try { const r = await engineCall('sigs', { tok: t }); const d2 = shapeData.get(t); if (r && d2) { d2.p.fsig = r.fsig; d2.p.esig = r.esig; delete d2.fsigM; delete d2.esigM; } } catch (e) { }
+      sigWanted.delete(t);
+    }
+  } finally { sigBusy = false; }
+}
 function proxy(b) {
   const k = `${b.id}|${b.shape}|${b.name}|${b.feature}`;
   return proxyPool.get(k) || b;
 }
 async function engineRegen(features, rollback) {
+  await loadDerivedResults(features);
   const r = await engineCall('regen', { features, rollback });
   for (const t of r.freed) shapeData.delete(t);
+  if (r.derived?.length) engineCall('derived', { keys: r.derived }).then(list => { for (const [k, brep] of list) if (brep.length) { payloadSave('res:' + k, brep); derivedLoaded.add(k); } }).catch(() => { });
   r.meshes.forEach(ingestMesh);
   for (const [t, pos, idx, groups] of r.meshData || []) {
     const flat = new Float32Array(idx.length * 3); for (let i = 0; i < idx.length; i++) { flat[3 * i] = pos[3 * idx[i]]; flat[3 * i + 1] = pos[3 * idx[i] + 1]; flat[3 * i + 2] = pos[3 * idx[i] + 2]; }
@@ -102,7 +116,28 @@ const meshGeoms = new Map();   // mesh token -> { geom (non-indexed), groups }
 function engineMeshFile(fileId, name, data, binary) { return engineCall('meshfile', { fileId, name, data, binary }); }
 function brepSection(items, o) { return engineCall('section', { items: items.map(({ shape, place }) => ({ tok: shape, place })), ...o }); }
 function brepProject(items, kinds, cams) { return engineCall('project', { items: items.map(({ id, shape, place }) => ({ id, tok: shape, place })), kinds, cams: cams || {} }); }
-async function brepImportSTEP(fileId, text) { const n = await engineCall('import', { fileId, text }); importsRead.add(fileId); return n; }
+// STEP is parsed once; the solids are then kept in the engine's own format, so reopening or inserting skips parsing
+async function brepImportSTEP(fileId, text) {
+  const r = await engineCall('import', { fileId, text, wantBrep: true }); importsRead.add(fileId);
+  if (r?.brep?.length) payloadSave('brep:' + fileId, r.brep);
+  return r?.n ?? r;
+}
+async function brepImportCached(fileId, brep) { const n = await engineCall('importbrep', { fileId, brep }); importsRead.add(fileId); return n; }
+async function cachedPayload(key) {
+  if (payloadMap().has(key)) return payloadMap().get(key);
+  try { const rec = await libTx('payloads', 'readonly', st => st ? st.get(key) : null); if (rec) { payloadMap().set(key, rec.v); return rec.v; } } catch (e) { }
+  return null;
+}
+// results of inserted designs: load saved ones into the engine before a rebuild, keep new ones
+const derivedLoaded = new Set();
+async function loadDerivedResults(features) {
+  for (const f of features) {
+    if (f.type !== 'derive' || !f.resKey || derivedLoaded.has(f.resKey)) continue;
+    derivedLoaded.add(f.resKey);
+    const brep = await cachedPayload('res:' + f.resKey);
+    if (brep?.length) { try { await engineCall('derivebrep', { key: f.resKey, brep }); } catch (e) { derivedLoaded.delete(f.resKey); } }
+  }
+}
 function brepSTEP(items) { return engineCall('step', { items: items.map(({ shape, name, color, place }) => ({ tok: shape, name, color, place })) }); }
 
 // ---- per-body data for display and picking ----
@@ -125,9 +160,21 @@ function brepMeshOf(rec) {
 }
 function brepGeomNI(rec) { const d = shapeData.get(rec.shape); if (!d) return brepMeshOf(rec).display; return d.ni || (d.ni = brepMeshOf(rec).display.toNonIndexed()); }
 function brepSigMap(rec, kind) {
-  const d = shapeData.get(rec.shape); if (!d?.p.fsig) return new Map();
+  const d = shapeData.get(rec.shape); if (!d) return new Map();
+  if (!d.p.fsig) { if (!sigQueue.includes(rec.shape)) sigQueue.unshift(rec.shape); pumpSigs(); return new Map(); }   // arriving in a moment
   const k = kind === 'face' ? 'fsig' : 'esig';
-  return d[k + 'M'] || (d[k + 'M'] = new Map(d.p[k]));
+  return d[k + 'M'] || (d[k + 'M'] = unpackSigs(d.p[k]));
+}
+// signatures arrive packed (see enginehost.js packSigs); objects are made only when a body is first picked
+function unpackSigs(P) {
+  if (!P?.packed) return new Map(P || []);
+  const out = new Map();
+  for (let i = 0; i < P.h.length; i++) {
+    const s = { type: P.types[P.t[i]] }; let o = i * P.width;
+    for (const [k, len] of P.keys) { const v0 = P.d[o]; if (!Number.isNaN(v0)) s[k] = len === 1 ? v0 : Array.from(P.d.subarray(o, o + len)); o += len; }
+    out.set(P.h[i], s);
+  }
+  return out;
 }
 function brepProps(rec) {
   const d = shapeData.get(rec.shape), pr = d?.p.props;
