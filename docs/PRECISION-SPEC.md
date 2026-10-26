@@ -144,11 +144,31 @@ Verification: `node scripts/build.mjs && node tests/e2e-drawing4.mjs`.
 By hand: make a drawing, add a hole callout (Annotate ▸ Hole / Thread Callout) and a dimension, then change the model in Design:
 the drawing says OUT OF DATE; Update shows the new values with Δ markers.
 
-## Module C and later phases
+## Phase 5 — advanced capabilities (v0.41)
 
-| Phase | Scope | Status |
+| Requirement | Status | Notes |
 |---|---|---|
-| 5 Advanced | ball/planar suggestions, alignment inference, GD&T, datum, surface finish, welding symbols, drawing checks | open |
+| C3 auxiliary views | done | from an inclined edge on a principal view; exact projection square-on to the face (tested to 0.01 mm); VIEW letter and viewing arrow |
+| C3 broken views | done | horizontal or vertical band removed; dimensions across it keep the true length; break lines; centre marks and centrelines in the band skipped |
+| C4 GD&T feature control frames | done | 14 characteristics as vector glyphs, Ø zone, Ⓜ/Ⓛ, three datums with modifiers |
+| C4 datum references | done | datum feature symbols; letters skip I, O, Q |
+| C4 surface finish | done | ISO 1302: any process, removal required, removal not permitted; Ra and method |
+| C4 welding symbols | done | fillet, square, V, bevel, plug; arrow / other / both sides; size, length, all-around, field weld, tail note |
+| C4 never invent values | done | empty tolerance prints “?” and is an error in the check |
+| Automated drawing checks | done | out of date, flagged / lost / unspecified annotations, GD&T rules (tolerance, datum required / forbidden, undefined or duplicate datums), views off the border or over the title block, overlaps, empty title fields, approval, duplicate dimensions |
+| D6 assembly snap categories, enable/disable | done | per type in the joint dialog, kept per browser |
+| D6 temporary override | done | Ctrl: faces and axes only |
+| A2 collinear / equal / symmetry inference | open | |
+| D1 edge intersections, construction planes and axes as joint origins | open | |
+| D3 centering between faces, hole-pattern alignment | open | |
+| C5 links to component drawings | open | |
+
+Verification: `node scripts/build.mjs && node tests/e2e-drawing5.mjs`.
+
+## Remaining open items
+
+Collinear / equal / symmetry inference in sketches; edge intersections and construction planes / axes as joint origins;
+centering between faces and hole-pattern alignment in assemblies; links from assembly drawings to component drawings.
 
 ## Phase 1 verification
 

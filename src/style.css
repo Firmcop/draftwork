@@ -547,3 +547,11 @@ table.grid tr.sel td { background: color-mix(in srgb, var(--accent) 22%, transpa
 .dwstale .msg { line-height: 1.35; }
 #sheetSvg .warn { stroke: var(--err); fill: none; }
 #sheetSvg text.warn, #sheetSvg .ink-text.warn { fill: var(--err); stroke: none; }
+
+/* drawing check list */
+.dwcheck { display: flex; gap: 10px; width: 100%; text-align: left; align-items: baseline; padding: 6px 8px; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--fg); font: inherit; font-size: 12.5px; cursor: pointer; }
+.dwcheck:hover { background: var(--hover); }
+.dwcheck .lvl { flex: 0 0 62px; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; }
+.dwcheck.lvl-error .lvl { color: var(--err); }
+.dwcheck.lvl-warning .lvl { color: var(--select); }
+.dwcheck.lvl-info .lvl { color: var(--muted); }

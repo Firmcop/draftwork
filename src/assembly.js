@@ -308,6 +308,9 @@ function openJointDialog(id, snap, stage) {
           num('offset', 'Offset', 'mm'), j.asBuilt ? null : h('label', { class: 'chk', for: 'jt-flip' }, flip, 'Flip (same direction instead of facing)'),
           dofs.length ? h('div', { class: 'row' }, h('span', { class: 'rl' }), animBtn) : null),
         section_('Name', h('div', { class: 'row' }, h('label', { class: 'rl', for: 'jt-name' }, 'Name'), nameI)),
+        section_('Snap to', h('div', { class: 'snapcats' }, ...[['vertex', 'Vertices'], ['midpoint', 'Edge midpoints'], ['center', 'Circle centres'], ['axis', 'Axes'], ['face', 'Face centres'], ['origin', 'Component origins']].map(([k, label]) => {
+          const c = h('input', { type: 'checkbox', id: 'js-' + k, checked: asmSnap[k] !== false }); c.addEventListener('change', () => setAsmSnap(k, c.checked)); return h('label', { class: 'chk', for: 'js-' + k }, c, label); })),
+          h('p', { class: 'note', style: 'margin:4px 0 0' }, 'Hold Ctrl (⌘ on a Mac) to pick only faces and axes.')),
       ];
     },
     onOK: () => {
@@ -362,6 +365,9 @@ const endType = e => !e ? null : e.kind === 'ref' ? e.ref.type : e.kind === 'edg
 
 // ---------- AssemblyPlacementEngine: references under the cursor while a joint origin is picked ----------
 let refHover = null;   // { x, y, body, list: [ref + { d, w: world point }], idx }
+// which reference types joint picking snaps to (kept per browser); Ctrl held = faces and axes only
+var asmSnap = (() => { try { return { vertex: true, midpoint: true, center: true, axis: true, face: true, origin: true, ...JSON.parse(localStorage.getItem('draftwork.asmsnap') || '{}') }; } catch (e) { return { vertex: true, midpoint: true, center: true, axis: true, face: true, origin: true }; } })();
+function setAsmSnap(k, on) { asmSnap[k] = on; try { localStorage.setItem('draftwork.asmsnap', JSON.stringify(asmSnap)); } catch (e) { } }
 function refHoverAt(e) {
   raycaster.setFromCamera(ndcOf(e), camera); scene.updateMatrixWorld();
   const meshes = []; for (const [, sb] of shownBodies) if (sb.mesh.visible && sb.rec.shape) meshes.push(sb.mesh);
@@ -389,7 +395,8 @@ function refHoverAt(e) {
     }
     cands.push({ ...ref, d, w: [w.x, w.y, w.z] });
   }
-  const list = rankRefs(cands, 16).slice(0, 8);
+  const allow = c => asmSnap[c.type] !== false && !(e.ctrlKey || e.metaKey ? !['face', 'axis'].includes(c.type) : false);
+  const list = rankRefs(cands.filter(allow), 16).slice(0, 8);
   return { x: e.clientX, y: e.clientY, body, list, idx: 0 };
 }
 function refHoverHint() {

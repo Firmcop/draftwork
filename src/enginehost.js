@@ -168,7 +168,9 @@ function engineHost(RCmod) {
           for (const kind of a.kinds) {
             // replicad names views by the direction it looks along and its camera direction points toward the viewer,
             // so the true top view (X right, Y up) is its 'bottom', the true right view (Y right, Z up) its 'left'
-            const cam = kind === 'iso' ? new RC.ProjectionCamera([0, 0, 0], [1, -1, 1], [1, 1, 0]) : (TRUE_VIEW[kind] || kind);
+            // auxiliary views: a camera direction (toward the viewer) and an x axis given by the page
+            const aux = kind.startsWith('aux:') ? a.cams?.[kind] : null;
+            const cam = aux ? new RC.ProjectionCamera([0, 0, 0], aux.dir, aux.x) : kind === 'iso' ? new RC.ProjectionCamera([0, 0, 0], [1, -1, 1], [1, 1, 0]) : (TRUE_VIEW[kind] || kind);
             const { visible, hidden } = RC.drawProjection(all, cam);
             let bb = null; try { bb = visible.boundingBox.bounds; } catch (e) { }
             out[kind] = { vis: flat(visible.toSVGPaths()), hid: flat(hidden.toSVGPaths()), bbox: bb };

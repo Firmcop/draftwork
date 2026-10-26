@@ -22,7 +22,7 @@ function dw() {
 }
 const dwSheets = () => doc.drawing?.sheets || [];
 function replaceSheet(obj) { const R = doc.drawing, i = R.sheets.findIndex(s => s.id === obj.id); if (i >= 0) R.sheets[i] = obj; }
-const vk = v => v.kind === 'section' ? 'sec:' + v.id : v.kind === 'detail' ? (viewById(v.of) ? vk(viewById(v.of)) : 'none') : v.kind;     // key of a view's geometry in dwData
+const vk = v => v.kind === 'aux' ? 'aux:' + v.id : v.kind === 'section' ? 'sec:' + v.id : v.kind === 'detail' ? (viewById(v.of) ? vk(viewById(v.of)) : 'none') : v.kind;     // key of a view's geometry in dwData
 const sheetSize = () => { const D = dw(); return D?.sheet === 'custom' && D.size?.[0] > 0 && D.size?.[1] > 0 ? [+D.size[0], +D.size[1]] : SHEETS[D?.sheet] || SHEETS.A3; };
 const sheetLabel = D => D?.sheet === 'custom' ? `${+D.size?.[0] || 0} × ${+D.size?.[1] || 0}` : D?.sheet || 'A3';
 // First-angle (ISO E) puts the top view below the front view and the right view on its left; third-angle (ISO A, US) the opposite
@@ -127,6 +127,12 @@ function viewPos(v, depth = 0) {
 function viewXf(v) {
   if (v.kind === 'detail') { const s = dw().scale * (+v.k || 2), c = v.c; return { s, x: v.x, y: v.y, toSheet: ([x, y]) => [v.x + s * (x - c[0]), v.y + s * (y - c[1])], toLocal: ([X, Y]) => [(X - v.x) / s + c[0], (Y - v.y) / s + c[1]], clip: { cx: v.x, cy: v.y, r: s * v.r } }; }
   const d = dwData[vk(v)], s = dw().scale, [vx, vy] = viewPos(v);
+  if (v.brk && d) {
+    // broken view: the band (a, b) shrinks to a small gap on paper; positions outside it keep their model distances
+    const B = breakMap(v, d, s), cen = [B.ax === 0 ? B.mid : d.cx, B.ax === 1 ? B.mid : d.cy];
+    const fw = q => B.ax === 0 ? [B.c(q[0]), q[1]] : [q[0], B.c(q[1])], bw = q => B.ax === 0 ? [B.ci(q[0]), q[1]] : [q[0], B.ci(q[1])];
+    return { s, x: vx, y: vy, brk: true, toSheet: q => { const c = fw(q); return [vx + s * (c[0] - cen[0]), vy + s * (c[1] - cen[1])]; }, toLocal: ([X, Y]) => bw([(X - vx) / s + cen[0], (Y - vy) / s + cen[1]]) };
+  }
   return { s, x: vx, y: vy, toSheet: ([x, y]) => [vx + s * (x - (d?.cx || 0)), vy + s * (y - (d?.cy || 0))], toLocal: ([X, Y]) => [(X - vx) / s + (d?.cx || 0), (Y - vy) / s + (d?.cy || 0)] };
 }
 function segsToD(segs, f) {
@@ -207,10 +213,12 @@ function dwOrient() {
 async function dwRefresh(force) {
   if (!isBrep()) return;
   const allViews = dwSheets().flatMap(s => s.views || []);   // one projection serves every sheet
-  const kinds = [...new Set(['front', 'top', 'right', 'iso', ...allViews.filter(v => v.kind !== 'section' && v.kind !== 'detail').map(v => v.kind)])];
+  const kinds = [...new Set(['front', 'top', 'right', 'iso', ...allViews.filter(v => v.kind !== 'section' && v.kind !== 'detail' && v.kind !== 'aux').map(v => v.kind)])];
+  const cams = Object.fromEntries(allViews.filter(v => v.kind === 'aux' && v.cam).map(v => ['aux:' + v.id, v.cam]));
+  kinds.push(...Object.keys(cams));
   const secs = allViews.filter(v => v.kind === 'section').map(v => ({ id: v.id, of: v.of, axis: v.axis, value: v.value, removeAbove: v.removeAbove }));
   const R = doc.drawing, fp = modelFingerprint();
-  const covers = c => c && kinds.every(k => k in c.raw) && secs.every(sc => ('sec:' + sc.id) in c.raw && c.secKeys?.[sc.id] === sectionKey(sc));
+  const covers = c => c && kinds.every(k => k in c.raw && (!cams[k] || c.camKeys?.[k] === JSON.stringify(cams[k]))) && secs.every(sc => ('sec:' + sc.id) in c.raw && c.secKeys?.[sc.id] === sectionKey(sc));
   // a new drawing reuses the views just made for it
   if (R && !R.cache && dwLastRaw?.fp === fp && covers(dwLastRaw)) R.cache = dwLastRaw;
   if (R?.cache && !force && covers(R.cache)) {
@@ -227,12 +235,12 @@ async function dwRefresh(force) {
   const p = (async () => {
     $('#busy').hidden = false;
     try {
-      const raw = items.length ? await brepProject(items, kinds) : {};
+      const raw = items.length ? await brepProject(items, kinds, cams) : {};
       const data = {}, keep = {}, secKeys = {};
       for (const k of kinds) { const v = prepView(raw[k]); if (v) { data[k] = v; keep[k] = raw[k]; } }
       for (const sc of secs) { const r = items.length ? await brepSection(items, { kind: sc.of, axis: sc.axis, value: sc.value, removeAbove: sc.removeAbove }) : null; const v = prepView(r); if (v) { data['sec:' + sc.id] = v; keep['sec:' + sc.id] = r; secKeys[sc.id] = sectionKey(sc); } }
       dwData = data; dwKey = key;
-      dwLastRaw = { fp, raw: keep, secKeys };
+      dwLastRaw = { fp, raw: keep, secKeys, camKeys: Object.fromEntries(Object.entries(cams).map(([k, c]) => [k, JSON.stringify(c)])) };
       const D = doc.drawing;
       if (D) {
         D.cache = dwLastRaw;
@@ -278,6 +286,11 @@ function relayoutAuto() {
 function drawingHint() {
   if (dwTool === 'dim') return dwDraft?.p2 ? 'Move to place the dimension and click. Above or below gives horizontal, beside gives vertical, in between gives aligned' : dwDraft ? 'Click the second point on the same view' : 'Click a point on a view (corners and circle centers snap) · Esc cancels';
   if (dwTool === 'dia') return 'Click a circle, then click where the label goes · Esc cancels';
+  if (dwTool === 'sym:fcf' || dwTool === 'sym:finish') return dwDraft ? 'Click where the symbol goes' : 'Click the feature the leader points to (Shift-click to place the symbol without a leader) · Esc cancels';
+  if (dwTool === 'sym:datum') return dwDraft ? 'Click where the datum letter box goes' : 'Click the datum feature (an edge or face on a view) · Esc cancels';
+  if (dwTool === 'sym:weld') return dwDraft ? 'Click where the reference line starts' : 'Click the joint the weld arrow points to · Esc cancels';
+  if (dwTool === 'aux') return dwDraft ? 'Click on the sheet where the auxiliary view goes (on the side you look from)' : 'Click an inclined edge on a front, top or side view: the auxiliary view looks square-on at that face · Esc cancels';
+  if (dwTool === 'break') return dwDraft ? 'Click the other end of the stretch to cut out' : 'Click where the break starts on a long view · Esc cancels';
   if (dwTool === 'callout') return 'Click a hole or thread (a circle on a view), then click where the callout goes. The text comes from the hole or thread feature · Esc cancels';
   if (dwTool === 'rad') return 'Click a circle or arc (fillets too), then click where the label goes · Esc cancels';
   if (dwTool === 'ang') return dwDraft?.l2 ? 'Move to choose which angle and click to place it' : dwDraft ? 'Click the second edge on the same view' : 'Click an edge on a view · Esc cancels';
@@ -332,16 +345,20 @@ function displayList() {
   // views
   for (const v of D.views) {
     const d = dwData[vk(v)]; if (!d) continue;
-    const X = viewXf(v), tag = 'v:' + v.id, cl = X.clip, P = s => cl ? clipD(s, cl) : s;
-    if (!cl) for (const p of d.cut || []) L.push({ t: 'hatch', d: segsToD(p.segs, X.toSheet), tag });
-    if (v.hidden) for (const p of d.hid) { const s = P(segsToD(p.segs, X.toSheet)); if (s) path(s, { w: 0.18, dash: [1.5, 0.8], tag }); }
-    for (const p of d.vis) { const s = P(segsToD(p.segs, X.toSheet)); if (s) path(s, { w: 0.35, tag }); }
+    const X = viewXf(v), tag = 'v:' + v.id, cl = X.clip, P = s => cl ? clipD(s, cl) : s, SG = sg => v.brk ? clipBand(sg, v.brk) : sg;
+    if (!cl) for (const p of d.cut || []) { const sd = segsToD(SG(p.segs), X.toSheet); if (sd) L.push({ t: 'hatch', d: sd, tag }); }
+    if (v.hidden) for (const p of d.hid) { const s = P(segsToD(SG(p.segs), X.toSheet)); if (s) path(s, { w: 0.18, dash: [1.5, 0.8], tag }); }
+    for (const p of d.vis) { const s = P(segsToD(SG(p.segs), X.toSheet)); if (s) path(s, { w: 0.35, tag }); }
+    if (v.brk) breakLineItems(v, d, X, path, tag);
+    if (v.kind === 'aux') text(X.x, X.y + X.s * d.h / 2 + 7, `VIEW ${v.label}`, 3, { anchor: 'middle', bold: true, tag });
+    for (const av of D.views) if (av.kind === 'aux' && av.parentView === v.id && av.edge) auxArrowItems(av, v, X, path, text);
     if (cl) {   // detail view: its boundary and label
       path(circleD(cl.cx, cl.cy, cl.r), { w: 0.25, tag });
       text(cl.cx, cl.cy + cl.r + 7, `DETAIL ${v.label} (${scaleLabel(X.s)})`, 3, { anchor: 'middle', bold: true, tag });
     }
     // centrelines of holes and shafts seen from the side
     if (v.kind !== 'iso' && v.centers !== false) for (const a of d.axes || []) {
+      if (v.brk) { const k = v.brk.dir === 'h' ? 0 : 2; if (Math.min(a[k], a[k + 2]) < v.brk.b && Math.max(a[k], a[k + 2]) > v.brk.a) continue; }   // skip centrelines cut by a break
       const A = X.toSheet([a[0], a[1]]), B = X.toSheet([a[2], a[3]]), l = Math.hypot(B[0] - A[0], B[1] - A[1]); if (l < 0.5) continue;
       const u = [(B[0] - A[0]) / l, (B[1] - A[1]) / l], s = P(`M${A[0] - u[0] * 2} ${A[1] - u[1] * 2}L${B[0] + u[0] * 2} ${B[1] + u[1] * 2}`);
       if (s) path(s, { w: 0.13, dash: [4, 1, 0.6, 1], tag });
@@ -354,6 +371,7 @@ function displayList() {
     // centre marks on whole circles (not on fillet arcs)
     if (v.kind !== 'iso' && v.centers !== false) for (const c of d.circles) {
       if (!c.full || c.r * X.s < 0.75) continue;
+      if (v.brk) { const k = v.brk.dir === 'h' ? 0 : 1; if (c.c[k] + c.r > v.brk.a && c.c[k] - c.r < v.brk.b) continue; }
       const C = X.toSheet(c.c), e = c.r * X.s + 2, s = P(`M${C[0] - e} ${C[1]}H${C[0] + e}M${C[0]} ${C[1] - e}V${C[1] + e}`);
       if (s) path(s, { w: 0.13, dash: [4, 1, 0.6, 1], tag });
     }
@@ -365,6 +383,7 @@ function displayList() {
   if (dwStaleState) text(14, 17, 'OUT OF DATE: the model changed after this drawing was last updated', 3, { bold: true, tag: 'w:stale' });
   for (const b of D.balloons || []) balloonItems(b, path, text);
   for (const n of D.notes || []) noteItems(n, path, text);
+  for (const sy of D.symbols || []) symbolItems(sy, path, text);
   if ((dwDraft?.p2 || dwDraft?.l2) && dwCursor && dwTool !== 'section') dimItems({ ...dwDraft, kind: dwDraft.l2 ? 'ang' : undefined, id: '_draft', at: viewXf(viewById(dwDraft.view)).toLocal(dwCursor) }, path, text, true);
   return L;
 }
@@ -532,7 +551,7 @@ function renderSheet() {
   const defs = sv('defs', {}), pat = sv('pattern', { id: 'hatch45', patternUnits: 'userSpaceOnUse', width: 2.5, height: 2.5, patternTransform: 'rotate(45)' });
   pat.append(sv('line', { x1: 0, y1: 0, x2: 0, y2: 2.5, stroke: '#111', 'stroke-width': 0.18 })); defs.append(pat); sheetSvg.append(defs);
   sheetSvg.append(sv('rect', { x: 0, y: 0, width: W, height: H, class: 'paper' }));
-  const sel = dwSel ? ({ view: 'v:', dim: 'd:', balloon: 'b:', note: 'n:' }[dwSel.type]) + dwSel.id : null;
+  const sel = dwSel ? ({ view: 'v:', dim: 'd:', balloon: 'b:', note: 'n:', symbol: 's:' }[dwSel.type]) + dwSel.id : null;
   for (const it of displayList()) {
     const cls = (it.tag && it.tag === sel ? 'sel' : '') + (it.tag ? (it.tag.startsWith('w:') ? ' warn' : ' pick') : '');
     if (it.t === 'hatch') sheetSvg.append(sv('path', { d: it.d, fill: 'url(#hatch45)', 'fill-rule': 'evenodd', stroke: 'none', class: cls, 'data-tag': it.tag }));
@@ -591,7 +610,7 @@ function nearestCircle(P, wholeOnly) {
   return best;
 }
 function viewAt(P) {
-  for (const v of [...dw().views].reverse()) { const d = dwData[vk(v)]; if (!d) continue; if (v.kind === 'detail') { const X = viewXf(v); if (Math.hypot(P[0] - v.x, P[1] - v.y) <= X.clip.r + 2) return v; continue; } const s = dw().scale, m = 3, [vx, vy] = viewPos(v); if (Math.abs(P[0] - vx) <= s * d.w / 2 + m && Math.abs(P[1] - vy) <= s * d.h / 2 + m) return v; }
+  for (const v of [...dw().views].reverse()) { const d = dwData[vk(v)]; if (!d) continue; if (v.kind === 'detail') { const X = viewXf(v); if (Math.hypot(P[0] - v.x, P[1] - v.y) <= X.clip.r + 2) return v; continue; } const s = dw().scale, m = 3, [vx, vy] = viewPos(v), w = brokenWidth(v, d), hh = brokenHeight(v, d); if (Math.abs(P[0] - vx) <= s * w / 2 + m && Math.abs(P[1] - vy) <= s * hh / 2 + m) return v; }
   return null;
 }
 function wireSheet() {
@@ -605,14 +624,15 @@ function wireSheet() {
   sheetSvg.addEventListener('dblclick', e => { if (dwTool) return; const P = sheetPoint(e), [W, H] = sheetSize(); if (P[0] >= W - 10 - TB.w && P[0] <= W - 10 && P[1] >= H - 10 - TB.h && P[1] <= H - 10) dwSheetDialog(); });
   sheetSvg.addEventListener('pointerdown', e => {
     const P = sheetPoint(e);
-    if (e.button === 1 || (e.button === 0 && !dwTool && !viewAt(P) && !e.target.closest('[data-tag^="d:"], [data-tag^="b:"], [data-tag^="n:"]'))) { drag = { pan: true, x: e.clientX, y: e.clientY, cam: { ...dwCam } }; sheetSvg.setPointerCapture(e.pointerId); return; }
+    if (e.button === 1 || (e.button === 0 && !dwTool && !viewAt(P) && !e.target.closest('[data-tag^="d:"], [data-tag^="b:"], [data-tag^="n:"], [data-tag^="s:"]'))) { drag = { pan: true, x: e.clientX, y: e.clientY, cam: { ...dwCam } }; sheetSvg.setPointerCapture(e.pointerId); return; }
     if (e.button !== 0) return;
     if (dwTool) return;                                  // tools act on click (pointerup)
-    const objTag = e.target.closest('[data-tag^="b:"], [data-tag^="n:"]')?.getAttribute('data-tag'), dimTag0 = e.target.closest('[data-tag^="d:"]')?.getAttribute('data-tag');
+    const objTag = e.target.closest('[data-tag^="b:"], [data-tag^="n:"], [data-tag^="s:"]')?.getAttribute('data-tag'), dimTag0 = e.target.closest('[data-tag^="d:"]')?.getAttribute('data-tag');
     const twice = (tg) => { const now = performance.now(), hit = lastTap?.tag === tg && now - lastTap.t < 450; lastTap = { tag: tg, t: now }; return hit; };   // our own double-click: re-rendering on the first click would swallow the browser's
     if (objTag && objTag[0] === 'n' && twice(objTag)) { noteEditDialog(objTag.slice(2)); return; }
+    if (objTag && objTag[0] === 's' && twice(objTag)) { symbolEditDialog(objTag.slice(2)); return; }
     if (dimTag0 && twice(dimTag0)) { dimEditDialog(dimTag0.slice(2)); return; }
-    if (objTag) { const list = objTag[0] === 'b' ? dw().balloons : dw().notes, o = list.find(x => x.id === objTag.slice(2)); dwSel = { type: objTag[0] === 'b' ? 'balloon' : 'note', id: o.id }; drag = { obj: o, start: P, at0: [...o.at], moved: false }; sheetSvg.setPointerCapture(e.pointerId); renderSheet(); return; }
+    if (objTag) { const list = objTag[0] === 'b' ? dw().balloons : objTag[0] === 's' ? symList() : dw().notes, o = list.find(x => x.id === objTag.slice(2)); dwSel = { type: { b: 'balloon', s: 'symbol', n: 'note' }[objTag[0]], id: o.id }; drag = { obj: o, start: P, at0: [...o.at], moved: false }; sheetSvg.setPointerCapture(e.pointerId); renderSheet(); return; }
     const dimTag = e.target.closest('[data-tag^="d:"]')?.getAttribute('data-tag');
     if (dimTag) { const m = dw().dims.find(x => x.id === dimTag.slice(2)); dwSel = { type: 'dim', id: m.id }; drag = { dim: m, start: P, at0: [...dimGeom(m).at], moved: false }; sheetSvg.setPointerCapture(e.pointerId); renderSheet(); return; }
     const v = viewAt(P);
@@ -642,6 +662,8 @@ function wireSheet() {
     if (dwTool === 'dim') { dwHover = dwDraft?.p2 ? null : nearestSnap(P, dwDraft?.view); renderSheet(); }
     else if (dwTool === 'dia' || dwTool === 'rad' || dwTool === 'callout') { dwHover = dwDraft ? null : nearestCircle(P, dwTool === 'dia'); renderSheet(); }
     else if (dwTool === 'ang') { dwHover = dwDraft?.l2 ? null : nearestLine(P, dwDraft?.view); renderSheet(); }
+    else if (dwTool === 'aux') { dwHover = dwDraft ? null : nearestLine(P); renderSheet(); }
+    else if (dwTool?.startsWith('sym:')) { dwHover = dwDraft ? null : nearestSnap(P); renderSheet(); }
     else if (dwTool === 'section') { dwHover = dwDraft?.line ? null : nearestSnap(P, dwDraft?.view) || (viewAt(P) && { view: viewAt(P).id, free: true }); renderSheet(); }
     else if (dwTool === 'detail' || dwTool === 'balloon' || dwTool === 'note') renderSheet();
   });
@@ -650,6 +672,9 @@ function wireSheet() {
     if (d) { if (d.moved) persist(); return; }
     if (e.button !== 0) return;
     const P = sheetPoint(e);
+    if (dwTool?.startsWith('sym:')) { symbolToolClick(P, e); return; }
+    if (dwTool === 'aux') { auxToolClick(P); dwHover = null; renderSheet(); return; }
+    if (dwTool === 'break') { breakToolClick(P); renderSheet(); return; }
     if (dwTool === 'dim') {
       if (!dwDraft) { const s = nearestSnap(P); if (s) dwDraft = { view: s.view, p1: s.p }; }
       else if (!dwDraft.p2) { const s = nearestSnap(P, dwDraft.view); if (s && Math.hypot(s.p[0] - dwDraft.p1[0], s.p[1] - dwDraft.p1[1]) > 1e-6) dwDraft.p2 = s.p; else if (!s) toast('Click a point on the same view'); }
@@ -737,6 +762,7 @@ function dwDeleteSel() {
   if (dwSel.type === 'dim') dw().dims = dw().dims.filter(m => m.id !== dwSel.id);
   else if (dwSel.type === 'balloon') dw().balloons = (dw().balloons || []).filter(m => m.id !== dwSel.id);
   else if (dwSel.type === 'note') dw().notes = (dw().notes || []).filter(m => m.id !== dwSel.id);
+  else if (dwSel.type === 'symbol') dw().symbols = symList().filter(m => m.id !== dwSel.id);
   else {
     for (const c of dw().views) if (c.parent === dwSel.id) { const [x, y] = viewPos(c); c.x = x; c.y = y; delete c.parent; }
     dw().views = dw().views.filter(v => v.id !== dwSel.id && !(v.kind === 'detail' && v.of === dwSel.id)); dw().dims = dw().dims.filter(m => m.view !== dwSel.id); dw().balloons = (dw().balloons || []).filter(b => b.view !== dwSel.id);
