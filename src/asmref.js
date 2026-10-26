@@ -6,8 +6,10 @@
 //   type: 'vertex' | 'midpoint' | 'center' | 'axis' | 'face' | 'origin'
 //   p is the exact point, z the joint direction (face normal or axis), x an optional in-plane direction.
 // The cursor only chooses among candidates; every position comes from the geometry.
-const REF_PRIO = { vertex: 0, center: 0, origin: 0, midpoint: 1, axis: 2, face: 3 };
-const REF_LABEL = { vertex: 'Vertex', midpoint: 'Edge midpoint', center: 'Circle center', axis: 'Axis', face: 'Face center', origin: 'Component origin' };
+const REF_PRIO = { vertex: 0, center: 0, origin: 0, cpoint: 0, intersection: 0.5, midpoint: 1, axis: 2, caxis: 2, face: 3, between: 3.2, cplane: 3.5 };
+const REF_LABEL = { vertex: 'Vertex', midpoint: 'Edge midpoint', center: 'Circle center', axis: 'Axis', face: 'Face center', origin: 'Component origin', intersection: 'Edge intersection', between: 'Centre between faces', cpoint: 'Construction point', caxis: 'Construction axis', cplane: 'Plane' };
+// reference types grouped by how they behave for joint suggestions
+const REF_KIND = { vertex: 'point', intersection: 'point', cpoint: 'point', origin: 'point', midpoint: 'point', center: 'round', axis: 'axis', caxis: 'axis', face: 'face', between: 'face', cplane: 'face' };
 const vr = {
   sub: (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], add: (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]],
   mul: (a, s) => [a[0] * s, a[1] * s, a[2] * s], dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
@@ -17,7 +19,7 @@ const vr = {
 };
 // Candidate references on one body for a cursor over face `face` (its sig) with surface normal `hitN` there.
 // `edges` is the body's edge signatures. Callers filter by screen distance; this returns them all.
-function bodyRefs(edges, face, hitN) {
+function bodyRefs(edges, face, hitN, faces) {
   const out = [], zf = face?.type === 'PLANE' && face.n ? vr.norm(face.n) : vr.norm(hitN || [0, 0, 1]);
   const zsrc = face?.type === 'PLANE' ? { kind: 'face', sig: face } : null;
   // a line joining two circles is a cylinder's seam, not a real edge: no references on it
@@ -36,7 +38,24 @@ function bodyRefs(edges, face, hitN) {
       out.push({ type: 'center', p: s.cc, z, src: { kind: 'edge', sig: s } });
     }
   }
-  if (face?.type === 'PLANE' && face.c && face.n) out.push({ type: 'face', p: face.c, z: vr.norm(face.n), src: { kind: 'face', sig: face } });
+  if (face?.type === 'PLANE' && face.c && face.n) {
+    out.push({ type: 'face', p: face.c, z: vr.norm(face.n), src: { kind: 'face', sig: face } });
+    // where two edges of this face would meet if extended (the sharp corner under a chamfer or fillet)
+    const n = vr.norm(face.n), inPlane = q => Math.abs(vr.dot(vr.sub(q, face.c), n)) < 1e-6;
+    const ls = edges.filter(e => e.type === 'LINE' && e.a && e.b && inPlane(e.a) && inPlane(e.b)).slice(0, 80);
+    const verts = ls.flatMap(e => [e.a, e.b]);
+    for (let i = 0; i < ls.length; i++) for (let j = i + 1; j < ls.length; j++) {
+      const q = lineMeet(ls[i], ls[j]); if (!q || verts.some(v => vr.dist(v, q) < 1e-6) || out.some(r => r.type === 'intersection' && vr.dist(r.p, q) < 1e-6)) continue;
+      // only short extensions: within half of each edge's length from its nearest end (not far-away crossings)
+      const reach = l => Math.min(vr.dist(q, l.a), vr.dist(q, l.b)) <= 0.5 * (l.len || vr.dist(l.a, l.b));
+      if (!reach(ls[i]) || !reach(ls[j])) continue;
+      out.push({ type: 'intersection', p: q, z: n, x: vr.norm(vr.sub(ls[i].b, ls[i].a)), src: { kind: 'edge2', a: ls[i], b: ls[j] }, zsrc: { kind: 'face', sig: face } });
+    }
+    // midway between this face and the nearest parallel face looking the other way (centre of a slot or a wall)
+    let opp = null, od = Infinity;
+    for (const f of faces || []) { if (f.type !== 'PLANE' || !f.n || vr.dot(vr.norm(f.n), n) > -0.999) continue; const dd = vr.dot(vr.sub(face.c, f.c), n); if (dd > 1e-6 && dd < od) { od = dd; opp = f; } }
+    if (opp) out.push({ type: 'between', p: vr.sub(face.c, vr.mul(n, od / 2)), z: n, src: { kind: 'face2', a: face, b: opp } });
+  }
   if (face?.type === 'CYLINDRE' && face.ap && face.ax) out.push({ type: 'axis', p: face.ap, z: vr.norm(face.ax), src: { kind: 'face', sig: face } });
   // vertices are shared by several edges: keep one per position
   const seen = [];
@@ -45,8 +64,17 @@ function bodyRefs(edges, face, hitN) {
 // Order candidates near the cursor: d = screen distance in pixels; references within `radius` px compete by type
 // priority, then distance. Face and axis references are always available as the fallback.
 function rankRefs(cands, radius = 16) {
-  const near = cands.filter(c => c.type === 'face' || c.type === 'axis' || c.d <= radius);
+  // a virtual corner lies outside the material, so it is offered from a little further away
+  const near = cands.filter(c => c.type === 'face' || c.type === 'axis' || c.type === 'between' || c.type === 'cplane' || c.d <= (c.type === 'intersection' ? radius * 1.75 : radius));
   return near.sort((a, b) => ((REF_PRIO[a.type] ?? 3) + Math.min(a.d, radius) / radius * 0.9) - ((REF_PRIO[b.type] ?? 3) + Math.min(b.d, radius) / radius * 0.9));
+}
+// where two lines in one plane meet (null if parallel or skew)
+function lineMeet(l1, l2) {
+  const d1 = vr.sub(l1.b, l1.a), d2 = vr.sub(l2.b, l2.a), w = vr.sub(l1.a, l2.a), c = vr.cross(d1, d2), cc = vr.dot(c, c);
+  if (cc < 1e-12 * vr.dot(d1, d1) * vr.dot(d2, d2)) return null;
+  const t = vr.dot(vr.cross(vr.sub(l2.a, l1.a), d2), c) / cc, q = vr.add(l1.a, vr.mul(d1, t));
+  const s2 = vr.dot(vr.sub(q, l2.a), d2) / vr.dot(d2, d2), q2 = vr.add(l2.a, vr.mul(d2, s2));
+  return vr.dist(q, q2) < 1e-6 ? q : null;
 }
 // sizes within a factor of 2 count as the same edge (a resized part keeps its references)
 const refSimilar = (a, b) => { a = Math.abs(+a || 0); b = Math.abs(+b || 0); return !(a || b) || (Math.min(a, b) > 0 && Math.max(a, b) / Math.min(a, b) <= 2); };
@@ -80,6 +108,17 @@ function rematchSig(sigs, kind, r, maxDist = 50) {
 // Where a stored reference is now. edges / faces: the body's current signatures. Returns { p, z, x } or null.
 function resolveRef(ref, edges, faces) {
   if (ref.type === 'origin') return { p: ref.p, z: ref.z, x: ref.x };
+  if (ref.type === 'intersection') {
+    const a = rematchSig(edges, 'edge', ref.src.a), b = rematchSig(edges, 'edge', ref.src.b); if (!a || !b) return null;
+    const q = lineMeet(a, b); if (!q) return null;
+    let z = ref.z; if (ref.zsrc) { const f = rematchSig(faces, 'face', ref.zsrc.sig); if (f?.n) z = vr.norm(f.n); }
+    return { p: q, z, x: ref.x };
+  }
+  if (ref.type === 'between') {
+    const a = rematchSig(faces, 'face', ref.src.a), b = rematchSig(faces, 'face', ref.src.b); if (!a || !b) return null;
+    const n = vr.norm(a.n), dd = vr.dot(vr.sub(a.c, b.c), n);
+    return { p: vr.sub(a.c, vr.mul(n, dd / 2)), z: n };
+  }
   const sigs = ref.src.kind === 'edge' ? edges : faces;
   const s = rematchSig(sigs, ref.src.kind, ref.src.sig); if (!s) return null;
   const keepSign = (v, was) => (vr.dot(v, was) < 0 ? vr.mul(vr.norm(v), -1) : vr.norm(v));
@@ -111,8 +150,9 @@ function refFrame(p, z, xHint) {
   return { x, y, z: zz, o: p };
 }
 // Joint type to suggest for two references (the user can always choose another).
-function suggestJoint(ta, tb) {
-  const round = t => t === 'center' || t === 'axis';
+function suggestJoint(ta0, tb0) {
+  const map = t => ({ round: 'center', axis: 'axis', point: 'vertex', face: 'face' })[REF_KIND[t]] || t;
+  const ta = map(ta0), tb = map(tb0), round = t => t === 'center' || t === 'axis';
   if (ta === 'axis' && tb === 'axis') return { type: 'cylindrical', why: 'Shaft in hole: both origins are on cylinder axes, so the part can turn and slide' };
   if (round(ta) && round(tb)) return { type: 'revolute', why: 'Both origins are on round edges or axes, so the axes line up and the part turns' };
   if (ta === 'vertex' && tb === 'vertex') return { type: 'ball', why: 'Point to point: the part can turn in any direction about the shared point' };

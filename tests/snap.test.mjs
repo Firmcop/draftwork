@@ -10,7 +10,7 @@ import { loadKernels } from './load-kernels.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const tmp = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'dw-snap-')), 'snap.mjs');
-fs.writeFileSync(tmp, fs.readFileSync(path.join(root, 'src/snapgeo.js'), 'utf8') + '\nexport { snapCandidates, snapPick, curveIntersections, inferLine, snapConstraints };');
+fs.writeFileSync(tmp, fs.readFileSync(path.join(root, 'src/snapgeo.js'), 'utf8') + '\nexport { snapCandidates, snapPick, curveIntersections, inferLine, inferRadius, snapConstraints };');
 const S = await import(pathToFileURL(tmp).href);
 const K = await loadKernels();
 const near = (a, b, tol = 1e-9, msg = '') => assert.ok(Math.abs(a - b) <= tol, `${msg} got ${a}, expected ${b}`);
@@ -91,4 +91,30 @@ test('a point snapped to a quadrant stays level with the circle centre', () => {
   const s = K.solveSketch(geo);
   assert.ok(s.ok);
   near(Math.abs(s.points.get('q').x), 250, 1e-6, 'radius 250'); near(s.points.get('q').y, 0, 1e-6);
+});
+
+test('inference: collinear with a line it continues, equal length, both at once', () => {
+  const lines = [{ id: 'S', a: P(0, 0), b: P(30, 15) }];
+  const col = S.inferLine(P(40, 20), P(80, 40.4), lines, [], { tol: 0.5, equal: false });
+  assert.equal(col.type, 'collinear', 'starts on the extension of S and runs along it');
+  const par = S.inferLine(P(40, 30), P(80, 50.4), lines, [], { tol: 0.5, equal: false });
+  assert.equal(par.type, 'parallel', 'off the extension: only parallel');
+  const L = Math.hypot(30, 15);
+  const eq = S.inferLine(P(100, 0), P(100 + 0.3, L - 0.1), lines, [], { tol: 1 });
+  assert.equal(eq.equal, 'S'); assert.equal(eq.type, 'vertical'); near(Math.hypot(eq.x - 100, eq.y), L, 1e-9, 'exact length');
+  assert.equal(S.inferLine(P(100, 0), P(100.3, L - 3), lines, [], { tol: 1 }).equal, null, '3 mm short is not equal');
+  const r = S.inferRadius(9.8, [{ id: 'C', r: 10 }, { id: 'D', r: 4 }], 1); assert.equal(r.id, 'C'); assert.equal(r.r, 10);
+  assert.equal(S.inferRadius(8, [{ id: 'C', r: 10 }], 1), null);
+});
+
+test('symmetric points across a construction line, kept by a symmetry constraint', () => {
+  const pts = [{ id: 'O', x: 0, y: 0 }, { id: 'a', x: 0, y: -50 }, { id: 'b', x: 0, y: 50 }, { id: 'p', x: 12, y: 7 }];
+  const curves = [{ id: 'ax', kind: 'line', a: P(0, -50), b: P(0, 50), constr: true }];
+  const c = S.snapCandidates(pts, curves).find(k => k.type === 'symmetric');
+  assert.ok(c); near(c.x, -12); near(c.y, 7); assert.deepEqual(c.refs, [{ type: 'symmetry', e: ['p', 'ax'] }]);
+  const geo = { points: [{ id: 'a', x: 0, y: -50 }, { id: 'b', x: 0, y: 50 }, { id: 'p', x: 12, y: 7 }, { id: 'q', x: -12, y: 7 }], curves: [{ id: 'ax', kind: 'line', a: 'a', b: 'b', constr: true }],
+    cons: [{ id: 'f1', type: 'fix', e: ['a'], x: 0, y: -50 }, { id: 'f2', type: 'fix', e: ['b'], x: 0, y: 50 }, { id: 'f3', type: 'fix', e: ['p'], x: 20, y: 3 }, ...S.snapConstraints('q', c.refs).map((k, i) => ({ id: 's' + i, ...k }))] };
+  // the original is fixed at (20, 3), away from where the mirror was made: the mirror follows it
+  const s = K.solveSketch(geo); assert.ok(s.ok);
+  near(s.points.get('q').x, -20, 1e-6); near(s.points.get('q').y, 3, 1e-6);
 });

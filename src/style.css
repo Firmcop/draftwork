@@ -555,3 +555,10 @@ table.grid tr.sel td { background: color-mix(in srgb, var(--accent) 22%, transpa
 .dwcheck.lvl-error .lvl { color: var(--err); }
 .dwcheck.lvl-warning .lvl { color: var(--select); }
 .dwcheck.lvl-info .lvl { color: var(--muted); }
+.snap-symmetric { border: 2px dashed var(--select); transform: rotate(45deg); }
+.ref-intersection::before, .ref-intersection::after { content: ''; position: absolute; left: -2px; right: -2px; top: 40%; height: 2px; background: var(--select); transform: rotate(45deg); }
+.ref-intersection::after { transform: rotate(-45deg); }
+.ref-between { border: 2px dashed var(--accent); transform: rotate(45deg); }
+.ref-cpoint { border: 2px solid var(--accent); border-radius: 2px; transform: rotate(45deg); background: color-mix(in srgb, var(--accent) 25%, transparent); }
+.ref-caxis { border: 2px dashed var(--accent); border-radius: 50%; }
+.ref-cplane { border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }

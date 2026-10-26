@@ -33,7 +33,7 @@ Status: **done** = implemented and covered by automated tests · **partial** = w
 | A2 tangent | done | line leaving an arc end |
 | A2 coincidence | done | via point snaps |
 | A2 alignment with existing points | done | dotted guide, exact x or y; not persisted (temporary guide) |
-| A2 collinear, equal, symmetry inference | open | available as manual constraints |
+| A2 collinear, equal, symmetry inference | done (v0.42) | collinear when continuing a line's extension; equal length / radius within a few pixels; symmetric points across construction lines |
 | A2 disable automatic constraints | done | palette: Auto constraints, Inference; per-category snap switches; Ctrl override |
 | A2 remove individual constraints | existing | select glyph, Delete |
 | A3 constraint set | existing | + one-line angle dimension (angle to the sketch x axis) |
@@ -66,7 +66,7 @@ Status: **done** = implemented and covered by automated tests · **partial** = w
 | D1 planar face centres | done | |
 | D1 face corners | done | (the face's vertices) |
 | D1 component origins / local coordinate systems | done | |
-| D1 edge intersections, named points, work planes, construction axes | open | |
+| D1 edge intersections, named points, work planes, construction axes | done (v0.42) | virtual corners of coplanar edges (re-found from both edges); construction and origin planes, construction and origin axes, construction points (fixed side) |
 | D1 geometry decides accuracy, cursor only chooses | done | screen distance ranks candidates; positions come from B-rep signatures |
 | D2 highlight and distinct markers | done | square, triangle, circle-dot, dashed circle (axis), diamond (face) |
 | D2 pick on moving part, then stationary part; preview | existing + done | the parts move live; Cancel restores |
@@ -74,7 +74,7 @@ Status: **done** = implemented and covered by automated tests · **partial** = w
 | D2 numeric offsets / clearance | existing | offset along the joint direction, plus each joint value |
 | D2 feedback: selected references, joint, remaining DOF | done | hint names reference, body and component; dialog states the remaining motion |
 | D3 shaft-to-hole, hole-centre, flush faces, offset placement | done | through centre/axis references and offsets |
-| D3 centering between faces, frame members, hole patterns | open | |
+| D3 centering between faces, frame members, hole patterns | done (v0.42) | centre between two parallel faces; Align a second hole sets the rotation (revolute, cylindrical, rigid); frame-member presets not provided |
 | D4 rigid, revolute, slider, cylindrical, planar | existing | |
 | D4 ball | done | angle, pitch, roll about the shared point |
 | D4 grounded component | existing | |
@@ -85,7 +85,7 @@ Status: **done** = implemented and covered by automated tests · **partial** = w
 | D5 over-constrained loops | existing | loops that cannot close are flagged |
 | D5 save and reopen | done | references stored with their source signatures; tested after reload |
 | D6 selection cycling | done | Tab / Shift+Tab |
-| D6 configurable snap categories, temporary override | open | (sketch has both; assembly not yet) |
+| D6 configurable snap categories, temporary override | done (v0.41) | per type in the joint dialog; Ctrl = faces, axes and planes only |
 
 Verification: `node --test tests/asmref.test.mjs` and `node scripts/build.mjs && node tests/e2e-placement.mjs`.
 By hand: two components, Assemble ▸ Joint (J), hover a corner: a square marker and “Vertex on …” in the hint; Tab cycles;
@@ -99,7 +99,7 @@ click, then click a corner on the other part: Ball is suggested and the corners 
 | C1 from selected component | done | component alone; follows the component's current bodies |
 | C1 from selected body | done | |
 | C1 from selected face | done | the face's normal sets the front view; the whole part is drawn |
-| C1 from exploded assembly | open | Phase 4 |
+| C1 from exploded assembly | done (v0.40) | Create Drawing ▸ Exploded assembly |
 | C1 open existing drawing | done | File ▸ Open Drawing, workspace switcher |
 | C1 toolbar and browser context menus | done | File menu, command search, browser body/component menus |
 | C2 source identity and orientation preserved | done | `doc.drawing.source`, `doc.drawing.orient` (face re-found after model changes) |
@@ -108,9 +108,9 @@ click, then click a corner on the other part: Ball is suggested and the corners 
 | C3 first- and third-angle | done | layout mirrors; existing projected views flip when switching |
 | C3 hidden lines visible / removed | existing | per view |
 | C3 section, detail views | existing | |
-| C3 auxiliary, broken, exploded views | open | Phase 4–5 |
+| C3 auxiliary, broken, exploded views | done (v0.40–v0.41) | |
 | C4 linear, aligned, angular, radial, diameter dims; centre marks, centrelines, notes, leaders | existing | |
-| C4 hole / thread callouts, GD&T, datums, surface finish, welding | open | Phase 4–5 |
+| C4 hole / thread callouts, GD&T, datums, surface finish, welding | done (v0.40–v0.41) | |
 | C4 never invent values | done | empty title fields print a dash; revision and drawing number start empty |
 | C7 A4–A0 and custom sheets | done | custom 50–5000 mm per side |
 | C7 scale, units, projection standard | done | |
@@ -136,8 +136,8 @@ By hand: File ▸ Create Drawing from Face…, click a flat face, choose A1 and 
 | C4 never invent specifications | done | no feature → measured Ø, marked “(measured; no hole feature)”; several matching features → measured, with a note; no thread class or tolerance added |
 | C5 exploded assembly views | done | drawing-wide explode factor (Sheet & Title Block, or Create Drawing ▸ Exploded assembly) |
 | C5 balloons, parts list from instances | existing | balloons on removed parts are flagged on Update |
-| C5 links to component drawings | open | |
-| C3 auxiliary and broken views | open | Phase 5 |
+| C5 links to component drawings | done (v0.42) | Component Sheets: one sheet per component in its own coordinates; the parts list's DWG column links to it |
+| C3 auxiliary and broken views | done (v0.41) | |
 | C7 DXF of supported entities | existing | |
 
 Verification: `node scripts/build.mjs && node tests/e2e-drawing4.mjs`.
@@ -158,17 +158,19 @@ the drawing says OUT OF DATE; Update shows the new values with Δ markers.
 | Automated drawing checks | done | out of date, flagged / lost / unspecified annotations, GD&T rules (tolerance, datum required / forbidden, undefined or duplicate datums), views off the border or over the title block, overlaps, empty title fields, approval, duplicate dimensions |
 | D6 assembly snap categories, enable/disable | done | per type in the joint dialog, kept per browser |
 | D6 temporary override | done | Ctrl: faces and axes only |
-| A2 collinear / equal / symmetry inference | open | |
-| D1 edge intersections, construction planes and axes as joint origins | open | |
-| D3 centering between faces, hole-pattern alignment | open | |
-| C5 links to component drawings | open | |
+| A2 collinear / equal / symmetry inference | done (v0.42) | |
+| D1 edge intersections, construction planes and axes as joint origins | done (v0.42) | |
+| D3 centering between faces, hole-pattern alignment | done (v0.42) | |
+| C5 links to component drawings | done (v0.42) | Component Sheets: one sheet per component in its own coordinates; the parts list's DWG column links to it |
 
 Verification: `node scripts/build.mjs && node tests/e2e-drawing5.mjs`.
 
-## Remaining open items
+## Gaps closed (v0.42)
 
-Collinear / equal / symmetry inference in sketches; edge intersections and construction planes / axes as joint origins;
-centering between faces and hole-pattern alignment in assemblies; links from assembly drawings to component drawings.
+All open items from Phases 1–5 are implemented and tested in `tests/snap.test.mjs`, `tests/asmref.test.mjs` and
+`tests/e2e-gaps2.mjs`: collinear / equal / symmetry inference; joint origins on edge intersections, between parallel
+faces and on construction planes, axes and points; hole-pattern alignment; component sheets linked from the parts list.
+Not provided: dedicated frame-member alignment presets (the general references cover square and round tube ends).
 
 ## Phase 1 verification
 

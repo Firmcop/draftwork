@@ -120,7 +120,7 @@ const hov = async () => { await page.mouse.move(sc.x - 6, sc.y - 4); await page.
 let types = await hov();
 check(types?.[0] === 'vertex', 'near a corner the vertex is offered first: ' + JSON.stringify(types));
 await page.keyboard.down('Control'); types = await hov(); await page.keyboard.up('Control');
-check(types && types.every(t => t === 'face' || t === 'axis'), 'holding Ctrl offers only faces and axes: ' + JSON.stringify(types));
+check(types && types.length && types.every(t => ['face', 'axis', 'between', 'cplane', 'caxis'].includes(t)), 'holding Ctrl offers only faces, axes and planes (no point snaps): ' + JSON.stringify(types));
 await page.uncheck('#js-vertex'); await W(100);
 types = await hov();
 check(types && !types.includes('vertex'), 'with Vertices switched off, no vertex is offered: ' + JSON.stringify(types));

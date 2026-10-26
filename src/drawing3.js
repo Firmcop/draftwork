@@ -11,7 +11,7 @@ var dwStaleState = false, dwLastRaw = null;
 function dwHash(str) { let h = 0x811c9dc5; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(16).padStart(8, '0'); }
 function modelFingerprint() {
   const S = dwSrc() || {};
-  return dwHash(JSON.stringify([doc.features, doc.components || [], doc.joints || [], doc.rigidGroups || [], doc.params || [], doc.bodyMeta || {}, S.bodies || null, S.source || null, S.orient || null, S.explode || 0]));
+  return dwHash(JSON.stringify([doc.features, doc.components || [], doc.joints || [], doc.rigidGroups || [], doc.params || [], doc.bodyMeta || {}, S.bodies || null, S.source || null, S.orient || null, S.explode || 0, (doc.drawing?.sheets || []).map(sh => sh.src || null)]));
 }
 const sectionKey = sc => JSON.stringify([sc.of, sc.axis, sc.value, sc.removeAbove]);
 // view data for every cached kind and section
@@ -173,3 +173,24 @@ queueMicrotask(() => {
   cmd('dw.update', 'Update Drawing', 'history', { run: () => dwUpdate() });
   cmd('dw.callout', 'Hole / Thread Callout', 'hole', { run: () => { dwTool = dwTool === 'callout' ? null : 'callout'; dwDraft = null; renderRibbon(); defaultHint(); } });
 });
+
+// ---------- component sheets: one sheet per component, listed in the parts list's DWG column ----------
+async function createComponentSheets() {
+  const R = doc.drawing; if (!R) return;
+  if (!comps().length) { toast('This design has no components'); return; }
+  const cur = dw(), made = [];
+  checkpoint();
+  for (const c of comps()) {
+    if (R.sheets.some(sh => sh.src?.comp === c.id) || !c.bodies.some(id => result.bodies.has(id))) continue;
+    const sh = { id: uid(), name: c.name, sheet: cur.sheet, size: cur.size ? [...cur.size] : undefined, projection: cur.projection || 'third', scale: 1, views: [], dims: [], notes: [], balloons: [], symbols: [], auto: true, src: { comp: c.id }, title: { ...(cur.title || {}), partNo: c.name, drawingNo: '' } };
+    R.sheets.push(sh); made.push(sh);
+  }
+  if (!made.length) { toast('Every component already has its own sheet'); return; }
+  await dwRefresh();
+  const act = R.active;
+  for (const sh of made) { R.active = sh.id; const L = standardLayout(); if (L) { sh.views = L.views; sh.scale = L.scale; } }
+  R.active = act; cur.partsList = true;
+  persist(); renderSheetTabs(); renderSheet();
+  toast(made.length + ' component sheet' + (made.length > 1 ? 's' : '') + ' added; the parts list shows each one in its DWG column');
+}
+queueMicrotask(() => cmd('dw.compsheets', 'Component Sheets', 'component', { run: () => createComponentSheets() }));

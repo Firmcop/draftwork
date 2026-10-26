@@ -51,6 +51,7 @@ Next
 - [x] v0.39 Core drawings (spec Phase 3): Create Drawing from design/assembly, component, body or face (face sets the base view, part kept whole, follows model changes); first-angle projection and ISO projection symbol; A1, A0 and custom sheets; title block with drawing number, revision, finish, approval status and approver; drawing source recorded; File menu entries
 - [x] v0.40 Manufacturing drawings (spec Phase 4): out-of-date detection from a model fingerprint, stored view geometry, OUT OF DATE stamp and banner, controlled Update that flags changed and lost annotations (Mark reviewed), update record; hole and thread callouts from feature data with a measured-only fallback; exploded assembly drawings
 - [x] v0.41 Advanced drawings and placement (spec Phase 5): auxiliary and broken views; GD&T frames, datum, surface finish and welding symbols; Drawing Check; assembly snap categories and Ctrl override
+- [x] v0.42 Spec gaps closed: collinear, equal length / radius and symmetry inference; joint origins on edge intersections, between parallel faces and on construction planes, axes and points; Align a second hole (hole patterns), rigid-joint rotation; component sheets linked from the parts list
 - [ ] Desktop packaging (Tauri)
 
 ## Phase 2 — Drawings, assemblies, animation *(started)*

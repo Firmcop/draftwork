@@ -22,7 +22,7 @@ function dw() {
 }
 const dwSheets = () => doc.drawing?.sheets || [];
 function replaceSheet(obj) { const R = doc.drawing, i = R.sheets.findIndex(s => s.id === obj.id); if (i >= 0) R.sheets[i] = obj; }
-const vk = v => v.kind === 'aux' ? 'aux:' + v.id : v.kind === 'section' ? 'sec:' + v.id : v.kind === 'detail' ? (viewById(v.of) ? vk(viewById(v.of)) : 'none') : v.kind;     // key of a view's geometry in dwData
+const vk = v => v.kind === 'aux' ? 'aux:' + v.id : v.kind === 'section' ? 'sec:' + v.id : v.kind === 'detail' ? (viewById(v.of) ? vk(viewById(v.of)) : 'none') : v.kind + (v.scope ? '@' + v.scope : '');     // key of a view's geometry in dwData
 const sheetSize = () => { const D = dw(); return D?.sheet === 'custom' && D.size?.[0] > 0 && D.size?.[1] > 0 ? [+D.size[0], +D.size[1]] : SHEETS[D?.sheet] || SHEETS.A3; };
 const sheetLabel = D => D?.sheet === 'custom' ? `${+D.size?.[0] || 0} × ${+D.size?.[1] || 0}` : D?.sheet || 'A3';
 // First-angle (ISO E) puts the top view below the front view and the right view on its left; third-angle (ISO A, US) the opposite
@@ -147,7 +147,8 @@ function segsToD(segs, f) {
 // Standard layout (third-angle): front lower left, top above it, right beside it, isometric upper right.
 // The largest standard scale is used at which no view overlaps another view or the title block.
 function standardLayout() {
-  const [W, H] = sheetSize(), F = dwData.front, T = dwData.top, R = dwData.right, I = dwData.iso;
+  const sfx = dw()?.src ? '@' + dw().id : '', scope = sfx ? dw().id : undefined;
+  const [W, H] = sheetSize(), F = dwData['front' + sfx], T = dwData['top' + sfx], R = dwData['right' + sfx], I = dwData['iso' + sfx];
   if (!F || !T || !R) return null;
   const gap = 18, left = 10 + gap, top = 10 + gap;
   const tbBox = [W - 10 - TB.w - 4, H - 10 - TB.h - 4, W - 10, H - 10];
@@ -164,6 +165,7 @@ function standardLayout() {
         { id: uid(), kind: 'right', x: rx, y: fy, hidden: true, parent: fid, dir: 'left', gap }];
     }
     if (I) views.push({ id: uid(), kind: 'iso', x: W - 10 - gap - scale * I.w / 2, y: top + scale * I.h / 2, hidden: false });
+    if (scope) for (const v of views) v.scope = scope;
     const box = v => { const d = dwData[vk(v)]; return [v.x - scale * d.w / 2, v.y - scale * d.h / 2 - 2, v.x + scale * d.w / 2, v.y + scale * d.h / 2 + 8]; };   // room for the label
     // sections and views placed by hand stay where they are; the standard views must avoid them
     const others = (dw()?.views || []).filter(v => !['front', 'top', 'right', 'iso'].includes(v.kind) && dwData[vk(v)]).map(v => { const d = dwData[vk(v)]; return [v.x - scale * d.w / 2, v.y - scale * d.h / 2 - 2, v.x + scale * d.w / 2, v.y + scale * d.h / 2 + 10]; });
@@ -210,15 +212,31 @@ function dwOrient() {
   const u = upRef.clone().addScaledVector(n, -upRef.dot(n)).normalize(), r = u.clone().cross(n).normalize();
   return new THREE.Matrix4().makeBasis(r, n.clone().negate(), u).transpose();
 }
+// Sheets that draw one component (sheet.src = { comp }) get their own projections: their standard views are keyed
+// 'front@<sheet id>' and so on; sections and auxiliary views have their own keys anyway.
+function dwGroups() {
+  const R = doc.drawing, sheets = dwSheets();
+  for (const sh of sheets) for (const v of sh.views || []) { if (sh.src && !['aux', 'section', 'detail'].includes(v.kind)) v.scope = sh.id; else delete v.scope; }
+  const groups = [{ scope: null, sheets: sheets.filter(sh => !sh.src) }];
+  for (const sh of sheets) if (sh.src) groups.push({ scope: sh.id, sheets: [sh], comp: sh.src.comp });
+  return groups.map(g => {
+    const views = g.sheets.flatMap(sh => sh.views || []), sfx = g.scope ? '@' + g.scope : '';
+    const kinds = [...new Set(['front', 'top', 'right', 'iso', ...views.filter(v => !['section', 'detail', 'aux'].includes(v.kind)).map(v => v.kind)])];
+    const cams = Object.fromEntries(views.filter(v => v.kind === 'aux' && v.cam).map(v => ['aux:' + v.id, v.cam]));
+    const secs = views.filter(v => v.kind === 'section').map(v => ({ id: v.id, of: v.of, axis: v.axis, value: v.value, removeAbove: v.removeAbove }));
+    return { ...g, sfx, kinds, cams, secs, keys: [...kinds.map(k => k + sfx), ...Object.keys(cams)] };
+  });
+}
+// a component sheet shows that component alone, as modelled (its own coordinates; no assembly placement, orientation or explode)
+function dwItemsForComp(cid) {
+  const c = compById(cid), ids = new Set(c ? c.bodies : []);
+  return [...result.bodies.entries()].filter(([id, b]) => b.shape && ids.has(id) && !bodyHidden(id)).map(([id, b]) => ({ id, shape: b.shape, place: null }));   // in the component's own coordinates, not as assembled
+}
 async function dwRefresh(force) {
   if (!isBrep()) return;
-  const allViews = dwSheets().flatMap(s => s.views || []);   // one projection serves every sheet
-  const kinds = [...new Set(['front', 'top', 'right', 'iso', ...allViews.filter(v => v.kind !== 'section' && v.kind !== 'detail' && v.kind !== 'aux').map(v => v.kind)])];
-  const cams = Object.fromEntries(allViews.filter(v => v.kind === 'aux' && v.cam).map(v => ['aux:' + v.id, v.cam]));
-  kinds.push(...Object.keys(cams));
-  const secs = allViews.filter(v => v.kind === 'section').map(v => ({ id: v.id, of: v.of, axis: v.axis, value: v.value, removeAbove: v.removeAbove }));
-  const R = doc.drawing, fp = modelFingerprint();
-  const covers = c => c && kinds.every(k => k in c.raw && (!cams[k] || c.camKeys?.[k] === JSON.stringify(cams[k]))) && secs.every(sc => ('sec:' + sc.id) in c.raw && c.secKeys?.[sc.id] === sectionKey(sc));
+  const groups = dwGroups(), R = doc.drawing, fp = modelFingerprint();
+  const allCams = Object.assign({}, ...groups.map(g => g.cams)), allSecs = groups.flatMap(g => g.secs);
+  const covers = c => c && groups.every(g => g.keys.every(k => k in c.raw && (!allCams[k] || c.camKeys?.[k] === JSON.stringify(allCams[k])))) && allSecs.every(sc => ('sec:' + sc.id) in c.raw && c.secKeys?.[sc.id] === sectionKey(sc));
   // a new drawing reuses the views just made for it
   if (R && !R.cache && dwLastRaw?.fp === fp && covers(dwLastRaw)) R.cache = dwLastRaw;
   if (R?.cache && !force && covers(R.cache)) {
@@ -228,19 +246,21 @@ async function dwRefresh(force) {
     return;
   }
   const wasStale = !!(R?.cache && R.cache.fp !== fp && !force);
-  const items = dwItems();
-  const key = JSON.stringify([items, kinds, secs, fp]);
+  const plan = groups.map(g => ({ g, items: g.scope ? dwItemsForComp(g.comp) : dwItems() }));
+  const key = JSON.stringify([plan.map(x => [x.items, x.g.kinds, x.g.secs, x.g.sfx, x.g.cams]), fp]);
   if (key === dwKey && Object.keys(dwData).length && !R) return;
   if (dwPending?.key === key) return dwPending.p;
   const p = (async () => {
     $('#busy').hidden = false;
     try {
-      const raw = items.length ? await brepProject(items, kinds, cams) : {};
       const data = {}, keep = {}, secKeys = {};
-      for (const k of kinds) { const v = prepView(raw[k]); if (v) { data[k] = v; keep[k] = raw[k]; } }
-      for (const sc of secs) { const r = items.length ? await brepSection(items, { kind: sc.of, axis: sc.axis, value: sc.value, removeAbove: sc.removeAbove }) : null; const v = prepView(r); if (v) { data['sec:' + sc.id] = v; keep['sec:' + sc.id] = r; secKeys[sc.id] = sectionKey(sc); } }
+      for (const { g, items } of plan) {
+        const raw = items.length ? await brepProject(items, [...g.kinds, ...Object.keys(g.cams)], g.cams) : {};
+        for (const k of [...g.kinds, ...Object.keys(g.cams)]) { const key2 = k.startsWith('aux:') ? k : k + g.sfx, v = prepView(raw[k]); if (v) { data[key2] = v; keep[key2] = raw[k]; } }
+        for (const sc of g.secs) { const r = items.length ? await brepSection(items, { kind: sc.of, axis: sc.axis, value: sc.value, removeAbove: sc.removeAbove }) : null; const v = prepView(r); if (v) { data['sec:' + sc.id] = v; keep['sec:' + sc.id] = r; secKeys[sc.id] = sectionKey(sc); } }
+      }
       dwData = data; dwKey = key;
-      dwLastRaw = { fp, raw: keep, secKeys, camKeys: Object.fromEntries(Object.entries(cams).map(([k, c]) => [k, JSON.stringify(c)])) };
+      dwLastRaw = { fp, raw: keep, secKeys, camKeys: Object.fromEntries(Object.entries(allCams).map(([k, c]) => [k, JSON.stringify(c)])) };
       const D = doc.drawing;
       if (D) {
         D.cache = dwLastRaw;
@@ -333,7 +353,7 @@ function displayList() {
   const r1 = ty + 14, r2 = r1 + 9, r3 = r2 + 9;
   path(`M${tx} ${r1}H${W - 10}M${tx} ${r2}H${W - 10}M${tx} ${r3}H${W - 10}M${tx + 120} ${ty}V${r1}M${tx + 60} ${r1}V${H - 10}M${tx + 105} ${r1}V${H - 10}M${tx + 140} ${r1}V${H - 10}`, { w: 0.25 });
   const cell = (x, y, label, val, size = 3, o = {}) => { text(x + 1.5, y + 3, label, 1.8); text(x + 1.5, y + 7.5, val || '—', size, o); };
-  text(tx + 3, ty + 4.5, 'TITLE', 1.8); text(tx + 3, ty + 11, doc.name || 'Untitled', 5, { bold: true, tag: 'tb:title' });
+  text(tx + 3, ty + 4.5, 'TITLE', 1.8); text(tx + 3, ty + 11, D.src ? (compById(D.src.comp)?.name || 'Component') + ' · ' + (doc.name || 'Untitled') : doc.name || 'Untitled', 5, { bold: true, tag: 'tb:title' });
   text(tx + 121.5, ty + 4.5, 'DRAWING NO.', 1.8); text(tx + 121.5, ty + 11, t.drawingNo || '—', 3.6, { bold: true, tag: 'tb:drawingNo' });
   cell(tx, r1, 'DRAWN BY', t.author, 3, { tag: 'tb:author' }); cell(tx + 60, r1, 'DATE', t.date || new Date().toISOString().slice(0, 10), 3, { tag: 'tb:date' }); cell(tx + 105, r1, 'SCALE', scaleLabel(D.scale), 3, { tag: 'tb:scale' }); cell(tx + 140, r1, 'SIZE', sheetLabel(D), 3, { tag: 'tb:size' });
   cell(tx, r2, 'MATERIAL', t.material, 3, { tag: 'tb:material' }); cell(tx + 60, r2, 'FINISH', t.finish, 3, { tag: 'tb:finish' }); cell(tx + 105, r2, 'PART NO.', t.partNo, 3, { tag: 'tb:partNo' }); cell(tx + 140, r2, 'REV', t.revision, 3, { tag: 'tb:revision' });
@@ -416,21 +436,23 @@ function cutLineItems(sc, v, X, d, path, text) {
 // Parts list above the title block: components and loose bodies, with material.
 function partsRows() {
   const rows = [];
-  for (const c of comps()) { const b = c.bodies.find(id => result.bodies.has(id)); if (b) rows.push([c.name, 1, bodyMaterial(b)]); }
-  for (const [id] of result.bodies) if (!compOfBody(id) && !bodyHidden(id)) rows.push([bodyName(id), 1, bodyMaterial(id)]);
+  const sheetOf = cid => { const i = dwSheets().findIndex(sh => sh.src?.comp === cid); return i >= 0 ? 'SH ' + (i + 1) : ''; };
+  for (const c of comps()) { const b = c.bodies.find(id => result.bodies.has(id)); if (b) rows.push([c.name, 1, bodyMaterial(b), sheetOf(c.id)]); }
+  for (const [id] of result.bodies) if (!compOfBody(id) && !bodyHidden(id)) rows.push([bodyName(id), 1, bodyMaterial(id), '']);
   // identical name + material collapse into one row with a quantity
   const out = [];
   for (const r of rows) { const k = out.find(o => o[0] === r[0] && o[2] === r[2]); if (k) k[1]++; else out.push([...r]); }
   return out;
 }
+// Parts list above the title block: components and loose bodies, with material and the sheet that draws each component
 function partsListItems(path, text, tx, ty) {
-  const rows = partsRows(), rh = 6, cols = [0, 14, 104, 122, TB.w], top = ty - 4 - rh * (rows.length + 1);
+  const rows = partsRows(), rh = 6, cols = [0, 12, 88, 102, 152, TB.w], top = ty - 4 - rh * (rows.length + 1);
   const W = TB.w, X0 = tx;
   path(`M${X0} ${top}H${X0 + W}V${ty - 4}H${X0}Z`, { w: 0.35 });
   for (let i = 1; i <= rows.length; i++) path(`M${X0} ${top + rh * i}H${X0 + W}`, { w: i === 1 ? 0.35 : 0.18 });
   for (const c of cols.slice(1, -1)) path(`M${X0 + c} ${top}V${ty - 4}`, { w: 0.18 });
-  ['ITEM', 'PART', 'QTY', 'MATERIAL'].forEach((t, i) => text(X0 + cols[i] + 1.5, top + 4.2, t, 2.4, { bold: true }));
-  rows.forEach((r, k) => { const y = top + rh * (k + 1) + 4.2; text(X0 + 1.5, y, String(k + 1), 2.8); text(X0 + cols[1] + 1.5, y, r[0], 2.8); text(X0 + cols[2] + 1.5, y, String(r[1]), 2.8); text(X0 + cols[3] + 1.5, y, r[2] || '—', 2.8); });
+  ['ITEM', 'PART', 'QTY', 'MATERIAL', 'DWG'].forEach((t, i) => text(X0 + cols[i] + 1.5, top + 4.2, t, 2.4, { bold: true }));
+  rows.forEach((r, k) => { const y = top + rh * (k + 1) + 4.2; text(X0 + 1.5, y, String(k + 1), 2.8); text(X0 + cols[1] + 1.5, y, r[0], 2.8); text(X0 + cols[2] + 1.5, y, String(r[1]), 2.8); text(X0 + cols[3] + 1.5, y, r[2] || '—', 2.8); text(X0 + cols[4] + 1.5, y, r[3] || '—', 2.8, { tag: r[3] ? 'pl:' + r[3] : null }); });
 }
 // Associative dimension points: each point also remembers where it sits relative to the view's extents. After the
 // model changes it snaps to whichever geometry is nearest, at its old position or at its relative position, so
@@ -624,9 +646,11 @@ function wireSheet() {
   sheetSvg.addEventListener('dblclick', e => { if (dwTool) return; const P = sheetPoint(e), [W, H] = sheetSize(); if (P[0] >= W - 10 - TB.w && P[0] <= W - 10 && P[1] >= H - 10 - TB.h && P[1] <= H - 10) dwSheetDialog(); });
   sheetSvg.addEventListener('pointerdown', e => {
     const P = sheetPoint(e);
-    if (e.button === 1 || (e.button === 0 && !dwTool && !viewAt(P) && !e.target.closest('[data-tag^="d:"], [data-tag^="b:"], [data-tag^="n:"], [data-tag^="s:"]'))) { drag = { pan: true, x: e.clientX, y: e.clientY, cam: { ...dwCam } }; sheetSvg.setPointerCapture(e.pointerId); return; }
+    if (e.button === 1 || (e.button === 0 && !dwTool && !viewAt(P) && !e.target.closest('[data-tag^="d:"], [data-tag^="b:"], [data-tag^="n:"], [data-tag^="s:"], [data-tag^="pl:"]'))) { drag = { pan: true, x: e.clientX, y: e.clientY, cam: { ...dwCam } }; sheetSvg.setPointerCapture(e.pointerId); return; }
     if (e.button !== 0) return;
     if (dwTool) return;                                  // tools act on click (pointerup)
+    const plTag = e.target.closest('[data-tag^="pl:"]')?.getAttribute('data-tag');   // parts list: open the component's sheet
+    if (plTag) { const sh = dwSheets()[+plTag.replace(/\D+/g, '') - 1]; if (sh) { switchSheet(sh.id); return; } }
     const objTag = e.target.closest('[data-tag^="b:"], [data-tag^="n:"], [data-tag^="s:"]')?.getAttribute('data-tag'), dimTag0 = e.target.closest('[data-tag^="d:"]')?.getAttribute('data-tag');
     const twice = (tg) => { const now = performance.now(), hit = lastTap?.tag === tg && now - lastTap.t < 450; lastTap = { tag: tg, t: now }; return hit; };   // our own double-click: re-rendering on the first click would swallow the browser's
     if (objTag && objTag[0] === 'n' && twice(objTag)) { noteEditDialog(objTag.slice(2)); return; }

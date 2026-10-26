@@ -184,7 +184,7 @@ const TABS = {
     { name: 'VIEWS', bar: ['dw.std', 'dw.view.front', 'dw.view.iso', 'dw.section', 'dw.detail', 'dw.aux'], menu: ['dw.std', '-', ...Object.keys(VIEW_KINDS).map(k => 'dw.view.' + k), 'dw.section', 'dw.detail', 'dw.aux', 'dw.break', 'dw.unbreak', '-', 'dw.hidden', 'dw.centers'] },
     { name: 'ANNOTATE', bar: ['dw.dim', 'dw.dia', 'dw.rad', 'dw.ang', 'dw.callout', 'dw.note'], menu: ['dw.dim', 'dw.dia', 'dw.rad', 'dw.ang', 'dw.callout', '-', 'dw.note', 'dw.balloon', '-', 'dw.centers', 'dw.hidden'] },
     { name: 'SYMBOLS', bar: ['dw.fcf', 'dw.datum', 'dw.sfinish', 'dw.weld'], menu: ['dw.fcf', 'dw.datum', 'dw.sfinish', 'dw.weld'] },
-    { name: 'TABLES', bar: ['dw.parts', 'dw.balloon'], menu: ['dw.parts', 'dw.balloon'] },
+    { name: 'TABLES', bar: ['dw.parts', 'dw.balloon', 'dw.compsheets'], menu: ['dw.parts', 'dw.balloon', 'dw.compsheets'] },
     { name: 'SHEET', bar: ['dw.sheet', 'dw.update', 'dw.check', 'dw.addsheet', 'dw.fit'], menu: ['dw.sheet', 'dw.update', 'dw.check', 'dw.fit', '-', 'dw.addsheet', 'dw.delsheet'] },
     { name: 'EXPORT', bar: ['dw.export'], menu: ['dw.export'] },
     { name: 'FINISH DRAWING', finish: true, bar: ['dw.finish'], menu: [] },

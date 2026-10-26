@@ -76,3 +76,28 @@ test('joint suggestions from the reference types', () => {
   assert.equal(A.suggestJoint('face', 'face').type, 'rigid');
   assert.equal(A.JOINT_DOF.cylindrical, 2);
 });
+
+test('edge intersection: the sharp corner under a chamfer, re-found after the chamfer grows', () => {
+  const box = [{ id: 'b', type: 'box', plane: 'XY', cx: 0, cy: 0, w: 60, d: 40, h: 10, op: 'new' }];
+  const vEdge = sigs(box).edges.find(e => Math.abs(e.p[0] - 30) < 1e-6 && Math.abs(e.p[1] - 20) < 1e-6);   // vertical edge at the (30, 20) corner
+  const f = d => [...box, { id: 'c', type: 'chamfer', edges: [vEdge], distance: d }];
+  const S1 = sigs(f(3)), top = S1.faces.find(x => x.type === 'PLANE' && x.n[2] > 0.99);
+  const refs = A.bodyRefs(S1.edges, top, top.n, S1.faces);
+  const sharp = refs.filter(r => r.type === 'intersection');
+  assert.ok(sharp.length >= 1, 'a virtual corner on the chamfered top face: ' + sharp.length);
+  const corner = sharp.find(r => Math.abs(r.p[0] - 30) < 1e-6 && Math.abs(r.p[1] - 20) < 1e-6);
+  assert.ok(corner, 'one at (30, 20, 10), where the original corner was'); near(corner.p[2], 10, 1e-6);
+  const S2 = sigs(f(5)), again = A.resolveRef(corner, S2.edges, S2.faces);
+  nearV(again.p, [30, 20, 10], 1e-6, 'still the same sharp corner with a 5 mm chamfer');
+});
+
+test('centre between faces: midway through the plate, following a thickness change', () => {
+  const top = S.faces.find(f => f.type === 'PLANE' && f.n[2] > 0.99);
+  const mid = A.bodyRefs(S.edges, top, top.n, S.faces).find(r => r.type === 'between');
+  assert.ok(mid); near(mid.p[2], 5, 1e-6, 'half of the 10 mm thickness'); nearV(mid.z, [0, 0, 1]);
+  const thick = [{ id: 'b', type: 'box', plane: 'XY', cx: 0, cy: 0, w: 60, d: 40, h: 16, op: 'new' }];
+  const S3 = sigs(thick); near(A.resolveRef(mid, S3.edges, S3.faces).p[2], 8, 1e-6, 'half of 16');
+  assert.equal(A.suggestJoint('between', 'cplane').type, 'rigid');
+  assert.equal(A.suggestJoint('caxis', 'center').type, 'revolute');
+  assert.equal(A.suggestJoint('intersection', 'cpoint').type, 'ball');
+});

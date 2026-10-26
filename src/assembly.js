@@ -64,6 +64,7 @@ function frameFromSig(sig, kind) {
 // Re-find the picked face/edge on the rebuilt body (same signature matching as fillets), then build its frame.
 function endFrame(end) {
   if (!end) return null;
+  if (end.kind === 'cons') return consFrame(end.cons);
   const rec = result.bodies.get(end.body); if (!rec) return null;
   if (end.kind === 'frame') return new THREE.Matrix4().fromArray(end.frame);
   if (end.kind === 'ref') {
@@ -76,6 +77,23 @@ function endFrame(end) {
   let sig = end.sig;
   if (rec.shape) { sig = rematchEnd(rec, end); if (!sig) return null; }
   return frameFromSig(sig, end.kind);
+}
+// Construction planes, axes and points as joint origins (they belong to the fixed root): re-read from the model each time.
+const JOINT_AXES = { X: [1, 0, 0], Y: [0, 1, 0], Z: [0, 0, 1] };
+function consFrame(c) {
+  const basis = (o, z, x) => { const F = refFrame(o, z, x); return new THREE.Matrix4().makeBasis(new THREE.Vector3(...F.x), new THREE.Vector3(...F.y), new THREE.Vector3(...F.z)).setPosition(...F.o); };
+  if (c.type === 'cplane') {
+    if (!PLANES[c.id] && !result.planes?.has?.(c.id)) return null;
+    const M = PLANES[c.id] ? planeMatrix(c.id, 0) : planeMatrixOf(c.id), o = new THREE.Vector3(c.local[0], c.local[1], 0).applyMatrix4(M);
+    const z = new THREE.Vector3(0, 0, 1).transformDirection(M), x = new THREE.Vector3(1, 0, 0).transformDirection(M);
+    return basis(o.toArray(), z.toArray(), x.toArray());
+  }
+  if (c.type === 'caxis') {
+    const a = JOINT_AXES[c.id] ? { o: [0, 0, 0], d: JOINT_AXES[c.id] } : result.axes?.get(c.id); if (!a) return null;
+    return basis(a.o.map((v, i) => v + a.d[i] * c.t), a.d);
+  }
+  if (c.type === 'cpoint') { const pt = result.points?.get(c.id); return pt ? basis(pt.p, [0, 0, 1]) : null; }
+  return null;
 }
 // Joint origins follow their face or edge through bigger changes than fillet picks: same kind and direction,
 // similar size, then the nearest one (a plate made thicker keeps its pin on the top face).
@@ -97,7 +115,7 @@ function motionOf(j) {
   const t = j.type;
   if (t === 'slider' || t === 'cylindrical') m.multiply(new THREE.Matrix4().makeTranslation(0, 0, jval(j, 'distance')));
   if (t === 'planar') m.multiply(new THREE.Matrix4().makeTranslation(jval(j, 'x'), jval(j, 'y'), 0));
-  if (t === 'revolute' || t === 'cylindrical' || t === 'planar' || t === 'ball') m.multiply(new THREE.Matrix4().makeRotationZ(THREE.MathUtils.degToRad(jval(j, 'angle'))));
+  if (t === 'revolute' || t === 'cylindrical' || t === 'planar' || t === 'ball' || (t === 'rigid' && +j.angle)) m.multiply(new THREE.Matrix4().makeRotationZ(THREE.MathUtils.degToRad(jval(j, 'angle'))));
   if (t === 'ball') m.multiply(new THREE.Matrix4().makeRotationY(THREE.MathUtils.degToRad(jval(j, 'pitch')))).multiply(new THREE.Matrix4().makeRotationX(THREE.MathUtils.degToRad(jval(j, 'roll'))));
   if (!j.flip) m.multiply(new THREE.Matrix4().makeRotationX(Math.PI));     // origins face each other (faces touch)
   return m;
@@ -272,7 +290,7 @@ function openJointDialog(id, snap, stage) {
     body: () => {
       const j = J(); if (!j) return [];
       const st = jointStatus.get(j.id);
-      const desc = e => !e ? 'Not picked' : (e.kind === 'frame' ? 'As it sits now, with' : e.kind === 'ref' ? REF_LABEL[e.ref.type] : e.kind === 'edge' ? 'Round edge' : 'Face center') + ' on ' + bodyName(e.body) + (compOfBody(e.body) ? ' (' + compOfBody(e.body).name + ')' : ' (fixed)');
+      const desc = e => !e ? 'Not picked' : e.kind === 'cons' ? REF_LABEL[e.cons.type] + ' ' + jointConsName(e.cons) + ' (fixed)' : (e.kind === 'frame' ? 'As it sits now, with' : e.kind === 'ref' ? REF_LABEL[e.ref.type] : e.kind === 'edge' ? 'Round edge' : 'Face center') + ' on ' + bodyName(e.body) + (compOfBody(e.body) ? ' (' + compOfBody(e.body).name + ')' : ' (fixed)');
       const endRow = (k, label) => h('div', { class: 'row' }, h('span', { class: 'rl' }, label), h('div', {},
         h('div', { class: 'note', style: 'margin:0' }, jointEdit?.stage === k ? (j.asBuilt && k === 'b' ? 'Click the part it stays with…' : 'Hover the model: corners, edge midpoints, hole centres, axes and faces light up. Tab cycles, click picks.') : desc(j[k])),
         h('button', { class: 'btn', type: 'button', id: 'jp-' + k, style: 'margin-top:4px', 'aria-pressed': String(jointEdit?.stage === k), onclick: () => { jointEdit.stage = k; rerenderDialog(); defaultHint(); } }, j[k] ? 'Pick again' : 'Pick')));
@@ -305,6 +323,10 @@ function openJointDialog(id, snap, stage) {
         section_('Motion', h('div', { class: 'row' }, h('label', { class: 'rl', for: 'jt-type' }, 'Type'), typeSel),
           sugRow, dofRow,
           ...dofs.map(k => num(k, DOF_LABEL[k] || k, DOF_UNITS[k], { slider: true })),
+          j.type === 'rigid' ? num('angle', 'Rotation', '°') : null,
+          j.a && j.b && !j.asBuilt && j.type !== 'slider' ? h('div', { class: 'row' }, h('span', { class: 'rl' }), h('div', {},
+            h('button', { class: 'btn', type: 'button', id: 'jt-align', 'aria-pressed': String(jointEdit?.stage === 'align1' || jointEdit?.stage === 'align2'), onclick: () => { jointEdit.stage = 'align1'; jointEdit.align = null; rerenderDialog(); defaultHint(); } }, 'Align a second hole…'),
+            h('div', { class: 'note', style: 'margin:2px 0 0' }, jointEdit?.stage === 'align1' ? 'Click a hole or round edge on the moving part…' : jointEdit?.stage === 'align2' ? 'Click the hole it should line up with on the other part…' : 'Turns the part about the joint axis so a second pair of holes line up (hole patterns).'))) : null,
           num('offset', 'Offset', 'mm'), j.asBuilt ? null : h('label', { class: 'chk', for: 'jt-flip' }, flip, 'Flip (same direction instead of facing)'),
           dofs.length ? h('div', { class: 'row' }, h('span', { class: 'rl' }), animBtn) : null),
         section_('Name', h('div', { class: 'row' }, h('label', { class: 'rl', for: 'jt-name' }, 'Name'), nameI)),
@@ -347,8 +369,9 @@ function jointPickAt(e) {
   const near = refHover && Math.hypot(refHover.x - e.clientX, refHover.y - e.clientY) < 3 ? refHover : refHoverAt(e);
   const cand = near?.list[near.idx];
   if (!cand) { if (near?.body) toast('Nothing to join to there: pick a corner, edge, round edge or flat face'); return true; }
-  const { d, w, ...ref } = cand;
-  const end = { body: near.body, kind: 'ref', ref };
+  if (jointEdit.stage === 'align1' || jointEdit.stage === 'align2') return alignPick(j, cand), true;
+  const { d, w, body: cbody, ...ref } = cand;
+  const end = ref.src?.kind === 'cons' ? { body: null, kind: 'cons', cons: { type: ref.type, ...ref.src.cons } } : { body: cbody !== undefined ? cbody : near.body, kind: 'ref', ref };
   refHover = null;
   const other = jointEdit.stage === 'a' ? j.b : j.a;
   if (other && compKey(other.body) === compKey(end.body)) { toast('Both origins would be on ' + compLabel(compKey(end.body)) + '. Pick a different part.'); return true; }
@@ -361,49 +384,106 @@ function jointPickAt(e) {
   assemblyChanged(); rerenderDialog(); defaultHint();
   return true;
 }
-const endType = e => !e ? null : e.kind === 'ref' ? e.ref.type : e.kind === 'edge' ? 'center' : e.kind === 'face' ? 'face' : 'frame';
+const endType = e => !e ? null : e.kind === 'ref' ? e.ref.type : e.kind === 'cons' ? e.cons.type : e.kind === 'edge' ? 'center' : e.kind === 'face' ? 'face' : 'frame';
+function jointConsName(c) { return PLANES[c.id] ? c.id : JOINT_AXES[c.id] ? c.id + ' axis' : featById(c.id)?.name || ''; }
+// Align a second hole: turn the moving part about the joint axis so a picked hole on it lines up with one on the other part.
+function alignPick(j, cand) {
+  if (cand.type !== 'center' && cand.type !== 'axis') { toast('Pick a hole or a round edge'); return; }
+  const ka = compKey(j.a.body), kc = compKey(cand.body);
+  if (jointEdit.stage === 'align1') {
+    if (kc !== ka) { toast('Pick the hole on the moving part (' + compLabel(ka) + ')'); return; }
+    jointEdit.align = { body: cand.body, p: cand.p }; jointEdit.stage = 'align2'; refHover = null; rerenderDialog(); defaultHint(); return;
+  }
+  if (kc === ka) { toast('Pick the hole on the other part'); return; }
+  const target = new THREE.Vector3(...cand.w), A = jointEdit.align; jointEdit.stage = null; jointEdit.align = null; refHover = null;
+  solveAssembly();
+  const Fb = endFrame(j.b); if (!Fb) return;
+  const Wb = (keyXf.get(compKey(j.b.body)) || IDENT).clone().multiply(Fb).multiply(new THREE.Matrix4().makeTranslation(0, 0, jval(j, 'offset')));
+  const O = new THREE.Vector3().setFromMatrixPosition(Wb), z = new THREE.Vector3(0, 0, 1).transformDirection(Wb);
+  const movingNow = () => new THREE.Vector3(...A.p).applyMatrix4(keyXf.get(compKey(A.body)) || IDENT);
+  const flat = v => { const r = v.clone().sub(O); return r.sub(z.clone().multiplyScalar(r.dot(z))); };
+  const vA = flat(movingNow()), vB = flat(target);
+  if (vA.length() < 1e-6 || vB.length() < 1e-6) { toast('That hole is on the joint axis, so turning cannot move it'); rerenderDialog(); return; }
+  const deg = THREE.MathUtils.radToDeg(Math.atan2(z.dot(vA.clone().cross(vB)), vA.dot(vB))), cur = +j.angle || 0;
+  checkpoint('jalign-' + j.id);
+  let best = null;
+  for (const cand2 of [cur + deg, cur - deg]) { j.angle = Math.round(cand2 * 1e6) / 1e6; jointLive.delete(j.id); solveAssembly({ hold: j.id }); const dd = movingNow().distanceTo(target); if (!best || dd < best.d) best = { a: j.angle, d: dd }; }
+  j.angle = best.a; jointLive.delete(j.id);
+  assemblyChanged(j.id); rerenderDialog(); defaultHint();
+  toast(Math.abs(vA.length() - vB.length()) > 0.01 ? 'Turned to the closest angle: the two holes are at different distances from the joint axis, so they cannot line up exactly' : 'Turned ' + fmt(Math.round(best.a * 1000) / 1000) + '° so the holes line up');
+}
 
 // ---------- AssemblyPlacementEngine: references under the cursor while a joint origin is picked ----------
 let refHover = null;   // { x, y, body, list: [ref + { d, w: world point }], idx }
 // which reference types joint picking snaps to (kept per browser); Ctrl held = faces and axes only
 var asmSnap = (() => { try { return { vertex: true, midpoint: true, center: true, axis: true, face: true, origin: true, ...JSON.parse(localStorage.getItem('draftwork.asmsnap') || '{}') }; } catch (e) { return { vertex: true, midpoint: true, center: true, axis: true, face: true, origin: true }; } })();
 function setAsmSnap(k, on) { asmSnap[k] = on; try { localStorage.setItem('draftwork.asmsnap', JSON.stringify(asmSnap)); } catch (e) { } }
-function refHoverAt(e) {
+function refHoverAt(e, raw) {   // raw: list every candidate (test hook)
   raycaster.setFromCamera(ndcOf(e), camera); scene.updateMatrixWorld();
   const meshes = []; for (const [, sb] of shownBodies) if (sb.mesh.visible && sb.rec.shape) meshes.push(sb.mesh);
   const hit = raycaster.intersectObjects(meshes, false)[0];
-  if (!hit) return null;
-  const body = hit.object.userData.body, sb = shownBodies.get(body), rec = sb.rec, Bx = bodyXf(body), Bi = Bx.clone().invert();
-  const face = brepSigMap(rec, 'face').get(brepMeshOf(rec).triFace[hit.faceIndex]);
-  const nW = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : new THREE.Vector3(0, 0, 1);
-  const nM = nW.clone().transformDirection(Bi);
   const r = renderer.domElement.getBoundingClientRect(), px = mmPerPx();
-  const refs = bodyRefs([...brepSigMap(rec, 'edge').values()], face, [nM.x, nM.y, nM.z]);
-  // the component's own origin (its local coordinate system moves with it)
-  if (compOfBody(body)) refs.push({ type: 'origin', p: [0, 0, 0], z: [0, 0, 1], x: [1, 0, 0], src: { kind: 'origin' } });
+  const scr = v => { const q = v.clone().project(camera); return Math.hypot(r.left + (q.x + 1) / 2 * r.width - e.clientX, r.top + (1 - q.y) / 2 * r.height - e.clientY); };
   const cands = [];
-  for (const ref of refs) {
-    const w = new THREE.Vector3(...ref.p).applyMatrix4(Bx);
-    // hidden references (behind the face under the cursor) are not offered
-    if (ref.type !== 'face' && ref.type !== 'axis' && ref.type !== 'origin' && w.distanceTo(raycaster.ray.origin) > hit.distance + Math.max(1, px * 6)) continue;
-    const scr = v => { const q = v.clone().project(camera); return Math.hypot(r.left + (q.x + 1) / 2 * r.width - e.clientX, r.top + (1 - q.y) / 2 * r.height - e.clientY); };
-    let d = scr(w);
-    // a circle's centre is offered from anywhere along its edge too (a hole's centre is in empty space)
-    if (ref.type === 'center' && ref.src.sig.p) {
-      const c = new THREE.Vector3(...ref.p), ax = new THREE.Vector3(...ref.src.sig.ax).normalize(), u = new THREE.Vector3(...ref.src.sig.p).sub(c), vv = ax.clone().cross(u);
-      for (let i = 0; i < 24; i++) { const t = i / 24 * Math.PI * 2; d = Math.min(d, scr(c.clone().addScaledVector(u, Math.cos(t)).addScaledVector(vv, Math.sin(t)).applyMatrix4(Bx))); }
+  let body = null;
+  if (hit) {
+    body = hit.object.userData.body;
+    const sb = shownBodies.get(body), rec = sb.rec, Bx = bodyXf(body), Bi = Bx.clone().invert();
+    const face = brepSigMap(rec, 'face').get(brepMeshOf(rec).triFace[hit.faceIndex]);
+    const nW = hit.face ? hit.face.normal.clone().transformDirection(hit.object.matrixWorld) : new THREE.Vector3(0, 0, 1);
+    const nM = nW.clone().transformDirection(Bi);
+    const refs = bodyRefs([...brepSigMap(rec, 'edge').values()], face, [nM.x, nM.y, nM.z], [...brepSigMap(rec, 'face').values()]);
+    // the component's own origin (its local coordinate system moves with it)
+    if (compOfBody(body)) refs.push({ type: 'origin', p: [0, 0, 0], z: [0, 0, 1], x: [1, 0, 0], src: { kind: 'origin' } });
+    for (const ref of refs) {
+      const w = new THREE.Vector3(...ref.p).applyMatrix4(Bx);
+      // hidden references (behind the face under the cursor) are not offered
+      const onFace = face?.type === 'PLANE' && face.n && Math.abs((ref.p[0] - face.c[0]) * face.n[0] + (ref.p[1] - face.c[1]) * face.n[1] + (ref.p[2] - face.c[2]) * face.n[2]) < 1e-6;   // on the face under the cursor: not hidden by it
+      if (!onFace && !['face', 'axis', 'origin', 'between'].includes(ref.type) && w.distanceTo(raycaster.ray.origin) > hit.distance + Math.max(1, px * 6)) continue;
+      let d = scr(w);
+      // a circle's centre is offered from anywhere along its edge too (a hole's centre is in empty space)
+      if (ref.type === 'center' && ref.src.sig.p) {
+        const c = new THREE.Vector3(...ref.p), ax = new THREE.Vector3(...ref.src.sig.ax).normalize(), u = new THREE.Vector3(...ref.src.sig.p).sub(c), vv = ax.clone().cross(u);
+        for (let i = 0; i < 24; i++) { const t = i / 24 * Math.PI * 2; d = Math.min(d, scr(c.clone().addScaledVector(u, Math.cos(t)).addScaledVector(vv, Math.sin(t)).applyMatrix4(Bx))); }
+      }
+      cands.push({ ...ref, d, w: [w.x, w.y, w.z], body });
     }
-    cands.push({ ...ref, d, w: [w.x, w.y, w.z] });
   }
-  const allow = c => asmSnap[c.type] !== false && !(e.ctrlKey || e.metaKey ? !['face', 'axis'].includes(c.type) : false);
+  // construction points, axes and planes (fixed): offered next to the part's own references
+  for (const [id, pt] of result.points || []) {
+    if (doc.planeHidden?.[id]) continue;
+    const w = new THREE.Vector3(...pt.p), d = scr(w);
+    if (d <= 16) cands.push({ type: 'cpoint', p: pt.p, z: [0, 0, 1], src: { kind: 'cons', cons: { id } }, d, w: pt.p, body: null });
+  }
+  const axes = [...(result.axes || [])].filter(([id]) => !doc.planeHidden?.[id]).map(([id, a]) => ({ id, o: a.o, d: a.d }));
+  if (doc.showOrigin) for (const [id, d] of Object.entries(JOINT_AXES)) axes.push({ id, o: [0, 0, 0], d });
+  for (const a of axes) {
+    // the point on the axis closest to the pick ray
+    const o = new THREE.Vector3(...a.o), dv = new THREE.Vector3(...a.d).normalize(), ro = raycaster.ray.origin, rd = raycaster.ray.direction;
+    const w0 = o.clone().sub(ro), b = dv.dot(rd), den = 1 - b * b; if (den < 1e-9) continue;
+    const t = (b * w0.dot(rd) - w0.dot(dv)) / den, q = o.clone().addScaledVector(dv, t);
+    if (hit && q.distanceTo(ro) > hit.distance + Math.max(1, px * 6)) continue;
+    const d = scr(q);
+    if (d <= 12) cands.push({ type: 'caxis', p: q.toArray(), z: a.d, src: { kind: 'cons', cons: { id: a.id, t: Math.round(t * 1e6) / 1e6 } }, d, w: q.toArray(), body: null });
+  }
+  const planeObjs = []; for (const g of [planesGroup, originGroup]) if (g.visible) g.traverse(o => { if (o.isMesh && o.userData.pickable && o.visible) planeObjs.push(o); });
+  const ph = raycaster.intersectObjects(planeObjs, false)[0];
+  if (ph && (!hit || ph.distance < hit.distance - Math.max(0.05, hit.distance * 1e-3))) {
+    const id = ph.object.userData.plane, M = PLANES[id] ? planeMatrix(id, 0) : planeMatrixOf(id), l = ph.point.clone().applyMatrix4(M.clone().invert());
+    const local = [Math.round(l.x * 100) / 100, Math.round(l.y * 100) / 100], o = new THREE.Vector3(local[0], local[1], 0).applyMatrix4(M);
+    cands.push({ type: 'cplane', p: o.toArray(), z: new THREE.Vector3(0, 0, 1).transformDirection(M).toArray(), src: { kind: 'cons', cons: { id, local } }, d: 0, w: o.toArray(), body: null });
+  }
+  if (raw) return cands.map(c => c.type + ':' + Math.round(c.d) + ':' + c.p.map(v => Math.round(v * 10) / 10).join('/'));
+  if (!cands.length) return hit ? { x: e.clientX, y: e.clientY, body, list: [], idx: 0 } : null;
+  const allow = c => asmSnap[c.type] !== false && !(e.ctrlKey || e.metaKey ? !['face', 'axis', 'cplane', 'caxis', 'between'].includes(c.type) : false);
   const list = rankRefs(cands.filter(allow), 16).slice(0, 8);
   return { x: e.clientX, y: e.clientY, body, list, idx: 0 };
 }
 function refHoverHint() {
   const c = refHover?.list[refHover.idx]; if (!c) return null;
   const n = refHover.list.length;
-  const comp = compOfBody(refHover.body);
-  return REF_LABEL[c.type] + ' on ' + bodyName(refHover.body) + (comp ? ' (' + comp.name + ')' : ' (fixed)') + (n > 1 ? ' · Tab for the next one (' + (refHover.idx + 1) + ' of ' + n + ')' : '') + ' · click to pick';
+  const comp = c.body && compOfBody(c.body);
+  return REF_LABEL[c.type] + (c.body ? ' on ' + bodyName(c.body) + (comp ? ' (' + comp.name + ')' : ' (fixed)') : ' ' + jointConsName({ id: c.src.cons.id }) + ' (fixed)') + (n > 1 ? ' · Tab for the next one (' + (refHover.idx + 1) + ' of ' + n + ')' : '') + ' · click to pick';
 }
 // registered after every module has loaded (assembly.js runs before the viewport exists)
 queueMicrotask(() => viewport.addEventListener('pointermove', e => {
@@ -425,13 +505,13 @@ window.addEventListener('keydown', e => {
 }, true);
 // markers for the references under the cursor; the one a click would pick is drawn larger
 function drawRefMarkers(group) {
-  if (!refHover || !jointEdit?.stage) return;
+  if (!refHover?.list || !jointEdit?.stage) return;
   refHover.list.forEach((c, i) => {
     const el = h('div', { class: 'refmk ref-' + c.type + (i === refHover.idx ? ' active' : ''), 'data-ref': c.type, 'data-active': String(i === refHover.idx), title: REF_LABEL[c.type] });
     const o = new CSS2DObject(el); o.position.set(...c.w); group.add(o);
-    if (i === refHover.idx && (c.type === 'axis' || c.type === 'center' || c.type === 'face')) {
-      const Bx = bodyXf(refHover.body), z = new THREE.Vector3(...c.z).transformDirection(Bx), p = new THREE.Vector3(...c.w), L = Math.max(4, mmPerPx() * 40);
-      group.add(line([p.clone().addScaledVector(z, c.type === 'axis' ? -L : 0), p.clone().addScaledVector(z, L)], colors.select, { depthTest: false, dashed: c.type === 'axis', dash: L / 8, gap: L / 12 }));
+    if (i === refHover.idx && ['axis', 'center', 'face', 'caxis', 'cplane', 'between'].includes(c.type)) {
+      const Bx = c.body ? bodyXf(c.body) : IDENT, z = new THREE.Vector3(...c.z).transformDirection(Bx), p = new THREE.Vector3(...c.w), L = Math.max(4, mmPerPx() * 40);
+      const ax2 = c.type === 'axis' || c.type === 'caxis'; group.add(line([p.clone().addScaledVector(z, ax2 ? -L : 0), p.clone().addScaledVector(z, L)], colors.select, { depthTest: false, dashed: ax2, dash: L / 8, gap: L / 12 }));
     }
   });
 }
@@ -452,6 +532,8 @@ function dofSummary(j) {
 }
 function jointHint() {
   const j = jointEdit && joints().find(x => x.id === jointEdit.id);
+  if (jointEdit?.stage === 'align1') return 'Click a hole on the moving part that should line up with a hole on the other part';
+  if (jointEdit?.stage === 'align2') return 'Click the hole on the other part it should line up with';
   if (jointEdit?.stage === 'a') return j?.asBuilt ? 'Click a flat face or round edge on the moving part: that is where the joint turns or slides' : 'Click a flat face or round edge on the part that moves';
   if (jointEdit?.stage === 'b') return j?.asBuilt ? 'Click the part it stays with (it does not move)' : 'Click a flat face or round edge on the part it attaches to';
   return null;

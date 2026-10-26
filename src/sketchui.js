@@ -88,7 +88,7 @@ function snapScene(sk) {
   const points = [{ id: 'O', x: 0, y: 0 }, ...g.points.map(p => ({ id: p.id, ...pos(p.id), center: centers.has(p.id) }))];
   const curves = [];
   for (const c of g.curves) {
-    if (c.kind === 'line') curves.push({ id: c.id, kind: 'line', a: pos(c.a), b: pos(c.b) });
+    if (c.kind === 'line') curves.push({ id: c.id, kind: 'line', a: pos(c.a), b: pos(c.b), constr: !!c.constr });
     else if (c.kind === 'circle') curves.push({ id: c.id, kind: 'circle', c: pos(c.c), r: geoRadius(sk, c), ic: c.c });
     else if (c.kind === 'arc') curves.push({ id: c.id, kind: 'arc', c: pos(c.c), r: geoRadius(sk, c), a: pos(c.a), b: pos(c.b), ic: c.c });
   }
@@ -129,12 +129,12 @@ function lineTarget(sk, hit) {
   const inf = inferLine(lp, { x: hit.x, y: hit.y }, lines, arcsAt, { tol: hit.tol });
   if (!inf) return { sp, auto: null };
   let { x, y } = inf; const guides = [];
-  if (inf.type === 'horizontal') { x = sp.alignX ?? snapV(x); if (sp.alignX != null) guides.push(...(sp.guides || []).filter(gd => gd[0].x === sp.alignX)); }
-  if (inf.type === 'vertical') { y = sp.alignY ?? snapV(y); if (sp.alignY != null) guides.push(...(sp.guides || []).filter(gd => gd[0].y === sp.alignY)); }
+  if (inf.type === 'horizontal' && !inf.equal) { x = sp.alignX ?? snapV(x); if (sp.alignX != null) guides.push(...(sp.guides || []).filter(gd => gd[0].x === sp.alignX)); }
+  if (inf.type === 'vertical' && !inf.equal) { y = sp.alignY ?? snapV(y); if (sp.alignY != null) guides.push(...(sp.guides || []).filter(gd => gd[0].y === sp.alignY)); }
   return { sp: { x, y, type: 'infer', refs: [], guides: guides.map(([a]) => [a, { x, y }]) }, auto: inf };
 }
 function setSnapShow(sp, auto) {
-  snapShow = !sp ? null : { x: sp.x, y: sp.y, type: sp.type, label: sp.label || '', guides: sp.guides || [], glyph: auto?.glyph || null, ref: auto?.ref || null, infer: auto?.type || null };
+  snapShow = !sp ? null : { x: sp.x, y: sp.y, type: sp.type, label: sp.label || '', guides: sp.guides || [], glyph: auto?.glyph || sp.glyph || null, ref: auto?.ref || auto?.equal || sp.eqRef || null, infer: auto?.type || (auto?.equal || sp.eqRef ? 'equal' : null) };
 }
 // Why a change cannot be solved: the existing constraints whose removal would make it solvable.
 function conflictCulprits(sk, g) {
@@ -206,6 +206,7 @@ function buildShape(tool, s, e) {
       const cId = 'c' + uid();
       g.curves.push({ id: cId, kind: 'circle', c: P(s), r: e.id ? Math.round(d * 1e6) / 1e6 : Math.round(snapV(d) || d) });
       if (e.id && e.id !== s.id && sketchOpts.autoCons !== false) g.cons.push({ id: cid(), type: 'onCircle', e: [e.id, cId], _snap: true });   // through an existing point
+      if (e.eqRef && sketchOpts.autoCons !== false) { g.curves[g.curves.length - 1].r = Math.round(d * 1e6) / 1e6; g.cons.push({ id: cid(), type: 'equal', e: [cId, e.eqRef], _snap: true }); }   // same size as an existing circle
       return g;
     }
     case 'polygon': {
@@ -278,7 +279,7 @@ viewport.addEventListener('pointerdown', e => {
   if (sketchTool === 'trim') return trimClick(sk, hit);
   if (sketchTool === 'extend') return extendClick(sk, hit);
   // click, move, click: the second click finishes a shape started with a plain click
-  if (gdraw?.kind === 'shape' && gdraw.waiting) { if (!hud?.editing) gdraw.e = snapPoint(sk, hit); gdraw.waiting = false; window.removeEventListener('pointermove', onGeoMove); finishShape(gdraw); gdraw = null; refreshOverlays(); hudHide(); return; }
+  if (gdraw?.kind === 'shape' && gdraw.waiting) { if (!hud?.editing) gdraw.e = shapeEnd(sk, hit, gdraw); gdraw.waiting = false; window.removeEventListener('pointermove', onGeoMove); finishShape(gdraw); gdraw = null; refreshOverlays(); hudHide(); return; }
   gdraw = { kind: 'shape', tool: sketchTool, s: snapPoint(sk, hit), e: null, tol: hit.tol };
   window.addEventListener('pointermove', onGeoMove); window.addEventListener('pointerup', onGeoUp, { once: true });
 }, { capture: true });
@@ -286,7 +287,10 @@ viewport.addEventListener('pointerdown', e => {
 function onGeoMove(e) {
   if (!gdraw) return;
   const sk = featById(sketchId), hit = planeHit(e); if (!sk || !hit) return;
-  if (gdraw.kind === 'shape') { if (hud?.editing) return; gdraw.e = snapPoint(sk, hit); setSnapShow(gdraw.e); refreshOverlays(); return; }
+  if (gdraw.kind === 'shape') {
+    if (hud?.editing) return;
+    const e2 = shapeEnd(sk, hit, gdraw); gdraw.e = e2; setSnapShow(e2); refreshOverlays(); return;
+  }
   if (gdraw.kind === 'legacy') {
     const dx = snapV(hit.x - gdraw.start.x), dy = snapV(hit.y - gdraw.start.y);
     if (!gdraw.moved && (dx || dy)) { checkpoint(); gdraw.moved = true; viewport.classList.add('moving'); }
@@ -315,6 +319,15 @@ function onGeoMove(e) {
     else { move(t.curve.c); move(t.curve.a); move(t.curve.b); }
     commitGeo(sk, g, { drag, tag: 'drag-' + t.id, quiet: true, noPalette: true, delay: 200 });
   }
+}
+// the second point of a shape: snapped, and for a circle about as big as an existing one, that exact radius (kept equal)
+function shapeEnd(sk, hit, d) {
+  let e2 = snapPoint(sk, hit);
+  if (d.tool === 'circle' && !e2.id && !hit.noSnap && sketchOpts.infer !== false) {
+    const s0 = d.s, r = Math.hypot(e2.x - s0.x, e2.y - s0.y), m = inferRadius(r, snapScene(sk).curves.filter(c => c.kind !== 'line'), hit.tol);
+    if (m && r > 1e-9) { const k = m.r / r; e2 = { x: s0.x + (e2.x - s0.x) * k, y: s0.y + (e2.y - s0.y) * k, type: 'infer', refs: [], eqRef: m.id, glyph: '=' }; }
+  }
+  return e2;
 }
 function finishShape(d, dims) {
   const sk = featById(sketchId); if (!sk || !d.e) return false;
@@ -349,7 +362,10 @@ function lineClick(sk, hit) {
   if (!id) id = snapRealize(g, sp);
   const lid = 'l' + uid();
   g.curves.push({ id: lid, kind: 'line', a: lineDraft.last, b: id });
-  if (auto && sketchOpts.autoCons !== false) g.cons.push({ id: cid(), type: auto.type, e: auto.type === 'horizontal' || auto.type === 'vertical' ? [lid] : [lid, auto.ref], _snap: true });
+  if (auto && sketchOpts.autoCons !== false) {
+    if (auto.type) g.cons.push({ id: cid(), type: auto.type, e: auto.type === 'horizontal' || auto.type === 'vertical' ? [lid] : [lid, auto.ref], _snap: true });
+    if (auto.equal) g.cons.push({ id: cid(), type: 'equal', e: [lid, auto.equal], _snap: true });
+  }
   if (!commitSnapped(sk, g)) return;
   if (id === lineDraft.start) lineDraft = null; else lineDraft.last = id;
   defaultHint(); refreshOverlays();

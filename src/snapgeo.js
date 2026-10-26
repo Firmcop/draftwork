@@ -10,8 +10,8 @@
 // A snap result: { x, y, type, id?, refs: [{ type, e }], guides?: [[{x,y},{x,y}]], label }
 //   refs are the constraints a new point needs to stay where it snapped (the point id is filled in by the caller).
 const SNAP_TYPES = ['endpoint', 'midpoint', 'center', 'quadrant', 'intersection', 'nearest', 'align', 'grid'];
-const SNAP_PRIO = { origin: 0, endpoint: 0, center: 0, intersection: 1, midpoint: 2, quadrant: 2 };
-const SNAP_LABEL = { origin: 'Origin', endpoint: 'Endpoint', center: 'Center', intersection: 'Intersection', midpoint: 'Midpoint', quadrant: 'Quadrant', nearest: 'On curve', align: 'Aligned', grid: 'Grid' };
+const SNAP_PRIO = { origin: 0, endpoint: 0, center: 0, intersection: 1, midpoint: 2, quadrant: 2, symmetric: 2 };
+const SNAP_LABEL = { origin: 'Origin', endpoint: 'Endpoint', center: 'Center', intersection: 'Intersection', midpoint: 'Midpoint', quadrant: 'Quadrant', symmetric: 'Symmetric', nearest: 'On curve', align: 'Aligned', grid: 'Grid' };
 const TAU_ = 2 * Math.PI;
 const EPS_ = 1e-9;
 
@@ -69,6 +69,19 @@ function snapCandidates(points, curves, o = {}) {
         if (cv.ic) refs.push({ type: k % 2 ? 'vertical' : 'horizontal', e: [cv.ic], pointFirst: false });
         out.push({ ...q, type: 'quadrant', refs });
       }
+    }
+  }
+  // points mirrored across construction lines: a new point there stays symmetric to the original
+  for (const ax of curves) {
+    if (ax.kind !== 'line' || !ax.constr) continue;
+    const dx = ax.b.x - ax.a.x, dy = ax.b.y - ax.a.y, L2 = dx * dx + dy * dy; if (L2 < 1e-12) continue;
+    for (const p of points) {
+      if (p.id === 'O') continue;
+      const t = ((p.x - ax.a.x) * dx + (p.y - ax.a.y) * dy) / L2, fx = ax.a.x + t * dx, fy = ax.a.y + t * dy;
+      if (Math.hypot(p.x - fx, p.y - fy) < 1e-6) continue;           // on the axis already
+      const m = { x: 2 * fx - p.x, y: 2 * fy - p.y };
+      if (isPt(m)) continue;
+      out.push({ ...m, type: 'symmetric', refs: [{ type: 'symmetry', e: [p.id, ax.id] }] });
     }
   }
   const max = o.maxCurves ?? 200, cs = curves.slice(0, max);
@@ -142,12 +155,28 @@ function inferLine(lp, p, lines, arcsAt, o = {}) {
   for (const ac of arcsAt || []) cands.push({ type: 'tangent', dir: Math.atan2(lp.y - ac.c.y, lp.x - ac.c.x) + Math.PI / 2, ref: ac.id, bias: 0.7 });
   let best = null, bd = Infinity;
   for (const c of cands) { const d = dAng(th, c.dir), thr = c.type === 'horizontal' || c.type === 'vertical' ? thrHV : thrRel; if (d <= thr && d * c.bias < bd) { bd = d * c.bias; best = c; } }
-  if (!best) return null;
-  let ux = Math.cos(best.dir), uy = Math.sin(best.dir);
-  if (ux * dx + uy * dy < 0) { ux = -ux; uy = -uy; }
-  const t = ux * dx + uy * dy;
+  let ux = dx / L, uy = dy / L;
+  if (best) { ux = Math.cos(best.dir); uy = Math.sin(best.dir); if (ux * dx + uy * dy < 0) { ux = -ux; uy = -uy; } }
+  let t = ux * dx + uy * dy, type = best?.type || null;
+  // parallel to a line whose extension passes through the start point: collinear
+  if (type === 'parallel') {
+    const ln = lines.find(l => l.id === best.ref), ex = ln.b.x - ln.a.x, ey = ln.b.y - ln.a.y, el = Math.hypot(ex, ey) || 1;
+    if (Math.abs((lp.x - ln.a.x) * ey - (lp.y - ln.a.y) * ex) / el <= Math.max(1e-6, (o.tol ?? 0) * 0.25)) type = 'collinear';
+  }
+  // about as long as an existing line: equal length
+  let eq = null;
+  if (o.equal !== false) { let bdl = Math.max(1e-9, (o.tol ?? 0) * 0.3); for (const ln of lines) { const Li = Math.hypot(ln.b.x - ln.a.x, ln.b.y - ln.a.y), dd = Math.abs(Li - t); if (Li > 1e-6 && dd <= bdl) { bdl = dd; eq = { id: ln.id, L: Li }; } } }
+  if (eq) t = eq.L;
+  if (!type && !eq) return null;
   const r6 = v => Math.round(v * 1e9) / 1e9;
-  return { x: r6(lp.x + ux * t), y: r6(lp.y + uy * t), type: best.type, ref: best.ref || null, glyph: { horizontal: 'H', vertical: 'V', parallel: '∥', perpendicular: '⊥', tangent: 'T' }[best.type] };
+  const glyph = [{ horizontal: 'H', vertical: 'V', parallel: '∥', perpendicular: '⊥', tangent: 'T', collinear: '≡' }[type] || '', eq ? '=' : ''].filter(Boolean).join(' ');
+  return { x: r6(lp.x + ux * t), y: r6(lp.y + uy * t), type, ref: best?.ref || null, equal: eq?.id || null, glyph };
+}
+// A circle being drawn about as big as an existing circle or arc: snap to that radius (equal constraint).
+function inferRadius(r, circles, tol) {
+  let best = null, bd = Math.max(1e-9, tol * 0.3);
+  for (const c of circles) { const d = Math.abs(c.r - r); if (c.r > 1e-6 && d <= bd) { bd = d; best = c; } }
+  return best ? { r: best.r, id: best.id } : null;
 }
 // The constraint list for a new point `pid` snapped with refs (see snapCandidates).
 function snapConstraints(pid, refs) {
