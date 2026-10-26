@@ -74,7 +74,10 @@ d.features.find(f => f.id === 'plate').d = 50;
 await page.evaluate(x => window.__dw.setDoc(x), d); await W(2500);
 await page.evaluate(() => window.__dw.run('opendrawing')); await W(1500); await idle(); await W(600);
 I = await info();
-check(I && near(I.views.front.w, 50) && near(I.views.front.h, 20), 'after the model change the front view is 50 × 20: ' + (I && I.views.front.w.toFixed(3)));
+check(I && near(I.views.front.w, 40) && await page.isVisible('#dw-update'), 'the drawing is marked out of date and still shows the earlier model');
+await page.click('#dw-update'); await W(1500); await idle(); await W(600);
+I = await info();
+check(I && near(I.views.front.w, 50) && near(I.views.front.h, 20), 'after Update the front view is 50 × 20: ' + (I && I.views.front.w.toFixed(3)));
 
 // 4. reload: sheet, projection and title block come back
 await page.reload(); await engine(); await W(2500);

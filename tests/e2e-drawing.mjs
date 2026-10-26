@@ -83,7 +83,10 @@ if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/drawi
 // the drawing follows the model: make the plate 80 long, the 60 becomes 80
 await page.evaluate(() => { const x = window.__dw.doc(); x.features[0].w = 80; window.__dw.setDoc(x); }); await W(3500);
 d = await info();
-check(d.dims.includes('h:80') && d.dims.includes('ang:90') && d.dims.includes('r:4'), 'after the plate grows to 80 mm, the dimensions follow ' + JSON.stringify(d.dims));
+check(d.dims.includes('h:60') && await page.isVisible('#dw-update'), 'after the model change the drawing keeps its views and offers an update (out of date, nothing overwritten)');
+await page.click('#dw-update'); await W(3500);
+d = await info();
+check(d.dims.includes('h:80') && d.dims.includes('ang:90') && d.dims.includes('r:4'), 'after Update, the dimensions follow the 80 mm plate ' + JSON.stringify(d.dims));
 const tidy = x => { const [W, H] = x.size, b = x.boxes; const inside = b.every(r => r[0] >= 10 && r[1] >= 10 && r[2] <= W - 10 && r[3] <= H - 10); let overlap = false; for (let i = 0; i < b.length; i++) for (let j = i + 1; j < b.length; j++) if (b[i][0] < b[j][2] && b[j][0] < b[i][2] && b[i][1] < b[j][3] && b[j][1] < b[i][3]) overlap = true; return inside && !overlap; };
 check(tidy(d), 'views re-flow to fit around the section: inside the border, nothing overlapping (scale ' + d.scale + ')');
 if (process.env.SHOTS) await page.screenshot({ path: process.env.SHOTS + '/drawing-dims.png' });

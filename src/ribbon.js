@@ -182,9 +182,9 @@ const TABS = {
   ],
   DRAWING: [
     { name: 'VIEWS', bar: ['dw.std', 'dw.view.front', 'dw.view.iso', 'dw.section', 'dw.detail'], menu: ['dw.std', '-', ...Object.keys(VIEW_KINDS).map(k => 'dw.view.' + k), 'dw.section', 'dw.detail', '-', 'dw.hidden', 'dw.centers'] },
-    { name: 'ANNOTATE', bar: ['dw.dim', 'dw.dia', 'dw.rad', 'dw.ang', 'dw.note'], menu: ['dw.dim', 'dw.dia', 'dw.rad', 'dw.ang', '-', 'dw.note', 'dw.balloon', '-', 'dw.centers', 'dw.hidden'] },
+    { name: 'ANNOTATE', bar: ['dw.dim', 'dw.dia', 'dw.rad', 'dw.ang', 'dw.callout', 'dw.note'], menu: ['dw.dim', 'dw.dia', 'dw.rad', 'dw.ang', 'dw.callout', '-', 'dw.note', 'dw.balloon', '-', 'dw.centers', 'dw.hidden'] },
     { name: 'TABLES', bar: ['dw.parts', 'dw.balloon'], menu: ['dw.parts', 'dw.balloon'] },
-    { name: 'SHEET', bar: ['dw.sheet', 'dw.addsheet', 'dw.fit'], menu: ['dw.sheet', 'dw.fit', '-', 'dw.addsheet', 'dw.delsheet'] },
+    { name: 'SHEET', bar: ['dw.sheet', 'dw.update', 'dw.addsheet', 'dw.fit'], menu: ['dw.sheet', 'dw.update', 'dw.fit', '-', 'dw.addsheet', 'dw.delsheet'] },
     { name: 'EXPORT', bar: ['dw.export'], menu: ['dw.export'] },
     { name: 'FINISH DRAWING', finish: true, bar: ['dw.finish'], menu: [] },
   ],

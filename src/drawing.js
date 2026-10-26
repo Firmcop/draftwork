@@ -183,9 +183,11 @@ const dwSrc = () => (typeof pendingDrawingSource !== 'undefined' && pendingDrawi
 function dwItems() {
   const S = dwSrc(), src = S?.source, comp = src?.kind === 'component' && compById(src.comp);
   const only = comp ? new Set(comp.bodies) : S?.bodies?.length ? new Set(S.bodies) : null;
-  const R = dwOrient();
+  const R = dwOrient(), ex = +S?.explode > 0 ? dwExplodeOffsets(+S.explode) : null;
   return [...result.bodies.entries()].filter(([id, b]) => b.shape && !bodyHidden(id) && (!only || only.has(id))).map(([id, b]) => {
-    const M = R ? R.clone().multiply(bodyXf(id)) : bodyXf(id);
+    let M = bodyXf(id);
+    if (ex?.has(id)) M = new THREE.Matrix4().makeTranslation(ex.get(id).x, ex.get(id).y, ex.get(id).z).multiply(M);   // exploded: moved out from the centre
+    if (R) M = R.clone().multiply(M);
     return { id, shape: b.shape, place: M.equals(IDENT) ? null : xfParts(M) };
   });
 }
@@ -202,21 +204,41 @@ function dwOrient() {
   const u = upRef.clone().addScaledVector(n, -upRef.dot(n)).normalize(), r = u.clone().cross(n).normalize();
   return new THREE.Matrix4().makeBasis(r, n.clone().negate(), u).transpose();
 }
-async function dwRefresh() {
+async function dwRefresh(force) {
   if (!isBrep()) return;
   const allViews = dwSheets().flatMap(s => s.views || []);   // one projection serves every sheet
-  const items = dwItems(), kinds = [...new Set(['front', 'top', 'right', 'iso', ...allViews.filter(v => v.kind !== 'section' && v.kind !== 'detail').map(v => v.kind)])];
+  const kinds = [...new Set(['front', 'top', 'right', 'iso', ...allViews.filter(v => v.kind !== 'section' && v.kind !== 'detail').map(v => v.kind)])];
   const secs = allViews.filter(v => v.kind === 'section').map(v => ({ id: v.id, of: v.of, axis: v.axis, value: v.value, removeAbove: v.removeAbove }));
-  const key = JSON.stringify([items, kinds, secs]);
-  if (key === dwKey && Object.keys(dwData).length) return;
+  const R = doc.drawing, fp = modelFingerprint();
+  const covers = c => c && kinds.every(k => k in c.raw) && secs.every(sc => ('sec:' + sc.id) in c.raw && c.secKeys?.[sc.id] === sectionKey(sc));
+  // a new drawing reuses the views just made for it
+  if (R && !R.cache && dwLastRaw?.fp === fp && covers(dwLastRaw)) R.cache = dwLastRaw;
+  if (R?.cache && !force && covers(R.cache)) {
+    // the drawing shows the geometry it was last made from; a changed model only marks it out of date
+    if (dwKey !== 'cache:' + R.cache.fp + ':' + Object.keys(R.cache.raw).length) { dwData = dwFromRaw(R.cache.raw); dwKey = 'cache:' + R.cache.fp + ':' + Object.keys(R.cache.raw).length; }
+    dwStaleState = R.cache.fp !== fp;
+    return;
+  }
+  const wasStale = !!(R?.cache && R.cache.fp !== fp && !force);
+  const items = dwItems();
+  const key = JSON.stringify([items, kinds, secs, fp]);
+  if (key === dwKey && Object.keys(dwData).length && !R) return;
   if (dwPending?.key === key) return dwPending.p;
   const p = (async () => {
     $('#busy').hidden = false;
     try {
       const raw = items.length ? await brepProject(items, kinds) : {};
-      const data = {}; for (const k of kinds) { const v = prepView(raw[k]); if (v) data[k] = v; }
-      for (const sc of secs) { const r = items.length ? await brepSection(items, { kind: sc.of, axis: sc.axis, value: sc.value, removeAbove: sc.removeAbove }) : null; const v = prepView(r); if (v) data['sec:' + sc.id] = v; }
+      const data = {}, keep = {}, secKeys = {};
+      for (const k of kinds) { const v = prepView(raw[k]); if (v) { data[k] = v; keep[k] = raw[k]; } }
+      for (const sc of secs) { const r = items.length ? await brepSection(items, { kind: sc.of, axis: sc.axis, value: sc.value, removeAbove: sc.removeAbove }) : null; const v = prepView(r); if (v) { data['sec:' + sc.id] = v; keep['sec:' + sc.id] = r; secKeys[sc.id] = sectionKey(sc); } }
       dwData = data; dwKey = key;
+      dwLastRaw = { fp, raw: keep, secKeys };
+      const D = doc.drawing;
+      if (D) {
+        D.cache = dwLastRaw;
+        if (wasStale) { D.revs = [...(D.revs || []), { n: (D.revs?.length || 0) + 1, date: new Date().toISOString(), fp, note: 'updated to add a view' }].slice(-50); toast('The drawing was updated to the current model to make the new view'); }
+      }
+      dwStaleState = false;
     } catch (e) { toast('Could not make the drawing views: ' + occMsg(e)); }
     finally { $('#busy').hidden = true; dwPending = null; }
   })();
@@ -256,6 +278,7 @@ function relayoutAuto() {
 function drawingHint() {
   if (dwTool === 'dim') return dwDraft?.p2 ? 'Move to place the dimension and click. Above or below gives horizontal, beside gives vertical, in between gives aligned' : dwDraft ? 'Click the second point on the same view' : 'Click a point on a view (corners and circle centers snap) · Esc cancels';
   if (dwTool === 'dia') return 'Click a circle, then click where the label goes · Esc cancels';
+  if (dwTool === 'callout') return 'Click a hole or thread (a circle on a view), then click where the callout goes. The text comes from the hole or thread feature · Esc cancels';
   if (dwTool === 'rad') return 'Click a circle or arc (fillets too), then click where the label goes · Esc cancels';
   if (dwTool === 'ang') return dwDraft?.l2 ? 'Move to choose which angle and click to place it' : dwDraft ? 'Click the second edge on the same view' : 'Click an edge on a view · Esc cancels';
   if (dwTool === 'detail') return dwDraft?.r ? 'Click on the sheet where the detail view goes' : dwDraft ? 'Move out and click to set the size of the detail circle' : 'Click the centre of the area to enlarge on a view · Esc cancels';
@@ -338,7 +361,8 @@ function displayList() {
     for (const sc of D.views) if (sc.kind === 'section' && sc.cutOf === v.id) cutLineItems(sc, v, X, d, path, text);
   }
   // dimensions, balloons, notes
-  for (const m of D.dims) dimItems(m, path, text);
+  for (const m of D.dims) { dimItems(m, path, text); flagItems(m, path, text); }
+  if (dwStaleState) text(14, 17, 'OUT OF DATE: the model changed after this drawing was last updated', 3, { bold: true, tag: 'w:stale' });
   for (const b of D.balloons || []) balloonItems(b, path, text);
   for (const n of D.notes || []) noteItems(n, path, text);
   if ((dwDraft?.p2 || dwDraft?.l2) && dwCursor && dwTool !== 'section') dimItems({ ...dwDraft, kind: dwDraft.l2 ? 'ang' : undefined, id: '_draft', at: viewXf(viewById(dwDraft.view)).toLocal(dwCursor) }, path, text, true);
@@ -405,10 +429,10 @@ function resolveCircle(d, c, r, n) {
   return best && bd <= 0.25 * Math.max(d.w, d.h, 1) ? best : { c, r };
 }
 // The label keeps its offset from its own dimension (ao), so it moves with the geometry it measures.
-const dimMid = m => m.kind === 'd' || m.kind === 'r' ? m.c : m.kind === 'ang' ? (lineX(m.l1[0], m.l1[1], m.l2[0], m.l2[1]) || m.l1[0]) : [(m.p1[0] + m.p2[0]) / 2, (m.p1[1] + m.p2[1]) / 2];
+const dimMid = m => m.kind === 'd' || m.kind === 'r' || m.kind === 'hc' ? m.c : m.kind === 'ang' ? (lineX(m.l1[0], m.l1[1], m.l2[0], m.l2[1]) || m.l1[0]) : [(m.p1[0] + m.p2[0]) / 2, (m.p1[1] + m.p2[1]) / 2];
 function dimGeom(m) {
   const v = viewById(m.view), d = v && dwData[vk(v)]; if (!d) return m;
-  const g = m.kind === 'd' || m.kind === 'r' ? (k => ({ ...m, c: k.c, r: k.r }))(resolveCircle(d, m.c, m.r, m.nc))
+  const g = m.kind === 'd' || m.kind === 'r' || m.kind === 'hc' ? (k => ({ ...m, c: k.c, r: k.r }))(resolveCircle(d, m.c, m.r, m.nc))
     : m.kind === 'ang' ? { ...m, l1: m.l1.map((p, i) => resolvePt(d, p, m.n1?.[i])), l2: m.l2.map((p, i) => resolvePt(d, p, m.n2?.[i])) }
     : { ...m, p1: resolvePt(d, m.p1, m.n1), p2: resolvePt(d, m.p2, m.n2) };
   if (m.ao) { const c = dimMid(g); g.at = [c[0] + m.ao[0], c[1] + m.ao[1]]; }
@@ -442,12 +466,13 @@ function angleGeom(m) {
 function dimValue(m0) {
   const m = dimGeom(m0);
   if (m.kind === 'ang') { const g = angleGeom(m); return g ? Math.abs(g.sw) * 180 / Math.PI : 0; }
-  if (m.kind === 'd') return 2 * m.r;
+  if (m.kind === 'd' || m.kind === 'hc') return 2 * m.r;
   if (m.kind === 'r') return m.r;
   const dx = m.p2[0] - m.p1[0], dy = m.p2[1] - m.p1[1], k = m.kind || dimKind(m.p1, m.p2, m.at);
   return k === 'h' ? Math.abs(dx) : k === 'v' ? Math.abs(dy) : Math.hypot(dx, dy);
 }
 function dimItems(m0, path, text, draft) {
+  if (m0.kind === 'hc' && !draft) return calloutItems(m0, path, text);
   const v = viewById(m0.view); if (!v || !dwData[vk(v)]) return;
   let basicBox = false;
   if (!draft && m0.tol?.kind === 'basic') { const t0 = text; text = (x, y, s, size, o = {}) => { t0(x, y, s, size, o); if (!o.rot) { const w = s.length * size * 0.55 + 1.6, x0 = o.anchor === 'middle' ? x - w / 2 : o.anchor === 'end' ? x - w : x - 0.8; path(`M${x0} ${y - size - 0.4}h${w}v${size + 1.4}h${-w}Z`, { w: 0.18, tag: 'd:' + m0.id }); } }; }
@@ -509,11 +534,12 @@ function renderSheet() {
   sheetSvg.append(sv('rect', { x: 0, y: 0, width: W, height: H, class: 'paper' }));
   const sel = dwSel ? ({ view: 'v:', dim: 'd:', balloon: 'b:', note: 'n:' }[dwSel.type]) + dwSel.id : null;
   for (const it of displayList()) {
-    const cls = (it.tag && it.tag === sel ? 'sel' : '') + (it.tag ? ' pick' : '');
+    const cls = (it.tag && it.tag === sel ? 'sel' : '') + (it.tag ? (it.tag.startsWith('w:') ? ' warn' : ' pick') : '');
     if (it.t === 'hatch') sheetSvg.append(sv('path', { d: it.d, fill: 'url(#hatch45)', 'fill-rule': 'evenodd', stroke: 'none', class: cls, 'data-tag': it.tag }));
     else if (it.t === 'path') sheetSvg.append(sv('path', { d: it.d, 'stroke-width': it.w, 'stroke-dasharray': it.dash ? it.dash.join(' ') : null, class: (it.fill ? 'ink fill ' : 'ink ') + cls, 'data-tag': it.tag }));
     else { const e = sv('text', { x: it.x, y: it.y, 'font-size': it.size, 'text-anchor': it.anchor, class: 'ink-text ' + cls + (it.bold ? ' bold' : ''), 'data-tag': it.tag, transform: it.rot ? `rotate(${it.rot} ${it.x} ${it.y})` : null }); e.textContent = it.s; sheetSvg.append(e); }
   }
+  renderStaleBar();
   // tool feedback
   if (dwHover?.p) { const r = dwCam.w / 250; sheetSvg.append(sv('circle', { cx: dwHover.P[0], cy: dwHover.P[1], r, class: 'snap' })); }
   if (dwHover?.circle) { const v = viewById(dwHover.view), X = viewXf(v), c = X.toSheet(dwHover.circle.c); sheetSvg.append(sv('circle', { cx: c[0], cy: c[1], r: dwHover.circle.r * X.s, class: 'snap ring' })); }
@@ -614,7 +640,7 @@ function wireSheet() {
       renderSheet(); return;
     }
     if (dwTool === 'dim') { dwHover = dwDraft?.p2 ? null : nearestSnap(P, dwDraft?.view); renderSheet(); }
-    else if (dwTool === 'dia' || dwTool === 'rad') { dwHover = dwDraft ? null : nearestCircle(P, dwTool === 'dia'); renderSheet(); }
+    else if (dwTool === 'dia' || dwTool === 'rad' || dwTool === 'callout') { dwHover = dwDraft ? null : nearestCircle(P, dwTool === 'dia'); renderSheet(); }
     else if (dwTool === 'ang') { dwHover = dwDraft?.l2 ? null : nearestLine(P, dwDraft?.view); renderSheet(); }
     else if (dwTool === 'section') { dwHover = dwDraft?.line ? null : nearestSnap(P, dwDraft?.view) || (viewAt(P) && { view: viewAt(P).id, free: true }); renderSheet(); }
     else if (dwTool === 'detail' || dwTool === 'balloon' || dwTool === 'note') renderSheet();
@@ -658,6 +684,17 @@ function wireSheet() {
         const label = String.fromCharCode(65 + dw().views.filter(w => w.kind === 'section').length);
         checkpoint(); dw().views.push({ id: uid(), kind: 'section', label, of: map.of, axis: map.axis, value: map.value(dwDraft.line.c), removeAbove: map.removeAbove, cutOf: v.id, line: dwDraft.line, x: P[0], y: P[1], hidden: false });
         persist(); dwDraft = null; dwTool = null; renderRibbon(); dwRefresh().then(renderSheet);
+      }
+      dwHover = null; renderSheet(); defaultHint(); return;
+    }
+    if (dwTool === 'callout') {
+      if (!dwDraft) { const c = nearestCircle(P, false); if (c) dwDraft = { view: c.view, circle: c.circle }; }   // holes can show as partial circles (seams, hidden parts)
+      else {
+        const v = viewById(dwDraft.view), d = dwData[vk(v)], at = viewXf(v).toLocal(P), info = holeCallout(dwDraft.circle.r, d);
+        checkpoint(); dw().dims.push({ id: uid(), view: dwDraft.view, kind: 'hc', c: dwDraft.circle.c, r: dwDraft.circle.r, nc: normPt(d, dwDraft.circle.c), at, ao: [at[0] - dwDraft.circle.c[0], at[1] - dwDraft.circle.c[1]], lines: info.lines, src: info.src, fid: info.fid || null });
+        persist(); dwDraft = null;
+        if (info.src === 'measured') toast('No hole or thread feature matches this circle, so the callout shows only the measured diameter');
+        else if (info.src === 'ambiguous') toast('Several features match this size, so the callout shows only the measured diameter. Edit its text to add the specification.');
       }
       dwHover = null; renderSheet(); defaultHint(); return;
     }
@@ -746,6 +783,10 @@ function dwSheetDialog() {
           const s0 = D.scale, s1 = +v, [W, H] = sheetSize();      // keep views spread around the sheet centre
           for (const vw of D.views) { vw.x = W / 2 + (vw.x - W / 2) * s1 / s0; vw.y = H / 2 + (vw.y - H / 2) * s1 / s0; }
           D.scale = s1; D.auto = false; renderSheet(); }))),
+        comps().length ? section_('Exploded view', h('div', { class: 'row' }, h('label', { class: 'rl', for: 'dw-explode' }, 'Explode'), (() => {
+          const i = h('input', { type: 'text', id: 'dw-explode', value: String(doc.drawing.explode || 0), inputmode: 'decimal', autocomplete: 'off', style: 'width:72px', title: '0 = assembled; 1 = each part moved out by its own distance from the centre' });
+          i.addEventListener('change', () => { const v = +i.value; if (v >= 0 && v <= 5) { doc.drawing.explode = v; if (v > 0 && doc.drawing.source && doc.drawing.source.kind !== 'exploded') doc.drawing.source = { ...doc.drawing.source, kind: 'exploded' }; dwUpdate(); } });
+          return h('div', { style: 'display:flex;gap:6px;align-items:center' }, i, h('span', { class: 'note', style: 'margin:0' }, '× distance from centre (0 = assembled)')); })())) : null,
         section_('Sheet name', txt('dw-sname', null, 'Name')),
         section_('Title block', txt('dw-dno', 'drawingNo', 'Drawing no.'), txt('dw-part', 'partNo', 'Part no.'), txt('dw-rev', 'revision', 'Revision'), txt('dw-mat', 'material', 'Material'), txt('dw-finish', 'finish', 'Finish'),
           txt('dw-author', 'author', 'Drawn by'), txt('dw-checked', 'checked', 'Checked by'),
@@ -759,6 +800,7 @@ function dwSheetDialog() {
 
 // ---------- PDF ----------
 function drawingPDF() {
+  if (dwStaleState) toast('This drawing is out of date; the PDF carries the OUT OF DATE stamp until you update it');
   const [W, H] = sheetSize(), k = 72 / 25.4, L = displayList();
   const X = x => (x * k).toFixed(3), Y = y => ((H - y) * k).toFixed(3);
   const enc = s => { let o = ''; for (const ch of s) { const c = ch.charCodeAt(0); if (ch === '(' || ch === ')' || ch === '\\') o += '\\' + ch; else if (ch === '—') o += '\\227'; else if (c < 128) o += ch; else if (c >= 160 && c <= 255) o += '\\' + c.toString(8); else o += '?'; } return o; };   // WinAnsi matches Latin-1 for 160–255

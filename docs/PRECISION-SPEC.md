@@ -120,11 +120,34 @@ click, then click a corner on the other part: Ball is suggested and the corners 
 Verification: `node scripts/build.mjs && node tests/e2e-drawing3.mjs` (face orientation checked on an axis-aligned face and on one turned 30°, to 0.01 mm).
 By hand: File ▸ Create Drawing from Face…, click a flat face, choose A1 and First angle, Create. Double-click the title block to fill it in.
 
+## Module C — manufacturing drawings (Phase 4, v0.40)
+
+| Requirement | Status | Notes |
+|---|---|---|
+| C6 detect that a drawing may be out of date | done | fingerprint of features, components, joints, parameters, visibility, source, orientation, explode |
+| C6 notify and offer a controlled update | done | banner with Update, OUT OF DATE stamp on the sheet (also in PDF); the earlier views stay until Update |
+| C6 regenerate model-derived geometry | done | views, sections, details from the exact model |
+| C6 preserve manual annotations | done | dimensions, callouts, notes, balloons kept and re-found |
+| C6 flag invalid or displaced annotations | done | Δ changed (with old value), ! geometry not found; Mark reviewed |
+| C6 record source revisions and update status | done | `doc.drawing.revs` (number, date, fingerprint, changed, lost) |
+| C6 no silent overwrite | done | adding a view to an out-of-date drawing updates it and says so; a new drawing source always gets fresh views |
+| C4 hole callouts | done | simple / counterbore / countersink / tapped (thread, pitch, LH, drill), depth or THRU, n× identical holes |
+| C4 thread callouts | done | thread features on shafts and holes; nominal size only when it matches a metric size, otherwise THREAD Ø… |
+| C4 never invent specifications | done | no feature → measured Ø, marked “(measured; no hole feature)”; several matching features → measured, with a note; no thread class or tolerance added |
+| C5 exploded assembly views | done | drawing-wide explode factor (Sheet & Title Block, or Create Drawing ▸ Exploded assembly) |
+| C5 balloons, parts list from instances | existing | balloons on removed parts are flagged on Update |
+| C5 links to component drawings | open | |
+| C3 auxiliary and broken views | open | Phase 5 |
+| C7 DXF of supported entities | existing | |
+
+Verification: `node scripts/build.mjs && node tests/e2e-drawing4.mjs`.
+By hand: make a drawing, add a hole callout (Annotate ▸ Hole / Thread Callout) and a dimension, then change the model in Design:
+the drawing says OUT OF DATE; Update shows the new values with Δ markers.
+
 ## Module C and later phases
 
 | Phase | Scope | Status |
 |---|---|---|
-| 4 Manufacturing drawings | out-of-date detection with controlled update preserving annotations, revision record, exploded/auxiliary/broken views | open (section, detail, BOM, balloons, DXF exist) |
 | 5 Advanced | ball/planar suggestions, alignment inference, GD&T, datum, surface finish, welding symbols, drawing checks | open |
 
 ## Phase 1 verification

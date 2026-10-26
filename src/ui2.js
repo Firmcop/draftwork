@@ -121,6 +121,7 @@ function openCreateDrawing(bodyIds, st0) {
   const st = st0 || { from: comp ? 'component' : ids.length ? 'body' : 'all', ids, comp: comp?.id || null, sheet: 'A3', projection: 'third', replace: !doc.drawing, face: null };
   const c = st.comp && compById(st.comp);
   const opts = [['all', comps().length ? 'Whole assembly (as assembled)' : 'Whole design']];
+  if (comps().length) opts.push(['exploded', 'Exploded assembly']);
   if (c) opts.push(['component', 'Component: ' + c.name + ' (alone)']);
   if (st.ids.length === 1) opts.push(['body', 'Body: ' + bodyName(st.ids[0])]);
   else if (st.ids.length > 1 && !c) opts.push(['body', st.ids.length + ' selected bodies']);
@@ -144,10 +145,11 @@ function openCreateDrawing(bodyIds, st0) {
       const cc = st.comp && compById(st.comp);
       const source = st.from === 'component' && cc ? { kind: 'component', comp: cc.id, name: cc.name }
         : st.from === 'body' ? { kind: 'body', bodies: [...st.ids], name: st.ids.map(bodyName).join(', ') }
+        : st.from === 'exploded' ? { kind: 'exploded', name: (doc.name || 'assembly') + ' (exploded)' }
         : { kind: comps().length ? 'assembly' : 'design', name: doc.name || 'design' };
       if (st.face) source.face = true;
       // the source and orientation must be known before the first views are made
-      const pre = { bodies: source.kind === 'body' ? [...st.ids] : source.kind === 'component' ? [...cc.bodies] : null, source, orient: st.face ? { body: st.face.body, sig: st.face.sig } : null };
+      const pre = { bodies: source.kind === 'body' ? [...st.ids] : source.kind === 'component' ? [...cc.bodies] : null, source, orient: st.face ? { body: st.face.body, sig: st.face.sig } : null, explode: source.kind === 'exploded' ? 0.8 : 0 };
       pendingDrawingSource = pre;
       await enterDrawing();
       pendingDrawingSource = null;
@@ -155,7 +157,7 @@ function openCreateDrawing(bodyIds, st0) {
       Object.assign(doc.drawing, pre);
       const s = dw();
       if (s) { s.sheet = st.sheet; s.projection = st.projection; }
-      persist(); await dwRefresh(); if (dw()?.auto) relayoutAuto(); dwFit(); renderSheet();   // fit to the chosen sheet size, then draw
+      persist(); await dwRefresh(true); if (dw()?.auto) relayoutAuto(); dwFit(); renderSheet();   // a new source always gets fresh views   // fit to the chosen sheet size, then draw
     } }, 'Create'),
     h('button', { class: 'btn', onclick: closeModal }, 'Cancel')]);
 }
