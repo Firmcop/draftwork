@@ -35,16 +35,21 @@ const idbKeys = () => page.evaluate(() => new Promise(res => { const q = indexed
 
 await page.goto(`http://localhost:${PORT}/`); await engine();
 await page.click('#abFile'); await page.click('text=New design'); await W(1000);
+// the busy indicator follows the upload stage by stage
+await page.evaluate(() => { window.__busySeen = new Set(); const b = document.querySelector('#busy'); new MutationObserver(() => { if (!b.hidden) window.__busySeen.add(b.textContent.split(' · ')[0]); }).observe(b, { attributes: true, childList: true, characterData: true, subtree: true }); });
 await page.setInputFiles('#stepInput', stepFile);
 await ready('import'); await idle(); await W(800);
+const seen = await page.evaluate(() => [...window.__busySeen]);
+check(seen.some(l => /^Reading the STEP file \(\d/.test(l)) && seen.some(l => /^(Preparing the view|Rebuilding the model)/.test(l)), 'upload shows its stages: ' + seen.join(' → '));
+check(await page.evaluate(() => document.querySelector('#busy').hidden), 'indicator clears when the upload is done');
 let st = await state();
 check(st.bodies.length === nBodies, `STEP import brings ${nBodies} bodies (${st.bodies.length})`);
-let t = await timings();
+let t = await timings(); const sigs0 = t.sigs || 0;
 check(t.import > 0 && !t.importbrep, 'first import parses the STEP file');
 // picking data (face/edge signatures) is computed after the rebuild, in the background
-await page.waitForFunction(() => 1, null, {}); await W(500);
+await W(500);
 t = await timings();
-check(t.sigs > 0, 'face and edge picking data arrive after the rebuild');
+check(sigs0 + (t.sigs || 0) > 0, 'face and edge picking data arrive after the rebuild');
 const sz = await page.evaluate(() => window.__dw.sizes());
 check(sz.doc > 200000 && sz.lean < 20000, `saved document stays small with the file inside (${sz.lean} B saved vs ${sz.doc} B in memory)`);
 check(sz.undoLast < 20000, `undo entries leave the file out (${sz.undoLast} B)`);

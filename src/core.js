@@ -645,11 +645,28 @@ function doRegen() {
   return Promise.resolve();
 }
 function finishRegen() {
-  $('#busy').hidden = true;
+  if (!busyState().hold) { $('#busy').hidden = true; busyRender(); }   // an upload in progress keeps the indicator
   if (selBody && !result.bodies.has(selBody)) selBody = null;
   if (typeof assemblyAutoComponents === 'function') assemblyAutoComponents();
   solveAssembly();
   updateScene(); dwAfterRegen(); renderTimeline(); renderBrowser(); renderInfo(); refreshDialogStatus(); persist();
+}
+
+// ---------- progress for long work: label · count · elapsed, with a bar when the count is known ----------
+function busyState() { return busyState.s || (busyState.s = { info: null, shown: 0, hold: 0 }); }
+function busyProgress(info) { const s = busyState(); s.info = info; busyRender(); }
+function busyRender() {
+  const el = $('#busy'), s = busyState(); if (!el) return;
+  if (el.hidden) {
+    if (el.classList.contains('prog')) { el.classList.remove('prog', 'indet'); el.style.removeProperty('--p'); el.textContent = 'Computing…'; }
+    s.shown = 0; s.info = null; return;
+  }
+  if (!s.shown) s.shown = performance.now();
+  const i = s.info; if (!i) return;
+  const secs = Math.floor((performance.now() - s.shown) / 1000), known = i.total > 1;
+  el.textContent = [i.label + '…', known ? `${Math.min(i.done + 1, i.total)} / ${i.total}${i.unit ? ' ' + i.unit : ''}` : '', secs >= 1 ? secs + ' s' : ''].filter(Boolean).join(' · ');
+  el.classList.add('prog'); el.classList.toggle('indet', !known);
+  if (known) el.style.setProperty('--p', (100 * i.done / i.total).toFixed(1) + '%'); else el.style.removeProperty('--p');
 }
 
 // ---------- persistence (per-browser convenience) ----------

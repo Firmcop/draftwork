@@ -20,6 +20,13 @@ function libURLs() {
   const abs = k => new URL(map[k], location.href).href;
   return { three: abs('three'), replicad: abs('replicad'), occ: abs('replicad-occ') };
 }
+// what the engine is doing, shown in the busy indicator with a count and elapsed time
+function engineProgress(p) {
+  const labels = { build: ['Rebuilding the model', 'features'], derive: ['Building inserted design' + (p.name ? ' “' + p.name + '”' : ''), 'features'], view: ['Preparing the view', 'bodies'], import: ['Reading the STEP file', ''], cache: ['Loading saved geometry', ''] };
+  const [label, unit] = labels[p.stage] || ['Computing', ''];
+  if (p.stage === 'import' && busyState().info?.label?.startsWith(label)) return;   // keeps the file size shown by the upload
+  busyProgress({ label, unit, done: p.done || 0, total: p.total || 0 });
+}
 function engineCall(op, args) {
   if (engineMode === 'inline') return engineInline.handle(op, args);
   return new Promise((resolve, reject) => {
@@ -32,6 +39,8 @@ function startWorker(urls, wasm) {
   return new Promise((resolve, reject) => {
     const src = `const factory = ${engineFactory.toString()};
 const hostP = factory(${JSON.stringify(urls)});
+let lastProg = 0;
+self.brepProgressPost = p => { const t = performance.now(); if (t - lastProg < 120 && p.done) return; lastProg = t; self.postMessage({ progress: p }); };
 self.onmessage = async e => {
   const { id, op, args } = e.data;
   try { const host = await hostP; const r = await host.handle(op, args); self.postMessage({ id, ok: true, r }, host.transfers(r)); }
@@ -43,6 +52,7 @@ self.onmessage = async e => {
     let started = false;
     w.onerror = e => { e.preventDefault?.(); if (!started) reject(new Error(e.message || 'worker could not start')); };
     w.onmessage = e => {
+      if (e.data.progress) { engineProgress(e.data.progress); return; }
       const { id, ok, r, err } = e.data, c = engineCalls.get(id); if (!c) return;
       engineCalls.delete(id); ok ? c.resolve(r) : c.reject(new Error(err));
     };
@@ -58,7 +68,7 @@ async function startEngine() {
     try { await startWorker(urls, wasm); return 'worker'; }
     catch (e) { console.warn('Engine worker unavailable, running on the page:', e); }
   }
-  engineInline = await engineFactory(urls); engineMode = 'inline';
+  globalThis.brepProgressPost = engineProgress; engineInline = await engineFactory(urls); engineMode = 'inline';
   await engineInline.handle('init', { urls, wasm });
   return 'inline';
 }

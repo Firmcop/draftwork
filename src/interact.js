@@ -257,21 +257,28 @@ function startImportSTEP() {
 $('#stepInput').addEventListener('change', e => {
   const file = e.target.files?.[0]; e.target.value = ''; if (!file) return;
   if (file.size > 25e6) { toast('That file is over 25 MB. Larger imports come with background processing.'); return; }
-  const rd = new FileReader();
+  const rd = new FileReader(), mb = (file.size / 1e6).toFixed(1) + ' MB';
+  // the busy indicator follows the upload: loading the file, reading the STEP data, building, preparing the view
+  busyState().hold++; busyState().shown = 0; $('#busy').hidden = false; busyProgress({ label: 'Loading ' + file.name + ' (' + mb + ')', done: 0, total: 0 });
+  rd.onprogress = ev => { if (ev.lengthComputable && ev.total > 2e6) busyProgress({ label: 'Loading ' + file.name, unit: 'MB', done: Math.round(ev.loaded / 1e6), total: Math.max(1, Math.round(ev.total / 1e6)) }); };
+  rd.onerror = () => { busyState().hold--; $('#busy').hidden = true; busyRender(); toast('Could not open ' + file.name); };
   rd.onload = async () => {
     const text = String(rd.result);
-    if (!/ISO-10303-21/.test(text.slice(0, 2000))) { toast('That is not a STEP file'); return; }
+    let held = true;
+    const done = () => { if (held) { held = false; busyState().hold--; } $('#busy').hidden = true; busyRender(); };
+    if (!/ISO-10303-21/.test(text.slice(0, 2000))) { done(); toast('That is not a STEP file'); return; }
     const fileId = uid();
     toast('Reading ' + file.name + '…');
     try {
+      busyProgress({ label: 'Reading the STEP file (' + mb + ')', done: 0, total: 0 });
       const n = await brepImportSTEP(fileId, text);
-      if (!n) { toast('No solid bodies found in ' + file.name); return; }
+      if (!n) { done(); toast('No solid bodies found in ' + file.name); return; }
       checkpoint();
       doc.files ||= {}; doc.files[fileId] = { name: file.name, text };
       const f = { id: uid(), type: 'import', name: file.name.replace(/\.(step|stp)$/i, ''), file: fileId };
-      insertFeature(f); await doRegen(); setView('fit');
+      insertFeature(f); await doRegen(); done(); setView('fit');
       toast(`Imported ${n} bod${n === 1 ? 'y' : 'ies'} from ${file.name}`);
-    } catch (err) { toast('Could not read ' + file.name + ': ' + occMsg(err)); }
+    } catch (err) { done(); toast('Could not read ' + file.name + ': ' + occMsg(err)); }
   };
   rd.readAsText(file);
 });
@@ -871,6 +878,7 @@ async function loadEngine() {
 // ---------- boot ----------
 function start(data) {
   doc = upgradeDoc(data?.doc) || loadStored() || sampleDoc();
+  setInterval(busyRender, 250);   // elapsed time and counts in the busy indicator
   payloadsReady = Promise.resolve().then(() => hydrateDoc(doc)).then(() => { try { drawToolsOverlay(); requestRender(); } catch (e) { } });   // file contents and drawing views saved outside the document
   $('#docTitle').textContent = doc.name;
   readTheme(); updateUndoButtons(); renderRibbon(); renderNavbar(); renderBrowser(); renderTimeline(); defaultHint();

@@ -123,7 +123,7 @@ function engineHost(RCmod) {
     const need = [];
     for (const [, b] of out.bodies) if (b.shape && !shipped.has(b.shape)) { shipped.add(b.shape); need.push(b.shape); }
     for (const [, list] of out.beforeBodies) for (const [, b] of list) if (b.shape && !shipped.has(b.shape)) { shipped.add(b.shape); need.push(b.shape); }
-    out.meshes = need.map(t => meshPayload(t, true)).filter(Boolean);
+    out.meshes = need.map((t, k) => { if (need.length > 3) brepProgress({ stage: 'view', done: k, total: need.length }); return meshPayload(t, true); }).filter(Boolean);
     out.meshData = [];
     const live = new Set();
     for (const [, m] of res.mbodies) { const t = mtok(m); live.add(t); if (mShipped.has(t)) continue; out.meshData.push([t, m.pos, m.idx, m.groups || null]); }
@@ -158,9 +158,12 @@ function engineHost(RCmod) {
       if (op === 'meshfile') { const bin = a.binary ? Uint8Array.from(atob(a.data), c => c.charCodeAt(0)) : null; importMeshes.set(a.fileId, /\.obj$/i.test(a.name) ? parseOBJ(a.data) : parseSTL(bin || new TextEncoder().encode(a.data))); cacheArr = []; return importMeshes.get(a.fileId).idx.length / 3; }
       if (op === 'flat') { const r = lastRes?.sheet.get(a.body); return r ? sheetFlatData(r) : null; }
       if (op === 'mesh') { const t = a.tok; const p = meshPayload(t, true); if (p) shipped.add(t); return p; }
+      if (op === 'import') brepProgress({ stage: 'import' });
       if (op === 'import') { const n = await brepImportSTEP(a.fileId, a.text); cacheArr = []; return a.wantBrep ? { n, brep: (importShapes.get(a.fileId) || []).map(s => s.serialize()) } : n; }
       // cached geometry: an import or an inserted design's result, in the engine's own format (no STEP parsing, no rebuild)
+      if (op === 'importbrep') brepProgress({ stage: 'cache' });
       if (op === 'importbrep') { importShapes.set(a.fileId, a.brep.map(s => RC.deserializeShape(s))); cacheArr = []; return a.brep.length; }
+      if (op === 'derivebrep') brepProgress({ stage: 'cache' });
       if (op === 'derivebrep') { deriveShapes.set(a.key, a.brep.map(s => RC.deserializeShape(s))); return a.brep.length; }
       if (op === 'derived') return a.keys.map(k => [k, (deriveShapes.get(k) || []).map(s => s.serialize())]);
       if (op === 'serialize') return a.toks.map(t => shapeOf.get(t)?.serialize() || null);

@@ -1036,20 +1036,84 @@ function brepClone(o) {
   return { bodies: new Map(o.bodies), bodyCount: o.bodyCount, lastBody: o.lastBody, sketches: new Map(o.sketches), planes: new Map(o.planes), axes: new Map(o.axes), points: new Map(o.points),
     status: new Map(o.status), tools: new Map(o.tools), before: new Map(o.before), beforeBodies: new Map(o.beforeBodies), sheet: new Map(o.sheet), mbodies: new Map(o.mbodies), lastMesh: o.lastMesh };
 }
+// progress reports to the page (set by the engine host; throttled there)
+function brepProgress(p) { try { globalThis.brepProgressPost?.(p); } catch (e) { } }
+let brepDepth = 0, brepDeriveName = '';
 function regenerateBrep(features, upto = null, cache = null) {
+  brepDepth++;
+  try { return regenerateBrepInner(features, upto, cache); } finally { brepDepth--; }
+}
+function regenerateBrepInner(features, upto, cache) {
   let out = { bodies: new Map(), bodyCount: 0, lastBody: null, sketches: new Map(), planes: new Map(), axes: new Map(), points: new Map(), status: new Map(), tools: new Map(), before: new Map(), beforeBodies: new Map(), sheet: new Map(), mbodies: new Map(), lastMesh: null };
   const end = upto == null ? features.length : Math.min(upto + 1, features.length);
   let key = '', reuse = !!cache;
+  // consecutive cuts that don't depend on the shape they cut (holes, cut primitives, distance/through-all cut extrudes and
+  // revolves on planes) are collected and applied as one boolean per body; the cache records the state after the run
+  const run = [];
+  const flush = () => {
+    if (!run.length) return;
+    brepCutRun(run, out);
+    const last = run[run.length - 1];
+    if (cache) { cache[last.i] = { key: last.key, out: brepClone(out) }; cache.length = last.i + 1; }
+    run.length = 0;
+  };
   for (let i = 0; i < features.length; i++) {
     const f = features[i];
-    if (i >= end) { out.status.set(f.id, { state: 'rolled' }); continue; }
+    if (i >= end) { flush(); out.status.set(f.id, { state: 'rolled' }); continue; }
+    if (brepDepth === 1) brepProgress({ stage: 'build', done: i, total: end });
+    else if (brepDepth === 2) brepProgress({ stage: 'derive', done: i, total: end, name: brepDeriveName });
     key += '|' + JSON.stringify(f);
     if (reuse && cache[i] && cache[i].key === key) { out = brepClone(cache[i].out); continue; }
     reuse = false;
+    if (f.type === 'sketch' && !f.suppressed) { brepStep(f, out); if (!run.length && cache) { cache[i] = { key, out: brepClone(out) }; cache.length = i + 1; } continue; }   // sketches never read bodies
+    if (brepBatchable(f, out)) {
+      out.before.set(f.id, [...out.bodies.keys()]);
+      try {
+        if (f.error) throw new Error(f.error);
+        const tool = brepTool(f, out);
+        const ids = f.target && out.bodies.has(f.target) ? [f.target] : [...out.bodies.keys()];
+        const hits = ids.filter(id => bboxOverlap(out.bodies.get(id).shape, tool));
+        if (!hits.length) throw new Error('The cut does not touch any body');
+        out.tools.set(f.id, { shape: tool, op: 'cut', target: f.target && out.bodies.has(f.target) ? f.target : null });
+        out.status.set(f.id, { state: 'ok' });
+        run.push({ i, key, f, tool, hits });
+      } catch (e) { out.status.set(f.id, { state: 'error', msg: occMsg(e) }); run.push({ i, key, f, tool: null, hits: [] }); }
+      continue;
+    }
+    flush();
     brepStep(f, out);
     if (cache) { cache[i] = { key, out: brepClone(out) }; cache.length = i + 1; }
   }
+  flush();
   return out;
+}
+function brepBatchable(f, out) {
+  if (f.suppressed || !out.bodies.size || globalThis.BREP_NO_BATCH) return false;
+  if (f.type === 'hole') return (f.extent || 'distance') !== 'to';
+  if (!['extrude', 'revolve', 'box', 'cylinder', 'sphere', 'torus'].includes(f.type) || f.op !== 'cut') return false;
+  if (f.type === 'extrude') return ['distance', 'two', 'all', undefined].includes(f.extent);
+  return true;
+}
+// one boolean per body for a run of cuts; if the combined cut fails, the tools are applied one at a time as usual
+function brepCutRun(run, out) {
+  const byBody = new Map();
+  for (const r of run) if (r.tool) for (const id of r.hits) { if (!byBody.has(id)) byBody.set(id, []); byBody.get(id).push(r); }
+  for (const [id, list] of byBody) {
+    const b = out.bodies.get(id); if (!b) continue;
+    if (list.length > 1) {
+      try {
+        const tool = T(RC.makeCompound(list.map(r => r.tool.clone())));
+        const res = T(b.shape.cut(tool));
+        if (res && RC.measureVolume(res) <= RC.measureVolume(b.shape) + 1e-6) { bReplace(out, id, res); continue; }
+      } catch (e) { }
+    }
+    let shape = b.shape;
+    for (const r of list) {
+      try { shape = T(shape.cut(r.tool)); }
+      catch (e) { out.status.set(r.f.id, { state: 'error', msg: occMsg(e) }); }
+    }
+    bReplace(out, id, shape);
+  }
 }
 const EDGE_TYPES = new Set(['fillet', 'chamfer', 'shell', 'draft', 'presspull', 'fullround', 'offsetface']);
 const FACE_PICK = new Set(['shell', 'draft', 'presspull', 'thicken', 'replaceface', 'thread', 'emboss', 'splitface', 'lip', 'fullround', 'offsetface']);
@@ -1162,6 +1226,7 @@ function brepStep(f, out) {
       // a saved result of this exact design is used as it is; otherwise its timeline is rebuilt (and the result kept)
       let shapes = f.resKey ? deriveShapes.get(f.resKey) : null;
       if (!shapes) {
+        brepDeriveName = f.name || ''; brepProgress({ stage: 'derive', done: 0, total: f.sub.length, name: brepDeriveName });
         const sub = regenerateBrep(f.sub), errs = [...sub.status.values()].filter(s => s.state === 'error').length;
         if (!sub.bodies.size) throw new Error('The derived design has no bodies' + (errs ? ` (${errs} of its features fail)` : ''));
         shapes = [...sub.bodies.values()].map(b => b.shape);

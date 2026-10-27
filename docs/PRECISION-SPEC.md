@@ -194,5 +194,6 @@ Precision work on imported and inserted models depends on them loading quickly. 
 | STEP import | 4.8–5.6 s | 3.7 s |
 | Reading the import on reopen | 1.2 s (STEP parse) | 0.16 s (cached BREP) |
 | Insert a design already built or saved | 7.5 s | 1.2 s |
+| Insert a design for the first time (v0.44) | 7.6 s | 1.4 s |
 
-Picking signatures are computed after the shapes appear, so references resolve a moment later on large imports; display meshes use an angular tolerance of 0.35 rad (about 18 segments per circle). Exact geometry, measurements and exports are unchanged. `tests/e2e-perf.mjs` guards each of these.
+Picking signatures are computed after the shapes appear, so references resolve a moment later on large imports; display meshes use an angular tolerance of 0.35 rad (about 18 segments per circle). Exact geometry, measurements and exports are unchanged. From v0.44, consecutive holes and cuts placed on planes (distance or through-all extents) are combined into one boolean per body; the result is checked against the sequential result in `tests/brep.test.mjs`, and a failed combined cut falls back to one cut at a time. `tests/e2e-perf.mjs` guards each of these.

@@ -283,3 +283,31 @@ test('split face cuts only the picked face', () => {
   assert.equal(K.brepSigMap(b2, 'face').size, 7, 'six faces + the top split in two');
   near(K.brepProps(b2).volume, 8000, 1e-6, 'volume unchanged');
 });
+
+test('a run of cuts is applied as one boolean with the same result, and edits inside the run rebuild correctly', () => {
+  const plate = { id: 'b', type: 'box', plane: 'XY', cx: 0, cy: 0, w: 200, d: 120, h: 12, op: 'new' };
+  const holes = Array.from({ length: 24 }, (_, k) => ({ id: 'h' + k, type: 'hole', plane: 'XY', offset: 12, flip: false, cx: -75 + (k % 6) * 30, cy: -45 + Math.floor(k / 6) * 30, diameter: 6, depth: 8, tip: true, holeType: 'cbore', cbDiameter: 10, cbDepth: 3 }));
+  const cut = { id: 'c', type: 'cylinder', plane: 'XY', offset: 0, cx: 90, cy: 50, diameter: 10, h: 12, op: 'cut' };
+  const fil = { id: 'x', type: 'box', plane: 'XY', cx: 120, cy: 0, w: 10, d: 10, h: 10, op: 'join' };   // a join ends the run
+  const feats = [plate, ...holes, cut, fil, { ...holes[0], id: 'late', cx: 120, cy: 0, depth: 5 }];
+  globalThis.BREP_NO_BATCH = true; const seq = K.regenerateBrep(feats); globalThis.BREP_NO_BATCH = false;
+  const bat = K.regenerateBrep(feats);
+  okAll(seq); okAll(bat);
+  assert.deepEqual(vols(bat).map(v => v.toFixed(4)), vols(seq).map(v => v.toFixed(4)), 'same volumes');
+  assert.equal([...bat.bodies.values()][0].shape.faces.length, [...seq.bodies.values()][0].shape.faces.length, 'same faces');
+  assert.ok(bat.tools.get('h5')?.shape, 'each hole keeps its tool for previews');
+  // incremental rebuilds with the cache: editing a hole in the middle of the run
+  const cache = [];
+  K.regenerateBrep(feats, null, cache);
+  const edited = feats.map(f => f.id === 'h7' ? { ...f, diameter: 4 } : f);
+  const inc = K.regenerateBrep(edited, null, cache), fresh = K.regenerateBrep(edited);
+  near(vols(inc)[0], vols(fresh)[0], 1e-6, 'cached rebuild after editing a hole');
+  // rolling back into the run
+  const rb = K.regenerateBrep(feats, 5, cache);
+  globalThis.BREP_NO_BATCH = true; const rbs = K.regenerateBrep(feats, 5); globalThis.BREP_NO_BATCH = false;
+  near(vols(rb)[0], vols(rbs)[0], 1e-6, 'rolled back inside the run');
+  // a cut that misses reports its own error and the rest still apply
+  const miss = K.regenerateBrep([plate, holes[0], { ...holes[1], id: 'm', cx: 900 }, holes[2]]);
+  assert.equal(miss.status.get('m').state, 'error');
+  assert.equal(miss.status.get('h2').state, 'ok');
+});

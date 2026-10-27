@@ -562,3 +562,9 @@ table.grid tr.sel td { background: color-mix(in srgb, var(--accent) 22%, transpa
 .ref-cpoint { border: 2px solid var(--accent); border-radius: 2px; transform: rotate(45deg); background: color-mix(in srgb, var(--accent) 25%, transparent); }
 .ref-caxis { border: 2px dashed var(--accent); border-radius: 50%; }
 .ref-cplane { border: 2px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+/* progress in the busy indicator: label · count · elapsed, filled bar when the count is known */
+.busy.prog { --p: 0%; padding: 4px 10px; border: 1px solid var(--line); border-radius: 4px; color: var(--fg); background: linear-gradient(90deg, var(--accent-soft) var(--p), var(--panel) var(--p)); box-shadow: var(--shadow); max-width: min(520px, calc(100% - 28px)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.busy.prog.indet { background: linear-gradient(90deg, var(--panel) 0%, var(--accent-soft) 50%, var(--panel) 100%) 0 0 / 200% 100%; animation: busysweep 1.4s linear infinite; }
+@keyframes busysweep { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) { .busy.prog.indet { animation: none; background: var(--accent-soft); } }
