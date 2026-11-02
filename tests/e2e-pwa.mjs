@@ -56,6 +56,8 @@ await page.reload(); await page.waitForTimeout(1500);
 await ctx.setOffline(true);
 const res = await page.goto(`http://localhost:${PORT}/`).catch(e => null);
 check(res && res.ok() && /Draftwork/.test(await page.content()), 'app page opens offline from the cache');
+const offEngine = await page.waitForFunction(() => /Exact engine/.test(document.querySelector('#engineBadge')?.textContent || ''), null, { timeout: 120000 }).then(() => true, () => false);
+check(offEngine, 'exact engine starts offline');
 await ctx.setOffline(false);
 check(!errors.filter(e => !/Failed to fetch|NetworkError|net::/.test(e)).length, 'no page errors' + (errors.length ? ': ' + errors.slice(0, 3).join(' | ') : ''));
 

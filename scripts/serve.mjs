@@ -15,7 +15,10 @@ export function serve(p = port) {
     if (url.startsWith('/engine/')) url = '/dist' + url;           // the page fetches engine/… relative to itself
     const file = path.join(root, url);
     if (!file.startsWith(root) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); return res.end('Not found'); }
-    res.writeHead(200, { 'content-type': types[path.extname(file)] || 'application/octet-stream' });
+    const st = fs.statSync(file), tag = '"' + st.size.toString(36) + '-' + Math.floor(st.mtimeMs).toString(36) + '"';
+    const cacheable = path.extname(file) === '.wasm';   // like GitHub Pages: the engine is cached and revalidated
+    if (cacheable && req.headers['if-none-match'] === tag) { res.writeHead(304, { etag: tag, 'cache-control': 'max-age=600' }); return res.end(); }
+    res.writeHead(200, { 'content-type': types[path.extname(file)] || 'application/octet-stream', ...(cacheable ? { etag: tag, 'cache-control': 'max-age=600' } : {}) });
     fs.createReadStream(file).pipe(res);
   }).listen(p);
 }

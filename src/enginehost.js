@@ -142,6 +142,17 @@ function engineHost(RCmod) {
     try {
       if (op === 'init') {
         const glue = await import(a.urls.occ);
+        // preferred: compile while downloading from the plain engine file; the browser then keeps the compiled
+        // (optimised) code between launches, so later starts skip compiling 23 MB and run at full speed at once
+        if (a.wasmPlain && WebAssembly.instantiateStreaming && !globalThis.DW_NO_STREAM) {
+          let mod = null;
+          try { const r = await fetch(a.wasmPlain); if (r.ok && /wasm/.test(r.headers.get('content-type') || '')) mod = await WebAssembly.compileStreaming(r); } catch (e) { mod = null; }
+          if (mod) {
+            const oc = await glue.default({ instantiateWasm(imports, done) { WebAssembly.instantiate(mod, imports).then(inst => done(inst, mod)); return {}; } });
+            RCmod.setOC(oc); RC = RCmod;
+            return { ok: true, streamed: true };
+          }
+        }
         const res = await fetch(a.wasm);
         if (!res.ok) throw new Error('engine file missing (' + res.status + ')');
         let buf = new Uint8Array(await res.arrayBuffer());

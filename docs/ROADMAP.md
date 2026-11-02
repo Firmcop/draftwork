@@ -54,6 +54,7 @@ Next
 - [x] v0.42 Spec gaps closed: collinear, equal length / radius and symmetry inference; joint origins on edge intersections, between parallel faces and on construction planes, axes and points; Align a second hole (hole patterns), rigid-joint rotation; component sheets linked from the parts list
 - [x] v0.43 Speed: lean document, undo and session save (imported files and drawing views held once in browser storage); STEP imports cached as BREP (reopen 7× faster to read); inserted designs cached by content hash (re-insert ~6× faster); picking signatures fetched after the rebuild; coarser display mesh on curves; e2e speed safeguards
 - [x] v0.44 Faster rebuilds: consecutive holes and plane-placed cuts applied as one boolean per body (96 holes: 8.4 s → 0.6 s, identical geometry, per-cut fallback); stage-by-stage progress with counts and elapsed time for uploads, rebuilds, inserted designs and view preparation
+- [x] v0.45 Editing imported models: Cut on a sketch drawn on a face goes into the part (as when dragging the arrow inward in Fusion); a cut that removes nothing is reported with how to fix it instead of passing silently; cutting an STL/OBJ body explains Convert Mesh. Engine compiled while downloading and kept compiled between launches (STEP parsing about 2–4× faster from the second launch)
 - [ ] Desktop packaging (Tauri)
 
 ## Phase 2 — Drawings, assemblies, animation *(started)*

@@ -72,6 +72,10 @@ const wasmOut = path.join(dist, 'engine/occ-gz.wasm');
 if (!fs.existsSync(wasmOut) || fs.statSync(wasmOut).mtimeMs < fs.statSync(wasmSrc).mtimeMs) {
   fs.writeFileSync(wasmOut, zlib.gzipSync(fs.readFileSync(wasmSrc), { level: 9 }));
 }
+// the plain engine file: compiled while it downloads and kept compiled by the browser between launches
+// (web servers send it compressed; the packed copy above is the fallback)
+const wasmPlainOut = path.join(dist, 'engine/occ.wasm');
+if (!fs.existsSync(wasmPlainOut) || fs.statSync(wasmPlainOut).mtimeMs < fs.statSync(wasmSrc).mtimeMs) fs.copyFileSync(wasmSrc, wasmPlainOut);
 
 // ---- installable desktop app (PWA) for GitHub Pages: dist/site ----
 {
@@ -85,7 +89,7 @@ if (!fs.existsSync(wasmOut) || fs.statSync(wasmOut).mtimeMs < fs.statSync(wasmSr
   r.addEventListener('updatefound', () => { const w = r.installing; w && w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller && typeof toast === 'function') toast('A new version of Draftwork is ready: close and reopen the app (or reload) to use it.'); }); });
 }).catch(() => {}));</script>`;
   fs.writeFileSync(path.join(site, 'index.html'), head + html + reg + '</body></html>');
-  fs.copyFileSync(wasmOut, path.join(site, 'engine/occ-gz.wasm'));
+  fs.copyFileSync(wasmOut, path.join(site, 'engine/occ-gz.wasm')); fs.copyFileSync(wasmPlainOut, path.join(site, 'engine/occ.wasm'));
   for (const f of ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png']) fs.copyFileSync(path.join(root, 'assets', f), path.join(site, f));
   fs.writeFileSync(path.join(site, 'manifest.webmanifest'), JSON.stringify({
     name: 'Draftwork', short_name: 'Draftwork', description: 'Parametric CAD: design, drawings, simulation and manufacture',
@@ -101,6 +105,7 @@ self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Pr
 self.addEventListener('fetch', e => {
   const u = new URL(e.request.url);
   if (e.request.method !== 'GET' || u.pathname.includes('/configurator/')) return;   // the configurator is its own site
+  if (u.pathname.endsWith('/engine/occ.wasm')) return;   // straight from the browser's HTTP cache, which keeps the compiled engine (offline: the packed copy below)
   const same = u.origin === location.origin, page = same && (e.request.mode === 'navigate' || u.pathname.endsWith('/') || u.pathname.endsWith('index.html'));
   if (page) { e.respondWith(fetch(e.request).then(r => { const c = r.clone(); caches.open(V).then(x => x.put(e.request, c)); return r; }).catch(() => caches.match(e.request).then(r => r || caches.match('index.html')))); return; }
   if (same || /(^|\\.)(jsdelivr\\.net|unpkg\\.com|googleapis\\.com|gstatic\\.com)$/.test(u.hostname)) {

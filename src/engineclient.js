@@ -35,7 +35,7 @@ function engineCall(op, args) {
     engineWorker.postMessage({ id, op, args });
   });
 }
-function startWorker(urls, wasm) {
+function startWorker(urls, wasm, wasmPlain) {
   return new Promise((resolve, reject) => {
     const src = `const factory = ${engineFactory.toString()};
 const hostP = factory(${JSON.stringify(urls)});
@@ -57,19 +57,19 @@ self.onmessage = async e => {
       engineCalls.delete(id); ok ? c.resolve(r) : c.reject(new Error(err));
     };
     engineWorker = w; engineMode = 'worker';
-    engineCall('init', { urls, wasm }).then(() => { started = true; resolve(); }, e => { w.terminate(); engineWorker = null; reject(e); });
+    engineCall('init', { urls, wasm, wasmPlain }).then(() => { started = true; resolve(); }, e => { w.terminate(); engineWorker = null; reject(e); });
   });
 }
 // Starts the exact engine: worker first, then on the page. Rejects when neither works.
 async function startEngine() {
   if (typeof WebAssembly !== 'object') throw new Error('WebAssembly is not available');
-  const urls = libURLs(), wasm = new URL('engine/occ-gz.wasm', location.href).href;
+  const urls = libURLs(), wasm = new URL('engine/occ-gz.wasm', location.href).href, wasmPlain = new URL('engine/occ.wasm', location.href).href;
   if (typeof Worker === 'function' && !/[?&]inline-engine\b/.test(location.search)) {
-    try { await startWorker(urls, wasm); return 'worker'; }
+    try { await startWorker(urls, wasm, wasmPlain); return 'worker'; }
     catch (e) { console.warn('Engine worker unavailable, running on the page:', e); }
   }
   globalThis.brepProgressPost = engineProgress; engineInline = await engineFactory(urls); engineMode = 'inline';
-  await engineInline.handle('init', { urls, wasm });
+  await engineInline.handle('init', { urls, wasm, wasmPlain });
   return 'inline';
 }
 

@@ -98,7 +98,7 @@ var pendingSketchTool = null;
 function startCreateSketch() {
   startPick({ prompt: 'Select a plane or flat face to sketch on', planes: true, faces: true, then: c => {
     checkpoint();
-    const f = { id: uid(), type: 'sketch', name: nextName('sketch'), plane: c.plane, offset: c.offset || 0, flip: !!c.flip, profiles: [], ...(c.body && compOfBody(c.body) ? { body: c.body } : {}) };
+    const f = { id: uid(), type: 'sketch', name: nextName('sketch'), plane: c.plane, offset: c.offset || 0, flip: !!c.flip, profiles: [], ...(c.face ? { onFace: true } : {}), ...(c.body && compOfBody(c.body) ? { body: c.body } : {}) };
     insertFeature(f); lastSketchId = f.id;
     doRegen(); enterSketch(f.id); setSketchTool(pendingSketchTool || 'rect2'); pendingSketchTool = null;
   } });

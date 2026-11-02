@@ -315,12 +315,20 @@ function dialogHelp(f) {
     pattern: 'Repeats a feature. Copies of a New Body feature become new bodies.', mirror: 'Mirrors a feature across an origin plane.', plane: 'A reference plane you can sketch on.',
     move: 'Moves or copies a body. Rotation is about the origin.', sweep: 'Moves a profile along a sketched path.', draft: 'Tilts the picked faces so the part releases from a mold.', loft: 'Blends a solid through two or more profiles.', import: 'Solids read from a STEP file.', fillet: 'Rounds the picked edges. Edge picks follow the model when earlier steps change.', chamfer: 'Bevels the picked edges.', shell: 'Hollows the body, opening the picked faces, with walls of the given thickness.', combine: 'Joins, cuts or intersects bodies with each other.' }[f.type] || 'Values accept expressions such as width/2 + 5.';
 }
+// a sketch on a picked face looks out of the part: a cut goes the other way, into the material
+function cutIntoFace(f) {
+  if (f.type !== 'extrude') return;
+  const sk = featById(f.sketch), onFace = !!sk?.onFace;   // the sketch normal points out of the face it was drawn on
+  if (!onFace) return;
+  if (f.op === 'cut' && (f.direction || 'one') === 'one') { f.direction = 'reverse'; f.autoFlip = true; }
+  else if (f.op !== 'cut' && f.autoFlip) { if (f.direction === 'reverse') f.direction = 'one'; delete f.autoFlip; }
+}
 function featureFields(f, idx) {
   const out = [];
   const nameRow = h('input', { type: 'text', id: 'dx-name', value: f.name, autocomplete: 'off' });
   nameRow.addEventListener('input', () => { checkpoint('name' + f.id); f.name = nameRow.value; renderTimeline(); renderBrowser(); });
   const opsSection = () => {
-    const kids = [selField('Operation', f, 'op', typeof designType === 'function' && designType() === 'hybrid' ? [...opOptions, ['newcomp', 'New Component']] : opOptions, { rerender: true })];
+    const kids = [selField('Operation', f, 'op', typeof designType === 'function' && designType() === 'hybrid' ? [...opOptions, ['newcomp', 'New Component']] : opOptions, { rerender: true, after: () => cutIntoFace(f) })];
     if (f.op !== 'new') kids.push(selField('Objects', f, 'target', [['', f.op === 'cut' ? 'All bodies it touches' : 'Automatic (last body)'], ...bodiesBefore(f.id)], { id: 'ds-target' }));
     return kids;
   };

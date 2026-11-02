@@ -33,7 +33,9 @@ const ready = kind => page.waitForFunction(k => window.__dw.state().features.inc
 const timings = () => page.evaluate(() => window.__dw.engineTimings());
 const idbKeys = () => page.evaluate(() => new Promise(res => { const q = indexedDB.open('draftwork'); q.onsuccess = () => { const t = q.result.transaction('payloads').objectStore('payloads').getAllKeys(); t.onsuccess = () => res(t.result); }; }));
 
+const engineFiles = []; page.context().on('request', r => { if (/engine\/occ/.test(r.url())) engineFiles.push(r.url().split('/').pop()); });
 await page.goto(`http://localhost:${PORT}/`); await engine();
+check(engineFiles.includes('occ.wasm') && !engineFiles.includes('occ-gz.wasm'), 'engine compiles while downloading the plain file (kept compiled between launches): ' + engineFiles.join(', '));
 await page.click('#abFile'); await page.click('text=New design'); await W(1000);
 // the busy indicator follows the upload stage by stage
 await page.evaluate(() => { window.__busySeen = new Set(); const b = document.querySelector('#busy'); new MutationObserver(() => { if (!b.hidden) window.__busySeen.add(b.textContent.split(' · ')[0]); }).observe(b, { attributes: true, childList: true, characterData: true, subtree: true }); });

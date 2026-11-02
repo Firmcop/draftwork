@@ -310,17 +310,34 @@ function bboxOverlap(a, b) {
   try { const A = a.boundingBox, B = b.boundingBox; const [a0, a1] = A.bounds, [b0, b1] = B.bounds; return a0[0] <= b1[0] && a1[0] >= b0[0] && a0[1] <= b1[1] && a1[1] >= b0[1] && a0[2] <= b1[2] && a1[2] >= b0[2]; }
   catch (e) { return true; }
 }
+// how much of a body there is (volume for solids, area for surfaces), to tell whether a cut removed anything
+function bAmount(shape) { try { return isSurfaceShape(shape) ? RC.measureArea(shape) : RC.measureVolume(shape); } catch (e) { return NaN; } }
+function cutChanged(before, after) { const a = bAmount(before), b = after ? bAmount(after) : 0; return !(isFinite(a) && isFinite(b)) || Math.abs(a - b) > 1e-7 * Math.max(1, a); }
+// meshes (STL/OBJ) the tool overlaps: B-rep cuts don't apply to them
+function meshHit(out, tool) {
+  let tb; try { tb = tool.boundingBox.bounds; } catch (e) { return null; }
+  for (const m of out.mbodies?.values() || []) {
+    const p = m.pos; if (!p?.length) continue;
+    const lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+    for (let i = 0; i < p.length; i += 3) for (let k = 0; k < 3; k++) { const v = p[i + k]; if (v < lo[k]) lo[k] = v; if (v > hi[k]) hi[k] = v; }
+    if ([0, 1, 2].every(k => lo[k] <= tb[1][k] && hi[k] >= tb[0][k])) return m;
+  }
+  return null;
+}
+const MESH_CUT_MSG = m => `${m.name} is a mesh (from an STL or OBJ file), which cuts don't change. Convert it first: Mesh › Convert Mesh, then cut the converted body.`;
+const AWAY_MSG = 'The cut removes no material: it points away from the body. Set Direction to Flipped (or Symmetric), or use a larger distance.';
 function bApply(out, f, tool, op, target, suffix = '') {
   if (op === 'new' || out.bodies.size === 0) {
-    if ((op === 'cut' || op === 'intersect') && out.bodies.size === 0) throw new Error('There is no body to ' + op + ' yet. Use New Body first.');
+    if ((op === 'cut' || op === 'intersect') && out.bodies.size === 0) { const m = meshHit(out, tool); throw new Error(m ? MESH_CUT_MSG(m) : 'There is no body to ' + op + ' yet. Use New Body first.'); }
     bNew(out, f.id + suffix, tool, f.id); return { op: 'new', target: f.id + suffix };
   }
   if (op === 'join') { const id = bTarget(out, target); bReplace(out, id, T(out.bodies.get(id).shape.fuse(tool))); out.lastBody = id; return { op, target: id }; }
   if (op === 'cut') {
     const ids = target && out.bodies.has(target) ? [target] : [...out.bodies.keys()];
-    let hit = false;
-    for (const id of ids) { const b = out.bodies.get(id); if (!bboxOverlap(b.shape, tool)) continue; hit = true; bReplace(out, id, T(b.shape.cut(tool))); }
-    if (!hit) throw new Error('The cut does not touch any body');
+    const done = [];
+    for (const id of ids) { const b = out.bodies.get(id); if (!bboxOverlap(b.shape, tool)) continue; const r = T(b.shape.cut(tool)); if (cutChanged(b.shape, r)) done.push([id, r]); }
+    if (!done.length) { const m = meshHit(out, tool); throw new Error(m ? MESH_CUT_MSG(m) : ids.some(id => bboxOverlap(out.bodies.get(id).shape, tool)) ? AWAY_MSG : 'The cut does not touch any body'); }
+    for (const [id, r] of done) bReplace(out, id, r);
     return { op, target: target || null };
   }
   if (op === 'intersect') { const id = bTarget(out, target); bReplace(out, id, T(out.bodies.get(id).shape.intersect(tool))); return { op, target: id }; }
@@ -1073,7 +1090,7 @@ function regenerateBrepInner(features, upto, cache) {
         const tool = brepTool(f, out);
         const ids = f.target && out.bodies.has(f.target) ? [f.target] : [...out.bodies.keys()];
         const hits = ids.filter(id => bboxOverlap(out.bodies.get(id).shape, tool));
-        if (!hits.length) throw new Error('The cut does not touch any body');
+        if (!hits.length) { const m = meshHit(out, tool); throw new Error(m ? MESH_CUT_MSG(m) : 'The cut does not touch any body'); }
         out.tools.set(f.id, { shape: tool, op: 'cut', target: f.target && out.bodies.has(f.target) ? f.target : null });
         out.status.set(f.id, { state: 'ok' });
         run.push({ i, key, f, tool, hits });
@@ -1098,22 +1115,24 @@ function brepBatchable(f, out) {
 function brepCutRun(run, out) {
   const byBody = new Map();
   for (const r of run) if (r.tool) for (const id of r.hits) { if (!byBody.has(id)) byBody.set(id, []); byBody.get(id).push(r); }
+  const removed = new Set();
   for (const [id, list] of byBody) {
     const b = out.bodies.get(id); if (!b) continue;
     if (list.length > 1) {
       try {
         const tool = T(RC.makeCompound(list.map(r => r.tool.clone())));
         const res = T(b.shape.cut(tool));
-        if (res && RC.measureVolume(res) <= RC.measureVolume(b.shape) + 1e-6) { bReplace(out, id, res); continue; }
+        if (res && RC.measureVolume(res) <= RC.measureVolume(b.shape) + 1e-6) { if (cutChanged(b.shape, res)) { list.forEach(r => removed.add(r)); bReplace(out, id, res); } continue; }
       } catch (e) { }
     }
     let shape = b.shape;
     for (const r of list) {
-      try { shape = T(shape.cut(r.tool)); }
+      try { const n = T(shape.cut(r.tool)); if (cutChanged(shape, n)) removed.add(r); shape = n; }
       catch (e) { out.status.set(r.f.id, { state: 'error', msg: occMsg(e) }); }
     }
     bReplace(out, id, shape);
   }
+  for (const r of run) if (r.tool && !removed.has(r) && out.status.get(r.f.id)?.state === 'ok') out.status.set(r.f.id, { state: 'error', msg: AWAY_MSG });
 }
 const EDGE_TYPES = new Set(['fillet', 'chamfer', 'shell', 'draft', 'presspull', 'fullround', 'offsetface']);
 const FACE_PICK = new Set(['shell', 'draft', 'presspull', 'thicken', 'replaceface', 'thread', 'emboss', 'splitface', 'lip', 'fullround', 'offsetface']);
