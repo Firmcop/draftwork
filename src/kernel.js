@@ -681,7 +681,7 @@ export function resolveFeatures(features, vars) {
   // 'New component' is a new body that the page then puts in its own component
   return features.map(f => { const holder = {}; const r = conv(f, holder); if (holder.error) r.error = holder.error; if (r.op === 'newcomp') { r.op = 'new'; r.newComp = true; } return r; });
 }
-const NUMERIC = new Set(['offset', 'distance', 'angle', 'count', 'count2', 'spacing', 'spacing2', 'cx', 'cy', 'w', 'h', 'd', 'r', 'rot', 'sides', 'length', 'width',
+const NUMERIC = new Set(['fromLeft', 'fromBottom', 'frameWidth', 'frameDepth', 'radius', 'offset', 'distance', 'angle', 'count', 'count2', 'spacing', 'spacing2', 'cx', 'cy', 'w', 'h', 'd', 'r', 'rot', 'sides', 'length', 'width',
   'diameter', 'depth', 'cbDiameter', 'cbDepth', 'radius', 'thickness', 'value', 'neutralOffset', 'wall', 'pathIndex', 'major', 'minor', 'dx', 'dy', 'dz', 'rx', 'ry', 'rz', 'tipAngle', 'x', 'y', 'bendRadius', 'kFactor', 'height', 'pitch', 'revolutions', 'section_size', 'factor', 'tolerance', 'gap', 'draftAngle', 'clearance', 'holeDiameter', 'holeDepth', 'holeBelow', 'ribs', 'ribThickness', 'ribLength', 'ribHeight', 'ribAngle', 'hookDepth', 'insertAngle', 'orient', 'edge', 'percent', 'iterations', 'strength', 'nx', 'ny', 'nz', 'level', 'distance2', 'startOffset', 'taper', 'angle2', 'csDiameter', 'csAngle', 'threadDepth']);
 
 // ---- crease edges that tolerate T-junctions (boolean output) ----

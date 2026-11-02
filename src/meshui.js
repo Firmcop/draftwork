@@ -25,7 +25,8 @@ function startInsertMesh() {
         doc.files ||= {}; doc.files[fileId] = { name: file.name, data, binary, kind: 'mesh' };
         const f = { id: uid(), type: 'meshinsert', name: file.name.replace(/\.(stl|obj)$/i, ''), file: fileId, units: 'mm', center: true, upY: false };
         insertFeature(f); await doRegen(); setView('fit'); openFeatureDialog(f.id, true, snap);
-        toast(`Inserted ${n.toLocaleString('en-US')} triangles from ${file.name}`);
+        const mk = meshKind([...result.bodies.values()].find(b => b.feature === f.id)?.stats);
+        toast(`Inserted ${n.toLocaleString('en-US')} triangles from ${file.name}: ${mk.label.toLowerCase()}. ${mk.next}`);
       } catch (err) { toast('Could not read ' + file.name + ': ' + (err.message || err)); }
     };
     isObj ? rd.readAsText(file) : rd.readAsArrayBuffer(file);
@@ -58,7 +59,7 @@ function newMesh(type) {
 function meshStatsNote(id) {
   const b = result.bodies.get(id); if (!b?.stats) return null;
   const s = b.stats;
-  return h('p', { class: 'note' }, `${s.tris.toLocaleString('en-US')} triangles · ${s.verts.toLocaleString('en-US')} vertices · ${s.closed ? 'closed' : `open (${s.boundary} boundary edges${s.nonManifold ? ', ' + s.nonManifold + ' non-manifold' : ''})`}${s.closed ? ' · ' + fmt(Math.abs(s.volume) / 1000) + ' cm³' : ''}${b.groupCount ? ' · ' + b.groupCount + ' face groups' : ''}`);
+  return h('div', {}, kindNote(meshKind(s)), h('p', { class: 'note' }, `${s.tris.toLocaleString('en-US')} triangles · ${s.verts.toLocaleString('en-US')} vertices · ${s.closed ? 'closed' : `open (${s.boundary} boundary edges${s.nonManifold ? ', ' + s.nonManifold + ' non-manifold' : ''})`}${s.closed ? ' · ' + fmt(Math.abs(s.volume) / 1000) + ' cm³' : ''}${b.groupCount ? ' · ' + b.groupCount + ' face groups' : ''}`));
 }
 function meshDialog(f, idx, out) {
   const meshOpts = () => { const ids = meshBodies(); if (f.body && !ids.includes(f.body)) ids.unshift(f.body); return ids.map(id => [id, bodyName(id)]); };

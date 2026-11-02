@@ -298,7 +298,7 @@ function bReplace(out, id, shape) {
   const surface = !!shape && isSurfaceShape(shape);
   let empty = false; try { empty = !shape || (surface ? RC.measureArea(shape) < 1e-9 : RC.measureVolume(shape) < 1e-9); } catch (e) { empty = false; }
   if (empty) { out.bodies.delete(id); if (out.lastBody === id) out.lastBody = [...out.bodies.keys()].pop() || null; return; }
-  out.bodies.set(id, { id, name: b.name, shape, feature: b.feature, surface });
+  out.bodies.set(id, { id, name: b.name, shape, feature: b.feature, surface, ...(b.role ? { role: b.role } : {}) });
 }
 function bTarget(out, target) {
   if (target && out.bodies.has(target)) return target;
@@ -1056,7 +1056,9 @@ function brepClone(o) {
 // progress reports to the page (set by the engine host; throttled there)
 function brepProgress(p) { try { globalThis.brepProgressPost?.(p); } catch (e) { } }
 let brepDepth = 0, brepDeriveName = '';
+let brepFeatNames = new Map();   // feature names of the top-level timeline (openings name what they run into)
 function regenerateBrep(features, upto = null, cache = null) {
+  if (!brepDepth) brepFeatNames = new Map(features.map(f => [f.id, f.name || '']));
   brepDepth++;
   try { return regenerateBrepInner(features, upto, cache); } finally { brepDepth--; }
 }
@@ -1155,6 +1157,7 @@ function brepStep(f, out) {
       const tool = brepTool(f, out);
       const res = bApply(out, f, tool, op, f.target);
       out.tools.set(f.id, { shape: tool, ...res, op });
+      if (f.role) for (const b of out.bodies.values()) if (b.feature === f.id) b.role = f.role;
     } else if (f.type === 'loft') {
       const ids = (f.sketches || []).filter(id => out.sketches.has(id));
       if (ids.length < 2 && !(ids.length === 1 && (f.endPoint || f.startPoint))) throw new Error('Choose at least two sketches to loft between (or one sketch and an end point)');
@@ -1267,9 +1270,13 @@ function brepStep(f, out) {
       plasticStep(f, out);
     } else if (MESH_TYPES.has(f.type)) {
       meshStep(f, out);
+    } else if (f.type === 'opening') {
+      openingStep(f, out);
     }
-    out.status.set(f.id, { state: 'ok' });
+    const warn = out.lastWarn, info = out.lastInfo; out.lastWarn = out.lastInfo = null;
+    out.status.set(f.id, { state: 'ok', ...(warn ? { warn } : {}), ...(info ? { info } : {}) });
   } catch (e) {
+    out.lastWarn = out.lastInfo = null;
     if (globalThis.process?.env?.BREP_STACK) console.log(e.stack); out.status.set(f.id, { state: 'error', msg: occMsg(e) });
   }
 }
@@ -1341,13 +1348,34 @@ function brepRefHashes(rec, refs, kind) {
 }
 
 // Parses STEP text into solids (async, done once per file before rebuilds use it).
+// what an import holds, so the page can say what can be edited: solids (valid, repaired, or invalid) and
+// surfaces (faces that belong to no solid: a surface model, or the loose parts of a mixed file)
+const importInfo = new Map();
 async function brepImportSTEP(fileId, text) {
   const shape = await RC.importSTEP(new Blob([text]));
+  const oc = RC.getOC(), ta = oc.TopAbs_ShapeEnum;
   let solids = [];
   try { solids = shape.solids || []; } catch (e) { solids = []; }
-  if (!solids.length && shape) solids = [shape];
-  importShapes.set(fileId, solids);
-  return solids.length;
+  // check every solid; try a repair on the ones that fail
+  let repaired = 0, invalid = 0;
+  solids = solids.map(s => {
+    if (shapeValid(s)) return s;
+    try { const fx = new oc.ShapeFix_Solid(s.wrapped); fx.Perform(new oc.Message_ProgressRange()); const r = RC.cast(fx.Solid()); if (shapeValid(r)) { repaired++; return r; } } catch (e) { }
+    invalid++; return s;
+  });
+  // loose faces (outside every solid), sewn into surface bodies
+  const free = [];
+  try { const ex = new oc.TopExp_Explorer(shape.wrapped, ta.TopAbs_FACE, ta.TopAbs_SOLID); while (ex.More()) { free.push(RC.cast(ex.Current())); ex.Next(); } ex.delete?.(); } catch (e) { }
+  let surfaces = [];
+  if (free.length) {
+    try { const sewn = sewShapes(free, 1e-3); const shells = [...RC.iterTopo(sewn.wrapped, 'shell')].map(s => RC.cast(s)); surfaces = shells.length && shells.length <= 200 ? shells : [sewn]; }
+    catch (e) { surfaces = [RC.makeCompound(free)]; }
+  }
+  const all = [...solids, ...surfaces];
+  if (!all.length && shape) all.push(shape);
+  importShapes.set(fileId, all);
+  importInfo.set(fileId, { solids: solids.length, repaired, invalid, surfaces: surfaces.length, faces: free.length });
+  return all.length;
 }
 
 // ---- sweep ----

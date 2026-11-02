@@ -20,6 +20,7 @@ ${strip(fs.readFileSync(path.join(root, 'src/brep.js'), 'utf8'))}
 ${strip(fs.readFileSync(path.join(root, 'src/brepsurf.js'), 'utf8'))}
 ${strip(fs.readFileSync(path.join(root, 'src/brepsheet.js'), 'utf8'))}
 ${strip(fs.readFileSync(path.join(root, 'src/brepplastic.js'), 'utf8'))}
+${strip(fs.readFileSync(path.join(root, 'src/brepopening.js'), 'utf8'))}
 ${strip(fs.readFileSync(path.join(root, 'src/meshops.js'), 'utf8'))}
 export function setOC(oc) { RCmod.setOC(oc); RC = RCmod; }
 export function getRC() { return RC; }

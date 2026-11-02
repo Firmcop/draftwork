@@ -134,6 +134,7 @@ function brepProject(items, kinds, cams) { return engineCall('project', { items:
 async function brepImportSTEP(fileId, text) {
   const r = await engineCall('import', { fileId, text, wantBrep: true }); importsRead.add(fileId);
   if (r?.brep?.length) payloadSave('brep:' + fileId, r.brep);
+  brepImportSTEP.info = r?.info || null;
   return r?.n ?? r;
 }
 async function brepImportCached(fileId, brep) { const n = await engineCall('importbrep', { fileId, brep }); importsRead.add(fileId); return n; }

@@ -76,7 +76,7 @@ function showTabDoc(t, msg) {
   dirty = !!t.dirty;
   activeTab = designType() === 'sheetmetal' && !doc.features.length ? 'SHEET METAL' : 'SOLID';
   afterDocReplace(); $('#dirty').hidden = !dirty; defaultHint(); renderBrowser(); renderTabs(); persist();
-  setTimeout(() => setView('iso'), 80); if (msg) toast(msg);
+  setTimeout(() => whenRebuilt().then(() => setView('iso')), 80); if (msg) toast(msg);   // fit once the bodies are there
 }
 function openInTab(d, o = {}) {
   captureTab();

@@ -568,3 +568,11 @@ table.grid tr.sel td { background: color-mix(in srgb, var(--accent) 22%, transpa
 .busy.prog.indet { background: linear-gradient(90deg, var(--panel) 0%, var(--accent-soft) 50%, var(--panel) 100%) 0 0 / 200% 100%; animation: busysweep 1.4s linear infinite; }
 @keyframes busysweep { from { background-position: 100% 0; } to { background-position: -100% 0; } }
 @media (prefers-reduced-motion: reduce) { .busy.prog.indet { animation: none; background: var(--accent-soft); } }
+
+/* a dialog note that is a warning, not an error (an opening running into a post or rail) */
+.dialog .err.warn { color: var(--fg); background: var(--planned-soft); border-color: var(--planned); }
+
+/* what an imported model is (solid, surface, mesh kinds) */
+.kindnote { margin: 4px 0; font-size: 12px; } .kindnote b { color: var(--fg); }
+.kindnote[data-kind="solid"] b, .kindnote[data-kind="watertight"] b { color: var(--ok); }
+.kindnote[data-kind="nonmanifold"] b, .kindnote[data-kind="open"] b, .kindnote[data-kind="solid-check"] b, .kindnote[data-kind="visual"] b { color: var(--planned); }

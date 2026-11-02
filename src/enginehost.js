@@ -170,7 +170,7 @@ function engineHost(RCmod) {
       if (op === 'flat') { const r = lastRes?.sheet.get(a.body); return r ? sheetFlatData(r) : null; }
       if (op === 'mesh') { const t = a.tok; const p = meshPayload(t, true); if (p) shipped.add(t); return p; }
       if (op === 'import') brepProgress({ stage: 'import' });
-      if (op === 'import') { const n = await brepImportSTEP(a.fileId, a.text); cacheArr = []; return a.wantBrep ? { n, brep: (importShapes.get(a.fileId) || []).map(s => s.serialize()) } : n; }
+      if (op === 'import') { const n = await brepImportSTEP(a.fileId, a.text); cacheArr = []; return a.wantBrep ? { n, info: importInfo.get(a.fileId), brep: (importShapes.get(a.fileId) || []).map(s => s.serialize()) } : n; }
       // cached geometry: an import or an inserted design's result, in the engine's own format (no STEP parsing, no rebuild)
       if (op === 'importbrep') brepProgress({ stage: 'cache' });
       if (op === 'importbrep') { importShapes.set(a.fileId, a.brep.map(s => RC.deserializeShape(s))); cacheArr = []; return a.brep.length; }

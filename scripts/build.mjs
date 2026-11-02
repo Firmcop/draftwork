@@ -13,10 +13,10 @@ const pkg = name => JSON.parse(fs.readFileSync(path.join(root, 'node_modules', n
 
 const strip = s => s.split('\n').filter(l => !/^import /.test(l)).map(l => l.replace(/^export /, '')).join('\n');
 // Concatenation order matters: later modules use functions from earlier ones.
-const MODULES = ['font', 'solver', 'snapgeo', 'asmref', 'kernel', 'engineclient', 'icons', 'assembly', 'drawing', 'drawing2', 'drawing3', 'drawing4', 'construct', 'modify', 'surfaceui', 'sheetui', 'plasticui', 'meshui', 'insert', 'assembly2', 'configure', 'productui', 'core', 'ribbon', 'panels', 'interact', 'sketchui', 'sketchtools', 'sketchhud', 'inspect', 'formui', 'camcore', 'camui', 'slicer', 'printui', 'nest', 'nestui', 'fea', 'simui', 'library', 'payloads', 'ui2'];
+const MODULES = ['font', 'solver', 'snapgeo', 'asmref', 'kernel', 'engineclient', 'icons', 'assembly', 'drawing', 'drawing2', 'drawing3', 'drawing4', 'construct', 'modify', 'surfaceui', 'sheetui', 'plasticui', 'meshui', 'insert', 'assembly2', 'configure', 'productui', 'core', 'ribbon', 'container', 'opening', 'classify', 'panels', 'interact', 'sketchui', 'sketchtools', 'sketchhud', 'inspect', 'formui', 'camcore', 'camui', 'slicer', 'printui', 'nest', 'nestui', 'fea', 'simui', 'library', 'payloads', 'ui2'];
 // The exact kernel runs in a Web Worker: solver + kernel + brep + host wrapped in one self-contained async function.
 // The page sends engineFactory.toString() to the worker, or calls it directly when workers are blocked.
-const ENGINE = ['font', 'solver', 'kernel', 'brep', 'brepsurf', 'brepsheet', 'brepplastic', 'meshops', 'enginehost'];
+const ENGINE = ['font', 'solver', 'kernel', 'brep', 'brepsurf', 'brepsheet', 'brepplastic', 'brepopening', 'meshops', 'enginehost'];
 const engineFactory = `async function engineFactory(urls) {
 const THREE = await import(urls.three);
 class Brush { } class Evaluator { } const ADDITION = 0, SUBTRACTION = 1, INTERSECTION = 2;   // mesh booleans are not used here

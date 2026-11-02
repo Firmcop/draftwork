@@ -448,6 +448,9 @@ function featureFields(f, idx) {
     case 'form':
       formDialog(f, idx, out, placement);
       break;
+    case 'opening':
+      openingDialog(f, idx, out);
+      break;
     case 'canvas': case 'decal': case 'derive':
       insertDialog(f, idx, out, placement);
       break;
@@ -538,6 +541,7 @@ function featureFields(f, idx) {
       out.push(section_('File', h('dl', { class: 'stat' }, h('dt', {}, 'Name'), h('dd', {}, file?.name || 'missing'), h('dt', {}, 'Size'), h('dd', {}, file ? fix((file.text?.length || 0) / 1024, 0) + ' KB' : '—'),
         h('dt', {}, 'Bodies'), h('dd', {}, String([...result.bodies.values()].filter(b => b.feature === f.id).length))),
         h('p', { class: 'note' }, 'Imported geometry is fixed. Add features after it to change it.')));
+      if (file?.info) out.push(section_('What it is', kindNote(stepKind(file.info))));
       break;
     }
     case 'remove': {
@@ -552,7 +556,8 @@ function featureFields(f, idx) {
 function refreshDialogStatus() {
   const box = $('#dlgErr'); if (!box || !dlg?.fid) return;
   const st = statusOf(dlg.fid);
-  box.hidden = st.state !== 'error'; box.textContent = st.msg || '';
+  box.hidden = st.state !== 'error' && !st.warn; box.textContent = st.state === 'error' ? (st.msg || '') : (st.warn || ''); box.classList.toggle('warn', st.state !== 'error' && !!st.warn);
+  const wi = $('#op-wallinfo'); if (wi && st.info) wi.textContent = openingInfoText(st.info);
 }
 function closeDialog(ok, silent) {
   if (!dlg) return;

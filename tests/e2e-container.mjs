@@ -36,6 +36,9 @@ await page.click('#abFile'); await page.click('text=New design'); await W(1000);
 await page.setInputFiles('#stepInput', stepFile);
 await page.waitForFunction(() => window.__dw.state().features.includes('import:ok'), null, { timeout: 120000 }); await idle(); await W(1500);
 check(Math.abs(await solidVol() - vol0) < 1, 'container imported (' + Math.round(vol0 / 1e6) + ' L of steel)');
+await page.evaluate(id => window.__dw.edit(id), (await page.evaluate(() => window.__dw.doc())).features[0].id); await W(800);
+check(/Editable CAD solids/.test(await page.textContent('.dialog')), 'import is classified as an editable CAD solid');
+await page.click('.dialog .btn.ok'); await W(500);
 
 // door: sketch on the front wall (y = −1219), 1200 × 2000 rectangle, extrude, Cut, 10 mm
 const cutOnWall = async (cx, w, hgt, setDir) => {
@@ -73,6 +76,7 @@ F.forEach((t, i) => t.forEach((vi, k) => V[vi].forEach((c, j) => buf.writeFloatL
 await page.click('.rtab:text-is("MESH")'); await W(150); await page.click('.rlabel:has-text("CREATE")'); await W(200);
 const [fc] = await Promise.all([page.waitForEvent('filechooser'), page.locator('.menu .mi', { has: page.locator('text="Insert Mesh"') }).first().click()]);
 await fc.setFiles({ name: 'container.stl', mimeType: 'model/stl', buffer: buf }); await W(2500);
+check(/Watertight mesh/.test(await page.textContent('.dialog')), 'STL is classified as a watertight mesh with what to do next');
 await page.click('.dialog .btn.ok'); await W(1200);
 await page.click('.rtab:text-is("SOLID")'); await W(300);
 await page.evaluate(() => { const d = window.__dw.doc(); d.features.push({ id: 'sk', type: 'sketch', name: 'Door', plane: { o: [0, -1219, 1300], x: [1, 0, 0], n: [0, -1, 0] }, offset: 0, flip: false, profiles: [{ kind: 'rect', cx: 0, cy: -200, w: 1200, h: 2000 }] }, { id: 'ex', type: 'extrude', name: 'Door cut', sketch: 'sk', distance: 10, direction: 'reverse', op: 'cut' }); window.__dw.setDoc(d); });

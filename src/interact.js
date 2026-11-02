@@ -1,5 +1,5 @@
 // ===== Commands, picking, sketching, measuring, view cube, navigation, boot =====
-const NAMES = { sketch: 'Sketch', plane: 'Plane', axis: 'Axis', point: 'Point', splitbody: 'Split Body', scale: 'Scale', thicken: 'Thicken', replaceface: 'Replace Face', align: 'Align', patpath: 'Pattern on Path', boundary: 'Boundary Fill', coil: 'Coil', splitface: 'Split Face', sextrude: 'Extrude Surface', srevolve: 'Revolve Surface', patch: 'Patch', soffset: 'Offset Surface', sloft: 'Loft Surface', ssweep: 'Sweep Surface', ruled: 'Ruled Surface', trim: 'Trim', untrim: 'Untrim', sextend: 'Extend', stitch: 'Stitch', unstitch: 'Unstitch', reverse: 'Reverse Normal', deleteface: 'Delete Face', flange: 'Flange', contourflange: 'Contour Flange', unfold: 'Unfold', refold: 'Refold', boss: 'Boss', snapfit: 'Snap Fit', lip: 'Lip', rest: 'Rest', meshinsert: 'Mesh', tessellate: 'Tessellate', facegroups: 'Face Groups', meshrepair: 'Repair', remesh: 'Remesh', reduce: 'Reduce', smooth: 'Smooth', meshplane: 'Plane Cut', meshconvert: 'Convert Mesh', canvas: 'Canvas', form: 'Form', decal: 'Decal', derive: 'Derive', thread: 'Thread', rib: 'Rib', web: 'Web', emboss: 'Emboss', extrude: 'Extrude', revolve: 'Revolve', box: 'Box', cylinder: 'Cylinder', sphere: 'Sphere', torus: 'Torus', hole: 'Hole', pattern: 'Pattern', mirror: 'Mirror', move: 'Move', combine: 'Combine', remove: 'Remove', fillet: 'Fillet', chamfer: 'Chamfer', shell: 'Shell', draft: 'Draft', loft: 'Loft', import: 'Import', sweep: 'Sweep' };
+const NAMES = { sketch: 'Sketch', plane: 'Plane', axis: 'Axis', point: 'Point', splitbody: 'Split Body', scale: 'Scale', thicken: 'Thicken', replaceface: 'Replace Face', align: 'Align', patpath: 'Pattern on Path', boundary: 'Boundary Fill', coil: 'Coil', splitface: 'Split Face', sextrude: 'Extrude Surface', srevolve: 'Revolve Surface', patch: 'Patch', soffset: 'Offset Surface', sloft: 'Loft Surface', ssweep: 'Sweep Surface', ruled: 'Ruled Surface', trim: 'Trim', untrim: 'Untrim', sextend: 'Extend', stitch: 'Stitch', unstitch: 'Unstitch', reverse: 'Reverse Normal', deleteface: 'Delete Face', flange: 'Flange', contourflange: 'Contour Flange', unfold: 'Unfold', refold: 'Refold', boss: 'Boss', snapfit: 'Snap Fit', lip: 'Lip', rest: 'Rest', meshinsert: 'Mesh', tessellate: 'Tessellate', facegroups: 'Face Groups', meshrepair: 'Repair', remesh: 'Remesh', reduce: 'Reduce', smooth: 'Smooth', meshplane: 'Plane Cut', meshconvert: 'Convert Mesh', opening: 'Opening', canvas: 'Canvas', form: 'Form', decal: 'Decal', derive: 'Derive', thread: 'Thread', rib: 'Rib', web: 'Web', emboss: 'Emboss', extrude: 'Extrude', revolve: 'Revolve', box: 'Box', cylinder: 'Cylinder', sphere: 'Sphere', torus: 'Torus', hole: 'Hole', pattern: 'Pattern', mirror: 'Mirror', move: 'Move', combine: 'Combine', remove: 'Remove', fillet: 'Fillet', chamfer: 'Chamfer', shell: 'Shell', draft: 'Draft', loft: 'Loft', import: 'Import', sweep: 'Sweep' };
 function nextName(type) {
   let n = doc.features.filter(f => f.type === type).length + 1;
   while (doc.features.some(f => f.name === NAMES[type] + ' ' + n)) n++;
@@ -274,10 +274,11 @@ $('#stepInput').addEventListener('change', e => {
       const n = await brepImportSTEP(fileId, text);
       if (!n) { done(); toast('No solid bodies found in ' + file.name); return; }
       checkpoint();
-      doc.files ||= {}; doc.files[fileId] = { name: file.name, text };
+      doc.files ||= {}; doc.files[fileId] = { name: file.name, text, ...(brepImportSTEP.info ? { info: brepImportSTEP.info } : {}) };
       const f = { id: uid(), type: 'import', name: file.name.replace(/\.(step|stp)$/i, ''), file: fileId };
       insertFeature(f); await doRegen(); done(); setView('fit');
-      toast(`Imported ${n} bod${n === 1 ? 'y' : 'ies'} from ${file.name}`);
+      const k = stepKind(brepImportSTEP.info);
+      toast(`Imported ${n} bod${n === 1 ? 'y' : 'ies'} from ${file.name}` + (k ? `: ${k.text}. ${k.next}` : ''));
     } catch (err) { done(); toast('Could not read ' + file.name + ': ' + occMsg(err)); }
   };
   rd.readAsText(file);
@@ -929,5 +930,5 @@ if (location.hostname === 'localhost') window.__dw = {
   rebuild: async () => { if (isBrep()) await engineReset(); else cache = []; await doRegen(); },
   curveScreen: i => { const sk = featById(sketchId), c = sk.geo.curves[i]; const pts = curvePts(sk, c, id => geoPos(sk, id), cc => geoRadius(sk, cc)); const m = pts[Math.floor(pts.length / 2)], m2 = pts.length === 2 ? [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2] : m; return window.__dw.sketchScreen(m2[0], m2[1]); },
   geo: () => { const sk = featById(sketchId); const st = sk && geoState(sk); return st ? { dof: st.analysis.dof, ok: !!st.solved?.ok, loops: st.loops.profiles.length, regions: st.regions.length, filled: st.regions.filter(r => r.filled).length, sel: [...geoSel] } : null; },
-  state: () => ({ mode, sketchTool, features: doc.features.map(f => f.type + ':' + statusOf(f.id).state + (statusOf(f.id).msg ? '(' + statusOf(f.id).msg + ')' : '')), bodies: [...result.bodies.keys()].map(id => bodyName(id) + '=' + fix(massProps().bodies.find(b => b.id === id)?.volume || 0, 0)) }),
+  state: () => ({ mode, sketchTool, features: doc.features.map(f => f.type + ':' + statusOf(f.id).state + (statusOf(f.id).msg ? '(' + statusOf(f.id).msg + ')' : '') + (statusOf(f.id).warn ? '[warn: ' + statusOf(f.id).warn + ']' : '')), bodies: [...result.bodies.keys()].map(id => bodyName(id) + '=' + fix(massProps().bodies.find(b => b.id === id)?.volume || 0, 0)) }),
 };

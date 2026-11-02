@@ -55,6 +55,8 @@ Next
 - [x] v0.43 Speed: lean document, undo and session save (imported files and drawing views held once in browser storage); STEP imports cached as BREP (reopen 7× faster to read); inserted designs cached by content hash (re-insert ~6× faster); picking signatures fetched after the rebuild; coarser display mesh on curves; e2e speed safeguards
 - [x] v0.44 Faster rebuilds: consecutive holes and plane-placed cuts applied as one boolean per body (96 holes: 8.4 s → 0.6 s, identical geometry, per-cut fallback); stage-by-stage progress with counts and elapsed time for uploads, rebuilds, inserted designs and view preparation
 - [x] v0.45 Editing imported models: Cut on a sketch drawn on a face goes into the part (as when dragging the arrow inward in Fusion); a cut that removes nothing is reported with how to fix it instead of passing silently; cutting an STL/OBJ body explains Convert Mesh. Engine compiled while downloading and kept compiled between launches (STEP parsing about 2–4× faster from the second launch)
+- [x] v0.46 Create Opening (door, window, vent, penetration presets; position from the wall edges; frame; cuts only the picked wall; structure warnings; validated result) and a 20 ft container reference model with 19 components; views fit once a design has finished building
+- [x] v0.47 Import classification: editable solids (checked, repaired with ShapeFix when possible), surface models, mixed files keep their loose faces, watertight / open / non-manifold meshes; an open mesh converts to a surface, never to a solid with made-up volume
 - [ ] Desktop packaging (Tauri)
 
 ## Phase 2 — Drawings, assemblies, animation *(started)*

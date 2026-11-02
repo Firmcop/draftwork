@@ -294,7 +294,8 @@ function meshToBrep(m, merge) {
   }
   sw.Perform(new oc.Message_ProgressRange());
   let shape = RC.cast(sw.SewedShape());
-  try { const shells = [...RC.iterTopo(shape.wrapped, 'shell')].map(s => RC.cast(s)); if (shells.length === 1) { const s = RC.makeSolid(shells); if (RC.measureVolume(s) > 1e-9) shape = s; } } catch (e) { /* stays a surface */ }
+  // only a closed, manifold mesh becomes a solid; an open one stays a surface (no made-up volume)
+  if (meshStats(m).closed) try { const shells = [...RC.iterTopo(shape.wrapped, 'shell')].map(s => RC.cast(s)); if (shells.length === 1) { const s = RC.makeSolid(shells); if (RC.measureVolume(s) > 1e-9) shape = s; } } catch (e) { /* stays a surface */ }
   if (merge) { const u = new oc.ShapeUpgrade_UnifySameDomain(shape.wrapped, true, true, false); u.Build(); shape = RC.cast(u.Shape()); }
   return shape;
 }
@@ -350,6 +351,8 @@ function meshStep(f, out) {
     case 'meshconvert': {
       const b = getM(), shape = T(meshToBrep(b, f.method !== 'faceted'));
       if (!f.keep) out.mbodies.delete(b.id);
+      // an open mesh becomes a surface: say so rather than pass it off as a solid
+      if (isSurfaceShape(shape)) out.lastWarn = 'The mesh is open, so the result is a surface, not a solid. Repair the mesh (Mesh › Repair, fill holes) before converting to get a solid.';
       return bNew(out, f.id, shape, f.id);
     }
     case 'meshplane': {
