@@ -254,8 +254,8 @@ function startImportSTEP() {
   if (!isBrep()) { toast(engineState === 'loading' ? 'The exact geometry engine is still loading. Try again in a moment.' : 'STEP import needs the exact geometry engine, which could not start here: ' + engineMsg); return; }
   $('#stepInput').click();
 }
-$('#stepInput').addEventListener('change', e => {
-  const file = e.target.files?.[0]; e.target.value = ''; if (!file) return;
+$('#stepInput').addEventListener('change', e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) importStepFile(file); });
+function importStepFile(file) {
   if (file.size > 25e6) { toast('That file is over 25 MB. Larger imports come with background processing.'); return; }
   const rd = new FileReader(), mb = (file.size / 1e6).toFixed(1) + ' MB';
   // the busy indicator follows the upload: loading the file, reading the STEP data, building, preparing the view
@@ -282,7 +282,7 @@ $('#stepInput').addEventListener('change', e => {
     } catch (err) { done(); toast('Could not read ' + file.name + ': ' + occMsg(err)); }
   };
   rd.readAsText(file);
-});
+}
 function deleteSelection() {
   if (selFeature) return deleteFeature(selFeature);
   if (selBody) {
@@ -462,15 +462,7 @@ function loadDoc(d, msg) {
   checkpoint(); doc = d; cache = []; selFeature = null; selBody = null; lastSketchId = null;
   afterDocReplace(); defaultHint(); renderRibbon(); setTimeout(() => setView('iso'), 80); if (msg) toast(msg);
 }
-$('#fileInput').addEventListener('change', e => {
-  const file = e.target.files?.[0]; if (!file) return;
-  const rd = new FileReader();
-  rd.onload = () => {
-    try { const d = upgradeDoc(JSON.parse(rd.result)); if (!d) throw new Error('bad'); openInTab(d, { msg: 'Opened ' + file.name }); }
-    catch (err) { toast('That file is not a Draftwork project'); }
-  };
-  rd.readAsText(file); e.target.value = '';
-});
+$('#fileInput').addEventListener('change', e => { const file = e.target.files?.[0]; if (!file) return; openProjectFile(file); e.target.value = ''; });
 
 // ---------- sketch mode ----------
 function enterSketch(id) {
@@ -893,6 +885,8 @@ if (location.hostname === 'localhost') window.__dw = {
   screen: (x, y, z) => { const v = new THREE.Vector3(x, y, z).project(camera), r = renderer.domElement.getBoundingClientRect(); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; },
   sketchScreen: (x, y) => { const v = new THREE.Vector3(x, y, 0).applyMatrix4(sketchMatrix(featById(sketchId))).project(camera), r = renderer.domElement.getBoundingClientRect(); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; },
   doc: () => JSON.parse(JSON.stringify(doc)),
+  helpers: () => enginePool.helpers.length,
+  pickData: () => [...result.bodies.values()].filter(b => shapeData.get(b.shape)?.p.fsig).length,
   engineTimings: () => engineCall('timings').then(t => Object.fromEntries(Object.entries(t).map(([k, v]) => [k, Math.round(v)]))),
   sizes: () => ({ doc: JSON.stringify(doc).length, lean: leanJSON(doc).length, undoLast: history.undo.at(-1)?.length || 0, undoTotal: history.undo.reduce((a, x) => a + x.length, 0), stored: (localStorage.getItem(STORE_KEY) || '').length }),
   engine: () => engineMode,

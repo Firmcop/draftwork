@@ -107,3 +107,31 @@ Undo/redo store whole-document snapshots; rapid edits to one field are grouped.
 
 - `tests/kernel.test.mjs`, `tests/brep.test.mjs` — volumes against hand calculations, reference survival, STEP output.
 - `tests/e2e.mjs` — headless Chromium session: engine load, edge pick + fillet, sketch → extrude → shell, STEP download. A `window.__dw` hook (localhost only) projects model coordinates to screen points.
+
+## Engine, helper engines and caches (v0.43–v0.48)
+
+- **Main engine** (`enginehost.js` in a worker): OpenCascade compiled to WebAssembly, holding the exact B-Rep of
+  every body. Rebuilds the timeline (`regenerateBrep`), runs exports, sections, drawings. The page holds only
+  display meshes, mass properties and picking signatures, keyed by shape tokens.
+- **Compiled engine kept:** the plain `engine/occ.wasm` is compiled while it downloads (`compileStreaming`), so the
+  browser keeps the optimised code between launches; `occ-gz.wasm` is the offline fallback.
+- **Helper engines** (`enginePool` in `engineclient.js`): extra engine workers on spare cores (browser: cores − 2,
+  up to 3; Windows app: cores − 1, up to 6). After a rebuild the main engine serialises the bodies that need a
+  display mesh, keeps its share, and the page sends the rest to the helpers (`meshbrep`), which return mesh,
+  mass properties and picking signatures computed on the same copy (face numbers are per copy).
+- **Caches:** imported STEP solids (`brep:<file>`), inserted designs' results (`res:<hash of features+params>`),
+  file contents and drawing views (`f:`, `dc:`) live in IndexedDB `payloads`; the document, undo history and session
+  save hold references only.
+- **Batched cuts:** consecutive holes and plane-placed cuts are applied as one boolean per body (`brepCutRun`).
+
+## Openings and import classification
+
+- `opening` features (`brepopening.js`) cut one target body. The frame: outward face normal `n`, `up` = world Z
+  projected into the face (the plane's v on roofs and floors), `right = up × n` (left/right as seen from outside).
+  The position is measured from the body's extent along `right` and `up`; the depth is the body's extent along `n`
+  (bodies deeper than 300 mm are cut 150 mm in from the face, so a one-solid container keeps its far wall). The
+  result must change the body and pass `BRepCheck_Analyzer`. An optional frame cuts a wider band and fills it with
+  its own body. Bodies whose feature has `role: 'structure'` (or are named post/rail) produce warnings.
+- STEP imports record `importInfo` (solids, repaired, invalid, surfaces); loose faces become surface bodies. The
+  page labels imports and meshes (`classify.js`): editable solids, surface model, mixed, watertight / open /
+  non-manifold mesh. Open meshes convert to surfaces only.

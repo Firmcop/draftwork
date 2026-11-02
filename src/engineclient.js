@@ -35,6 +35,58 @@ function engineCall(op, args) {
     engineWorker.postMessage({ id, op, args });
   });
 }
+function engineWorkerSrc(urls) {
+  return `const factory = ${engineFactory.toString()};
+const hostP = factory(${JSON.stringify(urls)});
+let lastProg = 0;
+self.brepProgressPost = p => { const t = performance.now(); if (t - lastProg < 120 && p.done) return; lastProg = t; self.postMessage({ progress: p }); };
+self.onmessage = async e => {
+  const { id, op, args } = e.data;
+  try { const host = await hostP; const r = await host.handle(op, args); self.postMessage({ id, ok: true, r }, host.transfers(r)); }
+  catch (err) { self.postMessage({ id, ok: false, err: (err && err.message) || String(err) }); }
+};`;
+}
+// ---------- helper engines: more engine workers that mesh bodies on other processor cores ----------
+// One per spare core, up to 3 (each holds its own copy of the engine, ~150 MB). Started quietly after the main
+// engine is ready; set with ?engine-helpers=N (0 turns them off).
+const enginePool = { helpers: [], wanted: 0 };
+function helperCount() {
+  const q = new URLSearchParams(location.search).get('engine-helpers');
+  if (q != null && isFinite(+q)) return Math.max(0, Math.min(8, Math.round(+q)));
+  if (typeof globalThis.DRAFTWORK_DESKTOP?.helpers === 'number') return globalThis.DRAFTWORK_DESKTOP.helpers;   // the Windows app: one per spare core
+  const cores = navigator.hardwareConcurrency || 2;
+  return Math.max(0, Math.min(3, cores - 2));
+}
+function spawnHelper(urls, wasm, wasmPlain) {
+  return new Promise((resolve, reject) => {
+    let w; try { w = new Worker(URL.createObjectURL(new Blob([engineWorkerSrc(urls)], { type: 'text/javascript' })), { type: 'module' }); } catch (e) { reject(e); return; }
+    const calls = new Map(); let seq = 0;
+    const helper = { busy: 0, call(op, args) { return new Promise((res, rej) => { const id = ++seq; calls.set(id, { res, rej }); helper.busy++; w.postMessage({ id, op, args }); }).finally(() => { helper.busy--; }); }, terminate: () => w.terminate() };
+    w.onerror = e => { e.preventDefault?.(); reject(new Error(e.message || 'helper could not start')); };
+    w.onmessage = e => { if (e.data.progress) return; const { id, ok, r, err } = e.data, c = calls.get(id); if (!c) return; calls.delete(id); ok ? c.res(r) : c.rej(new Error(err)); };
+    helper.call('init', { urls, wasm, wasmPlain }).then(() => resolve(helper), err => { w.terminate(); reject(err); });
+  });
+}
+async function startHelpers(urls, wasm, wasmPlain) {
+  enginePool.wanted = engineMode === 'worker' ? helperCount() : 0;
+  for (let i = 0; i < enginePool.wanted; i++) {
+    try { enginePool.helpers.push(await spawnHelper(urls, wasm, wasmPlain)); }
+    catch (e) { console.warn('Helper engine unavailable:', e); break; }
+  }
+}
+// mesh the bodies the main engine handed out, spread over the helpers by size; any failure falls back to the main engine
+async function meshOnHelpers(items) {
+  const hs = enginePool.helpers; if (!items?.length) return [];
+  const groups = hs.map(() => ({ items: [], size: 0 }));
+  for (const x of items.slice().sort((a, b) => b.brep.length - a.brep.length)) { const g = groups.reduce((m, g) => g.size < m.size ? g : m); g.items.push(x); g.size += x.brep.length; }
+  const parts = await Promise.all(groups.map((g, i) => g.items.length ? hs[i].call('meshbrep', { items: g.items }).then(r => r.meshes, () => null) : []));
+  const out = [];
+  for (let i = 0; i < groups.length; i++) {
+    if (parts[i]) { out.push(...parts[i]); continue; }
+    for (const x of groups[i].items) { try { out.push(await engineCall('mesh', { tok: x.tok })); } catch (e) { } }
+  }
+  return out;
+}
 function startWorker(urls, wasm, wasmPlain) {
   return new Promise((resolve, reject) => {
     const src = `const factory = ${engineFactory.toString()};
@@ -65,7 +117,7 @@ async function startEngine() {
   if (typeof WebAssembly !== 'object') throw new Error('WebAssembly is not available');
   const urls = libURLs(), wasm = new URL('engine/occ-gz.wasm', location.href).href, wasmPlain = new URL('engine/occ.wasm', location.href).href;
   if (typeof Worker === 'function' && !/[?&]inline-engine\b/.test(location.search)) {
-    try { await startWorker(urls, wasm, wasmPlain); return 'worker'; }
+    try { await startWorker(urls, wasm, wasmPlain); setTimeout(() => startHelpers(urls, wasm, wasmPlain), 1500); return 'worker'; }
     catch (e) { console.warn('Engine worker unavailable, running on the page:', e); }
   }
   globalThis.brepProgressPost = engineProgress; engineInline = await engineFactory(urls); engineMode = 'inline';
@@ -95,10 +147,11 @@ function proxy(b) {
 }
 async function engineRegen(features, rollback) {
   await loadDerivedResults(features);
-  const r = await engineCall('regen', { features, rollback });
+  const r = await engineCall('regen', { features, rollback, helpers: enginePool.helpers.length });
   for (const t of r.freed) shapeData.delete(t);
   if (r.derived?.length) engineCall('derived', { keys: r.derived }).then(list => { for (const [k, brep] of list) if (brep.length) { payloadSave('res:' + k, brep); derivedLoaded.add(k); } }).catch(() => { });
   r.meshes.forEach(ingestMesh);
+  if (r.deferred?.length) (await meshOnHelpers(r.deferred)).forEach(ingestMesh);
   // joints, drawing references and CAM setups read face/edge data as soon as the rebuild finishes: fetch it first for those
   if (sigsNeededNow()) await sigsDrained();
   for (const [t, pos, idx, groups] of r.meshData || []) {

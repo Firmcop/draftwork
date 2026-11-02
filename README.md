@@ -55,6 +55,14 @@ node packages/rules/bin/draftwork-configure.mjs packages/rules/examples/bearing-
 
 ## Desktop app
 
+**Windows app (recommended on Windows):** download `Draftwork-Setup.exe` from the repository's Releases
+(*desktop-latest*, rebuilt on every push to main) and run it. It is the same app with a desktop program's
+advantages: the geometry engine spread over your processor cores (helper engines mesh bodies in parallel), the
+graphics card always used, more memory for large models, and "Open with Draftwork" for STEP, STL and OBJ files.
+See [apps/desktop/README.md](apps/desktop/README.md).
+
+**Installable web app (any system):**
+
 Draftwork installs as a desktop app (Windows, macOS, Linux, ChromeOS) from **https://firmcop.github.io/draftwork/**:
 open it in Chrome or Edge and click the install icon in the address bar (Safari on a Mac: File → Add to Dock),
 or use **File → Install Desktop App…**. It opens in its own window, works offline once loaded, and updates itself
