@@ -4,3 +4,5 @@ dist/
 .DS_Store
 packages/*/out/
 services/*/storage/
+apps/desktop/release/
+apps/desktop/node_modules/

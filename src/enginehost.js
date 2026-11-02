@@ -66,8 +66,9 @@ function engineHost(RCmod) {
   const mstat = m => { let s = mStatOf.get(m); if (!s) { s = { ...meshStats(m), volume: meshVolume(m) }; mStatOf.set(m, s); } return s; };
   const tok = s => { if (!s) return 0; let t = tokOf.get(s); if (!t) { t = nextTok++; tokOf.set(s, t); shapeOf.set(t, s); } return t; };
 
-  function meshPayload(t, full) {
-    const rec = { shape: shapeOf.get(t) };
+  function meshPayload(t, full) { return meshPayloadShape(shapeOf.get(t), t, full); }
+  function meshPayloadShape(shape, t, full) {
+    const rec = { shape };
     if (!rec.shape) return null;
     let t1 = performance.now();
     const m = brepMeshOf(rec);
@@ -100,7 +101,8 @@ function engineHost(RCmod) {
     return alive;
   }
 
-  function regen({ features, rollback }) {
+  function regen(a) {
+    const { features, rollback } = a;
     const res = regenerateBrep(features, rollback, cacheArr);
     lastRes = res;
     brepCollect(cacheArr, res);
@@ -123,7 +125,20 @@ function engineHost(RCmod) {
     const need = [];
     for (const [, b] of out.bodies) if (b.shape && !shipped.has(b.shape)) { shipped.add(b.shape); need.push(b.shape); }
     for (const [, list] of out.beforeBodies) for (const [, b] of list) if (b.shape && !shipped.has(b.shape)) { shipped.add(b.shape); need.push(b.shape); }
-    out.meshes = need.map((t, k) => { if (need.length > 3) brepProgress({ stage: 'view', done: k, total: need.length }); return meshPayload(t, true); }).filter(Boolean);
+    // with helper engines on other cores, most bodies are sent to them in the engine's own format and meshed in
+    // parallel; this engine meshes its own share meanwhile (the page splits the rest)
+    let mine = need;
+    if (a.helpers > 0 && need.length >= 4) {
+      let t1 = performance.now();
+      const items = need.map(t => ({ tok: t, brep: shapeOf.get(t).serialize() }));
+      tAdd('serialize', performance.now() - t1);
+      const total = items.reduce((s, x) => s + x.brep.length, 0), share = total / (a.helpers + 1);
+      items.sort((x, y) => y.brep.length - x.brep.length);
+      const keep = [], away = []; let acc = 0;
+      for (const x of items) { if (acc + x.brep.length / 2 <= share) { keep.push(x.tok); acc += x.brep.length; } else away.push(x); }
+      mine = keep; out.deferred = away;
+    }
+    out.meshes = mine.map((t, k) => { if (mine.length > 3) brepProgress({ stage: 'view', done: k, total: mine.length }); return meshPayload(t, true); }).filter(Boolean);
     out.meshData = [];
     const live = new Set();
     for (const [, m] of res.mbodies) { const t = mtok(m); live.add(t); if (mShipped.has(t)) continue; out.meshData.push([t, m.pos, m.idx, m.groups || null]); }
@@ -168,6 +183,12 @@ function engineHost(RCmod) {
       if (op === 'reset') { cacheArr = []; return true; }
       if (op === 'meshfile') { const bin = a.binary ? Uint8Array.from(atob(a.data), c => c.charCodeAt(0)) : null; importMeshes.set(a.fileId, /\.obj$/i.test(a.name) ? parseOBJ(a.data) : parseSTL(bin || new TextEncoder().encode(a.data))); cacheArr = []; return importMeshes.get(a.fileId).idx.length / 3; }
       if (op === 'flat') { const r = lastRes?.sheet.get(a.body); return r ? sheetFlatData(r) : null; }
+      // helper engine: mesh bodies sent in the engine's own format, with their picking data (same face numbering)
+      if (op === 'meshbrep') return { meshes: a.items.map(x => {
+        const s = RC.deserializeShape(x.brep);
+        try { const p = meshPayloadShape(s, x.tok, true), rec = { shape: s }; let t1 = performance.now(); p.fsig = packSigs(brepSigMap(rec, 'face'), FACE_SIG_KEYS); p.esig = packSigs(brepSigMap(rec, 'edge'), EDGE_SIG_KEYS); tAdd('signatures', performance.now() - t1); return p; }
+        finally { try { s.delete(); } catch (e) { } }
+      }) };
       if (op === 'mesh') { const t = a.tok; const p = meshPayload(t, true); if (p) shipped.add(t); return p; }
       if (op === 'import') brepProgress({ stage: 'import' });
       if (op === 'import') { const n = await brepImportSTEP(a.fileId, a.text); cacheArr = []; return a.wantBrep ? { n, info: importInfo.get(a.fileId), brep: (importShapes.get(a.fileId) || []).map(s => s.serialize()) } : n; }

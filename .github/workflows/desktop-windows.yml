@@ -1,0 +1,52 @@
+# Builds the Windows desktop app (apps/desktop, Electron) into an installer on every push to main and on version tags.
+# - every main push: the installer is attached to the rolling "desktop-latest" pre-release (Draftwork-Setup.exe)
+# - a v* tag: the installer is attached to that release
+name: Desktop app (Windows)
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - run: npm install
+        working-directory: apps/desktop
+      - run: npx electron-builder --win nsis --x64 --publish never
+        working-directory: apps/desktop
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Name the installer for the rolling release
+        shell: pwsh
+        run: Copy-Item (Get-ChildItem apps/desktop/release/Draftwork-Setup-*.exe | Select-Object -First 1).FullName apps/desktop/release/Draftwork-Setup.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Draftwork-Windows
+          path: apps/desktop/release/Draftwork-Setup-*.exe
+      - name: Update the desktop-latest pre-release
+        if: github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: desktop-latest
+          name: Draftwork for Windows (latest main)
+          prerelease: true
+          body: Installer built from the latest main. Download Draftwork-Setup.exe and run it (SmartScreen: More info, Run anyway; the installer is not code-signed).
+          files: apps/desktop/release/Draftwork-Setup.exe
+      - name: Attach to the version release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: apps/desktop/release/Draftwork-Setup-*.exe

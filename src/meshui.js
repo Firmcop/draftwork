@@ -4,8 +4,11 @@ const solidBodies = () => [...result.bodies].filter(([, b]) => b.shape).map(([id
 function startInsertMesh() {
   if (!needExact('Insert Mesh')) return;
   const inp = h('input', { type: 'file', accept: '.stl,.obj', hidden: true });
-  inp.addEventListener('change', () => {
-    const file = inp.files?.[0]; inp.remove(); if (!file) return;
+  inp.addEventListener('change', () => { const file = inp.files?.[0]; inp.remove(); if (file) insertMeshFile(file); });
+  document.body.append(inp); inp.click();
+}
+function insertMeshFile(file) {
+  {
     if (file.size > 40e6) { toast('That file is over 40 MB'); return; }
     const isObj = /\.obj$/i.test(file.name), rd = new FileReader();
     rd.onload = async () => {
@@ -30,8 +33,7 @@ function startInsertMesh() {
       } catch (err) { toast('Could not read ' + file.name + ': ' + (err.message || err)); }
     };
     isObj ? rd.readAsText(file) : rd.readAsArrayBuffer(file);
-  });
-  document.body.append(inp); inp.click();
+  }
 }
 function ensureMeshImports() {
   for (const f of doc.features) {

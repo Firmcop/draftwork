@@ -84,3 +84,33 @@ function insertContainer() {
 }
 cmd('opening', 'Create Opening', 'hole', { run: () => startOpening('door') });
 cmd('container20', 'Shipping Container 20 ft', 'box', { run: () => insertContainer() });
+
+// ===== Opening files: drag and drop onto the window, or "Open with Draftwork" in the Windows app =====
+function openProjectFile(file) {
+  const rd = new FileReader();
+  rd.onload = () => {
+    try { const d = upgradeDoc(JSON.parse(rd.result)); if (!d) throw new Error('bad'); openInTab(d, { msg: 'Opened ' + file.name }); }
+    catch (err) { toast('That file is not a Draftwork project'); }
+  };
+  rd.readAsText(file);
+}
+function openAnyFile(file) {
+  if (/\.(step|stp)$/i.test(file.name)) { if (!isBrep()) { toast('The exact geometry engine is still loading. Try again in a moment.'); return; } importStepFile(file); }
+  else if (/\.(stl|obj)$/i.test(file.name)) { if (!isBrep()) { toast('The exact geometry engine is still loading. Try again in a moment.'); return; } insertMeshFile(file); }
+  else if (/\.json$/i.test(file.name)) openProjectFile(file);
+  else toast('Draftwork opens STEP, STL, OBJ and Draftwork project (.json) files');
+}
+document.addEventListener('dragover', e => { if ([...(e.dataTransfer?.types || [])].includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; document.body.classList.add('dropping'); } });
+document.addEventListener('dragleave', e => { if (!e.relatedTarget) document.body.classList.remove('dropping'); });
+document.addEventListener('drop', e => {
+  if (!e.dataTransfer?.files?.length) return;
+  e.preventDefault(); document.body.classList.remove('dropping');
+  [...e.dataTransfer.files].forEach(openAnyFile);
+});
+// the Windows app hands over files opened with it; files that arrive before the engine is ready wait for it
+if (globalThis.DRAFTWORK_DESKTOP) {
+  const waiting = [];
+  const go = () => { while (waiting.length && isBrep()) openAnyFile(waiting.shift()); if (waiting.length) setTimeout(go, 500); };
+  DRAFTWORK_DESKTOP.onOpenFile(f => { waiting.push(new File([f.data], f.name)); go(); });
+  setTimeout(() => DRAFTWORK_DESKTOP.ready(), 0);
+}

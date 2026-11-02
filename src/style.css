@@ -576,3 +576,6 @@ table.grid tr.sel td { background: color-mix(in srgb, var(--accent) 22%, transpa
 .kindnote { margin: 4px 0; font-size: 12px; } .kindnote b { color: var(--fg); }
 .kindnote[data-kind="solid"] b, .kindnote[data-kind="watertight"] b { color: var(--ok); }
 .kindnote[data-kind="nonmanifold"] b, .kindnote[data-kind="open"] b, .kindnote[data-kind="solid-check"] b, .kindnote[data-kind="visual"] b { color: var(--planned); }
+
+/* a file dragged over the window */
+body.dropping #viewport { outline: 3px dashed var(--accent); outline-offset: -6px; }

@@ -1,0 +1,31 @@
+{
+  "name": "draftwork-desktop",
+  "productName": "Draftwork",
+  "version": "0.48.0",
+  "description": "Draftwork CAD for Windows: the Draftwork app with its geometry engine spread over the processor cores",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "smoke": "electron smoke.js",
+    "dist:win": "electron-builder --win nsis --x64 --publish never"
+  },
+  "devDependencies": {
+    "electron": "38.8.6",
+    "electron-builder": "26.0.12"
+  },
+  "build": {
+    "appId": "com.firmcop.draftwork",
+    "productName": "Draftwork",
+    "files": ["main.js", "preload.js", "server.js", "package.json"],
+    "extraResources": [{ "from": "../../dist/site", "to": "site" }],
+    "fileAssociations": [
+      { "ext": ["step", "stp"], "name": "STEP model", "role": "Viewer" },
+      { "ext": ["stl", "obj"], "name": "Mesh", "role": "Viewer" }
+    ],
+    "win": { "target": ["nsis"], "icon": "../../assets/icon-512.png" },
+    "nsis": { "oneClick": false, "allowToChangeInstallationDirectory": true, "perMachine": false, "createDesktopShortcut": true },
+    "artifactName": "Draftwork-Setup-${version}.${ext}",
+    "directories": { "output": "release" }
+  }
+}

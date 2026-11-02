@@ -57,6 +57,7 @@ Next
 - [x] v0.45 Editing imported models: Cut on a sketch drawn on a face goes into the part (as when dragging the arrow inward in Fusion); a cut that removes nothing is reported with how to fix it instead of passing silently; cutting an STL/OBJ body explains Convert Mesh. Engine compiled while downloading and kept compiled between launches (STEP parsing about 2–4× faster from the second launch)
 - [x] v0.46 Create Opening (door, window, vent, penetration presets; position from the wall edges; frame; cuts only the picked wall; structure warnings; validated result) and a 20 ft container reference model with 19 components; views fit once a design has finished building
 - [x] v0.47 Import classification: editable solids (checked, repaired with ShapeFix when possible), surface models, mixed files keep their loose faces, watertight / open / non-manifold meshes; an open mesh converts to a surface, never to a solid with made-up volume
+- [x] v0.48 Windows desktop app (Electron, apps/desktop): helper engines on spare cores mesh bodies and prepare picking data in parallel (also in the browser on 4+ core machines), GPU blocklist off, 8 GB working memory, Open with Draftwork for STEP/STL/OBJ, installer built by GitHub Actions; drag and drop files onto the window
 - [ ] Desktop packaging (Tauri)
 
 ## Phase 2 — Drawings, assemblies, animation *(started)*
