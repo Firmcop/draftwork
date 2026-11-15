@@ -455,6 +455,31 @@ function openExportDialog(only) {
     },
   });
 }
+// Build timelapse: hands the visible bodies (assembled, mm) to apps/timelapse, which films them going up from site to handover.
+function makeTimelapse() {
+  const ids = [...result.bodies.keys()].filter(id => !bodyHidden(id));
+  if (!ids.length) { toast('There is no body to film yet'); return; }
+  const bodies = [];
+  for (const id of ids) {
+    const b = result.bodies.get(id); let g = b.shape ? brepGeomNI(b) : b.geom; if (!g?.attributes?.position) continue;
+    if (g.index) g = g.toNonIndexed();
+    const m = bodyXf(id); if (m !== IDENT) g = g.clone().applyMatrix4(m);
+    const f = featById(String(id).split(':')[0]);
+    bodies.push({ name: bodyName(id), role: f?.role || null, color: doc.bodyMeta[id]?.color || null, pos: new Float32Array(g.attributes.position.array) });
+  }
+  if (!bodies.length) { toast('There is no body to film yet'); return; }
+  const payload = { type: 'draftwork-timelapse', name: doc.name || 'Design', units: 'mm', up: prefs.up === 'Y' ? 'y' : 'z', bodies };
+  const w = window.open('timelapse/index.html', 'draftwork-timelapse');
+  if (!w) { toast('Allow pop-ups for Draftwork to open the timelapse'); return; }
+  const onMsg = e => {
+    if (e.source !== w || e.origin !== location.origin || e.data?.type !== 'timelapse-ready') return;
+    removeEventListener('message', onMsg);
+    w.postMessage(payload, location.origin, bodies.map(x => x.pos.buffer));
+  };
+  addEventListener('message', onMsg); setTimeout(() => removeEventListener('message', onMsg), 120000);
+  toast(`Opening the build timelapse with ${bodies.length} bod${bodies.length === 1 ? 'y' : 'ies'}…`);
+}
+cmd('timelapse', 'Make Build Timelapse', 'motion', { run: () => makeTimelapse() });
 function loadDoc(d, msg) {
   if (dlg) closeDialog(true, true);
   if (mode === 'sketch') exitSketch(true);

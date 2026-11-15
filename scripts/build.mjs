@@ -77,6 +77,10 @@ if (!fs.existsSync(wasmOut) || fs.statSync(wasmOut).mtimeMs < fs.statSync(wasmSr
 const wasmPlainOut = path.join(dist, 'engine/occ.wasm');
 if (!fs.existsSync(wasmPlainOut) || fs.statSync(wasmPlainOut).mtimeMs < fs.statSync(wasmSrc).mtimeMs) fs.copyFileSync(wasmSrc, wasmPlainOut);
 
+// ---- build timelapse page (apps/timelapse), opened by File › Make Build Timelapse ----
+const timelapse = fs.readFileSync(path.join(root, 'apps/timelapse/index.html'));
+fs.mkdirSync(path.join(dist, 'timelapse'), { recursive: true }); fs.writeFileSync(path.join(dist, 'timelapse/index.html'), timelapse);
+
 // ---- installable desktop app (PWA) for GitHub Pages: dist/site ----
 {
   const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -89,6 +93,7 @@ if (!fs.existsSync(wasmPlainOut) || fs.statSync(wasmPlainOut).mtimeMs < fs.statS
   r.addEventListener('updatefound', () => { const w = r.installing; w && w.addEventListener('statechange', () => { if (w.state === 'installed' && navigator.serviceWorker.controller && typeof toast === 'function') toast('A new version of Draftwork is ready: close and reopen the app (or reload) to use it.'); }); });
 }).catch(() => {}));</script>`;
   fs.writeFileSync(path.join(site, 'index.html'), head + html + reg + '</body></html>');
+  fs.mkdirSync(path.join(site, 'timelapse'), { recursive: true }); fs.writeFileSync(path.join(site, 'timelapse/index.html'), timelapse);
   fs.copyFileSync(wasmOut, path.join(site, 'engine/occ-gz.wasm')); fs.copyFileSync(wasmPlainOut, path.join(site, 'engine/occ.wasm'));
   for (const f of ['icon-192.png', 'icon-512.png', 'icon-maskable-512.png', 'apple-touch-icon.png']) fs.copyFileSync(path.join(root, 'assets', f), path.join(site, f));
   fs.writeFileSync(path.join(site, 'manifest.webmanifest'), JSON.stringify({
@@ -99,7 +104,7 @@ if (!fs.existsSync(wasmPlainOut) || fs.statSync(wasmPlainOut).mtimeMs < fs.statS
   }, null, 2));
   // offline cache: the app shell updates network-first; libraries, fonts and the engine are cached on first use
   fs.writeFileSync(path.join(site, 'sw.js'), `const V = 'draftwork-${pkg.version}-${Date.now().toString(36)}';
-const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'engine/occ-gz.wasm'];
+const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'engine/occ-gz.wasm', 'timelapse/index.html'];
 self.addEventListener('install', e => { e.waitUntil(caches.open(V).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
 self.addEventListener('activate', e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== V && k.startsWith('draftwork-')).map(k => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', e => {

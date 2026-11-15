@@ -230,7 +230,7 @@ const TABS = {
   ],
   MANAGE: [{ name: 'BOM', bar: ['bom'], menu: ['bom', 'properties'] }],
   UTILITIES: [
-    { name: 'MAKE', bar: ['make3d'], menu: ['make3d', 'exportstl'] },
+    { name: 'MAKE', bar: ['make3d', 'timelapse'], menu: ['make3d', 'exportstl', 'timelapse'] },
     { name: 'NEST', bar: ['nest'], menu: ['nest'] },
     { name: 'ADD-INS', bar: ['addins'], menu: ['addins'] },
     { name: 'UTILITY', bar: ['taskmgr', 'params'], menu: ['taskmgr', 'params'] },
@@ -343,6 +343,7 @@ function openFileMenu() {
     { label: 'Download file (.json)', icon: 'exportstl', action: () => saveProject() },
     { label: 'Import STEP…', icon: 'insertmesh', action: () => startImportSTEP() },
     { label: 'Export STEP / STL (.zip)…', icon: 'exportstl', action: () => openExportDialog() },
+    { label: 'Make Build Timelapse…', icon: 'motion', action: () => runCmd('timelapse') },
     '-',
     { label: 'Create Drawing…', icon: 'properties', action: () => openCreateDrawing(selBody ? [selBody] : null) },
     { label: 'Create Drawing from Face…', icon: 'properties', action: () => startDrawingFacePick(null) },
