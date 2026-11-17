@@ -12,7 +12,7 @@ export function serve(p = port) {
   return http.createServer((req, res) => {
     let url = decodeURIComponent(req.url.split('?')[0]);
     if (url === '/') url = '/dist/local.html';
-    if (url.startsWith('/engine/')) url = '/dist' + url;           // the page fetches engine/… relative to itself
+    if (url.startsWith('/engine/') || url.startsWith('/timelapse/')) url = '/dist' + url;           // the page fetches engine/… and opens timelapse/ relative to itself
     const file = path.join(root, url);
     if (!file.startsWith(root) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) { res.writeHead(404); return res.end('Not found'); }
     const st = fs.statSync(file), tag = '"' + st.size.toString(36) + '-' + Math.floor(st.mtimeMs).toString(36) + '"';
