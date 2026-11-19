@@ -7,7 +7,10 @@ const path = require('node:path');
 const step = process.argv.find(a => /\.(step|stp)$/i.test(a));
 require('./main.js');
 app.whenReady().then(() => setTimeout(async () => {
-  const win = BrowserWindow.getAllWindows()[0];
+  let win; for (let i = 0; i < 200 && !(win = BrowserWindow.getAllWindows()[0]); i++) await new Promise(r => setTimeout(r, 100));
+  if (!win) { console.log('SMOKE no window'); app.exit(1); return; }
+  win.webContents.on('console-message', (_e, level, msg) => { if (level >= 2) console.log('PAGE', msg); });
+  await new Promise(r => win.webContents.isLoading() ? win.webContents.once('did-finish-load', r) : r());
   const js = s => win.webContents.executeJavaScript(s);
   const until = async (expr, ms = 180000) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (await js(expr).catch(() => false)) return true; await new Promise(r => setTimeout(r, 250)); } return false; };
   const out = {};

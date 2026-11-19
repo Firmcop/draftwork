@@ -42,8 +42,9 @@ check(await many.page.evaluate(() => window.__dw.pickData()) === 12, 'face and e
 // drag and drop a STEP file onto the window
 await many.page.click('#abFile'); await many.page.click('text=New design'); await many.page.waitForTimeout(800);
 await many.page.evaluate(t => { const dt = new DataTransfer(); dt.items.add(new File([t], 'dropped.step')); document.querySelector('#viewport').dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true })); }, stepText);
-await many.page.waitForFunction(() => window.__dw.state().features.includes('import:ok'), null, { timeout: 120000 });
-check((await many.page.evaluate(() => window.__dw.state())).bodies.length === 12, 'a STEP file dropped on the window is imported');
+await many.page.waitForFunction(() => window.__dw.state().bodies.length === 12, null, { timeout: 120000 }).catch(() => {});
+const dropped = await many.page.evaluate(() => window.__dw.state());
+check(dropped.bodies.length === 12, 'a STEP file dropped on the window is imported');
 check(errors.length === 0, 'no page errors' + (errors.length ? ': ' + errors.slice(0, 3).join(' | ') : ''));
 await browser.close(); server.close();
 process.exit(failed ? 1 : 0);

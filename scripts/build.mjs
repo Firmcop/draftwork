@@ -120,4 +120,26 @@ self.addEventListener('fetch', e => {
 `);
   console.log('dist/site: installable app (manifest, service worker, icons)');
 }
+// ---- Windows desktop app (apps/desktop): dist/desktop = the site with every library inside, so it starts and
+// works without internet (fonts fall back to the system's) ----
+{
+  const site = path.join(dist, 'site'), desk = path.join(dist, 'desktop');
+  fs.rmSync(desk, { recursive: true, force: true });
+  fs.cpSync(site, desk, { recursive: true });
+  let page = fs.readFileSync(path.join(site, 'index.html'), 'utf8');
+  for (const name of Object.keys(versions)) page = page.replaceAll(`https://cdn.jsdelivr.net/npm/${name}@${versions[name]}/`, `./lib/${name}/`);
+  page = page.replace(/<link rel="(stylesheet|preconnect)" href="https:\/\/fonts\.[^"]*"[^>]*>/g, '');
+  fs.writeFileSync(path.join(desk, 'index.html'), page);
+  const keep = f => /\.(m?js|json)$/.test(f) && !/\.(d\.ts|cjs|map)$/.test(f);
+  const copyJs = (from, to) => {
+    for (const e of fs.readdirSync(from, { withFileTypes: true })) {
+      const a = path.join(from, e.name), b = path.join(to, e.name);
+      if (e.isDirectory()) copyJs(a, b);
+      else if (keep(e.name)) { fs.mkdirSync(to, { recursive: true }); fs.copyFileSync(a, b); }
+    }
+  };
+  for (const [name, sub] of [['three', 'build'], ['three', 'examples/jsm'], ['three-mesh-bvh', 'build'], ['three-mesh-bvh', 'src'], ['three-bvh-csg', 'build'], ['replicad', 'dist'], ['replicad-opencascadejs', 'dist']])
+    if (fs.existsSync(path.join(root, 'node_modules', name, sub))) copyJs(path.join(root, 'node_modules', name, sub), path.join(desk, 'lib', name, sub));
+  console.log('dist/desktop: Windows app files with the libraries inside');
+}
 console.log(`dist/index.html ${(html.length / 1024).toFixed(0)} KB · engine ${(fs.statSync(wasmOut).size / 1e6).toFixed(1)} MB`);

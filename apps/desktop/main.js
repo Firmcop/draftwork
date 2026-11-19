@@ -10,7 +10,7 @@ app.commandLine.appendSwitch('ignore-gpu-blocklist');            // use the grap
 app.commandLine.appendSwitch('enable-gpu-rasterization');
 app.commandLine.appendSwitch('js-flags', '--max-old-space-size=8192');   // room for large models
 
-const SITE = app.isPackaged ? path.join(process.resourcesPath, 'site') : path.join(__dirname, '../../dist/site');
+const SITE = app.isPackaged ? path.join(process.resourcesPath, 'site') : path.join(__dirname, '../../dist/desktop');
 let win = null, pending = [];
 const fileArgs = argv => argv.slice(1).filter(a => /\.(step|stp|stl|obj|json)$/i.test(a) && fs.existsSync(a));
 
@@ -35,12 +35,13 @@ else {
       webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false },
     });
     win.once('ready-to-show', () => { win.maximize(); win.show(); });
-    win.webContents.setWindowOpenHandler(({ url }) => { if (!url.startsWith(`http://127.0.0.1:${port}/`)) { shell.openExternal(url); return { action: 'deny' }; } return { action: 'allow' }; });
+    win.webContents.setWindowOpenHandler(({ url }) => { if (!/^http:\/\/(127\.0\.0\.1|localhost):/.test(url)) { shell.openExternal(url); return { action: 'deny' }; } return { action: 'allow' }; });
     win.webContents.on('before-input-event', (_e, input) => { if (input.type === 'keyDown' && input.key === 'F12') win.webContents.toggleDevTools(); });
     ipcMain.on('desktop-info', e => { e.returnValue = { cores: os.cpus().length, memoryGB: Math.round(os.totalmem() / 2 ** 30), version: app.getVersion() }; });
     ipcMain.on('page-ready', () => { const p = pending; pending = []; p.forEach(sendFile); });
     pending.push(...fileArgs(process.argv));
-    await win.loadURL(`http://127.0.0.1:${port}/`);
+    // the smoke test opens the page as localhost, where the app exposes its test hooks
+    await win.loadURL(`http://${process.env.DRAFTWORK_SMOKE ? 'localhost' : '127.0.0.1'}:${port}/`);
   });
   app.on('window-all-closed', () => app.quit());
 }
