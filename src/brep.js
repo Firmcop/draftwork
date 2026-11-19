@@ -300,6 +300,12 @@ function bReplace(out, id, shape) {
   if (empty) { out.bodies.delete(id); if (out.lastBody === id) out.lastBody = [...out.bodies.keys()].pop() || null; return; }
   out.bodies.set(id, { id, name: b.name, shape, feature: b.feature, surface, ...(b.role ? { role: b.role } : {}) });
 }
+function moveTargets(f, out) {
+  const b = f.body;
+  if (b === 'all') return [...out.bodies.keys()];
+  if (typeof b === 'string' && b.startsWith('feat:')) { const fid = b.slice(5); return [...out.bodies.values()].filter(x => String(x.feature).split(':')[0] === fid).map(x => x.id); }
+  return out.bodies.has(b) ? [b] : [];
+}
 function bTarget(out, target) {
   if (target && out.bodies.has(target)) return target;
   if (out.lastBody && out.bodies.has(out.lastBody) && !out.bodies.get(out.lastBody).surface) return out.lastBody;
@@ -1220,15 +1226,20 @@ function brepStep(f, out) {
         out.tools.set(f.id, { shape: tool, ...res, op: src.op });
       }
     } else if (f.type === 'move') {
-      const b = out.bodies.get(f.body);
-      if (!b) throw new Error('Choose a body to move');
-      let s = b.shape.clone();
-      if (+f.rz) s = s.rotate(+f.rz, [0, 0, 0], [0, 0, 1]);
-      if (+f.ry) s = s.rotate(+f.ry, [0, 0, 0], [0, 1, 0]);
-      if (+f.rx) s = s.rotate(+f.rx, [0, 0, 0], [1, 0, 0]);
-      if (+f.dx || +f.dy || +f.dz) s = s.translate([+f.dx || 0, +f.dy || 0, +f.dz || 0]);
-      T(s);
-      if (f.copy) bNew(out, f.id, s, f.id); else bReplace(out, b.id, s);
+      // one body, all bodies of one feature (e.g. a whole imported model: 'feat:<id>'), or every body ('all');
+      // rotations about the pivot (the bodies' centre when the move was made; the origin in older designs)
+      const ids = moveTargets(f, out);
+      if (!ids.length) throw new Error('Choose a body to move');
+      const p = Array.isArray(f.pivot) ? f.pivot.map(v => +v || 0) : [0, 0, 0];
+      const moved = ids.map(id => {
+        let s = out.bodies.get(id).shape.clone();
+        if (+f.rz) s = s.rotate(+f.rz, p, [0, 0, 1]);
+        if (+f.ry) s = s.rotate(+f.ry, p, [0, 1, 0]);
+        if (+f.rx) s = s.rotate(+f.rx, p, [1, 0, 0]);
+        if (+f.dx || +f.dy || +f.dz) s = s.translate([+f.dx || 0, +f.dy || 0, +f.dz || 0]);
+        return [id, T(s)];
+      });
+      moved.forEach(([id, s], k) => { if (f.copy) bNew(out, f.id + (k ? ':' + k : ''), s, f.id); else bReplace(out, id, s); });
     } else if (f.type === 'combine') {
       const t = out.bodies.get(f.target);
       if (!t) throw new Error('Choose a target body');
@@ -1292,11 +1303,19 @@ function brepCollect(cacheArr, res) {
 }
 
 // ---- display meshes for B-rep shapes (computed lazily, cached on the record) ----
+let brepTolFloor = 0;
+// the model's size sets a floor for the display tolerance: 1/20000 of the model (0.3 mm on a 6 m container)
+function modelTolFloor(res) {
+  let lo = [Infinity, Infinity, Infinity], hi = [-Infinity, -Infinity, -Infinity];
+  for (const b of res.bodies.values()) { try { const [a, c] = b.shape.boundingBox.bounds; for (let k = 0; k < 3; k++) { lo[k] = Math.min(lo[k], a[k]); hi[k] = Math.max(hi[k], c[k]); } } catch (e) { } }
+  const size = Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]);
+  return isFinite(size) && size > 1000 ? Math.min(2, size / 20000) : 0;
+}
 function brepMeshOf(rec) {
   if (rec._mesh) return rec._mesh;
   const s = rec.shape;
   let size = 100; try { const [a, b] = s.boundingBox.bounds; size = Math.max(b[0] - a[0], b[1] - a[1], b[2] - a[2]); } catch (e) { }
-  const tol = Math.min(0.1, Math.max(0.01, size / 2000)), opts = { tolerance: tol, angularTolerance: 0.35 };   // ~18 segments per circle; 0.25 doubled meshing time
+  const tol = Math.max(Math.min(0.1, Math.max(0.01, size / 2000)), brepTolFloor), opts = { tolerance: tol, angularTolerance: 0.35 };   // ~18 segments per circle; 0.25 doubled meshing time
   const m = s.mesh(opts), em = s.meshEdges(opts);
   const display = new THREE.BufferGeometry();
   display.setAttribute('position', new THREE.Float32BufferAttribute(m.vertices, 3));
@@ -1356,13 +1375,7 @@ async function brepImportSTEP(fileId, text) {
   const oc = RC.getOC(), ta = oc.TopAbs_ShapeEnum;
   let solids = [];
   try { solids = shape.solids || []; } catch (e) { solids = []; }
-  // check every solid; try a repair on the ones that fail
-  let repaired = 0, invalid = 0;
-  solids = solids.map(s => {
-    if (shapeValid(s)) return s;
-    try { const fx = new oc.ShapeFix_Solid(s.wrapped); fx.Perform(new oc.Message_ProgressRange()); const r = RC.cast(fx.Solid()); if (shapeValid(r)) { repaired++; return r; } } catch (e) { }
-    invalid++; return s;
-  });
+  // the geometry check (and repair) runs after the model is on screen: brepCheckImport
   // loose faces (outside every solid), sewn into surface bodies
   const free = [];
   try { const ex = new oc.TopExp_Explorer(shape.wrapped, ta.TopAbs_FACE, ta.TopAbs_SOLID); while (ex.More()) { free.push(RC.cast(ex.Current())); ex.Next(); } ex.delete?.(); } catch (e) { }
@@ -1374,8 +1387,23 @@ async function brepImportSTEP(fileId, text) {
   const all = [...solids, ...surfaces];
   if (!all.length && shape) all.push(shape);
   importShapes.set(fileId, all);
-  importInfo.set(fileId, { solids: solids.length, repaired, invalid, surfaces: surfaces.length, faces: free.length });
+  importInfo.set(fileId, { solids: solids.length, repaired: 0, invalid: 0, surfaces: surfaces.length, faces: free.length, checked: false });
   return all.length;
+}
+// check every imported solid; repair the ones that fail when ShapeFix can. Returns the info, and whether shapes changed
+function brepCheckImport(fileId) {
+  const shapes = importShapes.get(fileId), info = importInfo.get(fileId) || {};
+  if (!shapes) return null;
+  const oc = RC.getOC(); let repaired = 0, invalid = 0, changed = false;
+  const out = shapes.map(s => {
+    if (isSurfaceShape(s) || shapeValid(s)) return s;
+    try { const fx = new oc.ShapeFix_Solid(s.wrapped); fx.Perform(new oc.Message_ProgressRange()); const r = RC.cast(fx.Solid()); if (shapeValid(r)) { repaired++; changed = true; return r; } } catch (e) { }
+    invalid++; return s;
+  });
+  if (changed) importShapes.set(fileId, out);
+  const res = { ...info, repaired, invalid, checked: true };
+  importInfo.set(fileId, res);
+  return { info: res, changed };
 }
 
 // ---- sweep ----

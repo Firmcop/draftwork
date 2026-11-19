@@ -54,6 +54,7 @@ jobs:
       - run: node tests/e2e-container.mjs
       - run: node tests/e2e-opening.mjs
       - run: node tests/e2e-desktop.mjs
+      - run: node tests/e2e-move.mjs
       - run: ENGINE_INLINE=1 node tests/e2e.mjs
       - uses: actions/upload-artifact@v4
         with:

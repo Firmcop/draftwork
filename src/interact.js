@@ -151,9 +151,13 @@ function newRepeat(type, kind) {
 function newMove() {
   const bodies = bodiesAtInsert();
   if (!bodies.length) { toast('There is no body to move yet'); return; }
-  const body = selBody && bodies.includes(selBody) ? selBody : bodies[bodies.length - 1];
+  let body = selBody && bodies.includes(selBody) ? selBody : bodies[bodies.length - 1];
+  // a body of an imported (or other multi-body) model moves the whole model: its bodies stay together
+  const fid = String(result.bodies.get(body)?.feature || '').split(':')[0], sib = bodies.filter(id => String(result.bodies.get(id)?.feature || '').split(':')[0] === fid);
+  if (fid && sib.length > 1 && ['import', 'derive', 'meshinsert'].includes(featById(fid)?.type)) body = 'feat:' + fid;
   const snap = leanJSON(doc); checkpoint();
   const f = { id: uid(), type: 'move', name: nextName('move'), body, copy: false, dx: 0, dy: 0, dz: 0, rx: 0, ry: 0, rz: 0 };
+  f.pivot = bodiesCenter(moveBodyIds(f));
   insertFeature(f); openFeatureDialog(f.id, true, snap); scheduleRegen(0);
 }
 function newCombine() {
@@ -255,6 +259,16 @@ function startImportSTEP() {
   $('#stepInput').click();
 }
 $('#stepInput').addEventListener('change', e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) importStepFile(file); });
+// the geometry check of an import runs once the model is on screen; repaired solids replace the originals
+function checkImportLater(fileId) {
+  const go = () => engineCall('checkimport', { fileId }).then(r => {
+    if (!r) return; const file = doc.files?.[fileId]; if (file) file.info = r.info;
+    if (r.brep) { payloadSave('brep:' + fileId, r.brep); scheduleRegen(0); }
+    if (r.info.repaired || r.info.invalid) toast(`Geometry check of ${file?.name || 'the import'}: ${r.info.repaired ? r.info.repaired + ' solid' + (r.info.repaired === 1 ? '' : 's') + ' repaired' : ''}${r.info.repaired && r.info.invalid ? ', ' : ''}${r.info.invalid ? r.info.invalid + ' still failing (cuts on them may not work)' : ''}`);
+    if (dlg && typeof rerenderDialog === 'function') rerenderDialog();
+  }).catch(() => { });
+  whenRebuilt().then(() => setTimeout(go, 300));
+}
 function importStepFile(file) {
   if (file.size > 25e6) { toast('That file is over 25 MB. Larger imports come with background processing.'); return; }
   const rd = new FileReader(), mb = (file.size / 1e6).toFixed(1) + ' MB';
@@ -265,7 +279,7 @@ function importStepFile(file) {
   rd.onload = async () => {
     const text = String(rd.result);
     let held = true;
-    const done = () => { if (held) { held = false; busyState().hold--; } $('#busy').hidden = true; busyRender(); };
+    const done = () => { if (held) { held = false; busyState().hold--; } if (!streamState.running) { $('#busy').hidden = true; busyRender(); } };
     if (!/ISO-10303-21/.test(text.slice(0, 2000))) { done(); toast('That is not a STEP file'); return; }
     const fileId = uid();
     toast('Reading ' + file.name + '…');
@@ -276,9 +290,12 @@ function importStepFile(file) {
       checkpoint();
       doc.files ||= {}; doc.files[fileId] = { name: file.name, text, ...(brepImportSTEP.info ? { info: brepImportSTEP.info } : {}) };
       const f = { id: uid(), type: 'import', name: file.name.replace(/\.(step|stp)$/i, ''), file: fileId };
-      insertFeature(f); await doRegen(); done(); setView('fit');
+      insertFeature(f); await doRegen(); done(); whenRebuilt().then(() => setView('fit'));   // fit once every part has its mesh
       const k = stepKind(brepImportSTEP.info);
       toast(`Imported ${n} bod${n === 1 ? 'y' : 'ies'} from ${file.name}` + (k ? `: ${k.text}. ${k.next}` : ''));
+      checkImportLater(fileId);
+      const first = [...result.bodies.keys()].find(id => String(result.bodies.get(id)?.feature).split(':')[0] === f.id);
+      if (first) { selBody = first; updateScene(); setHint('Imported. Press M (or Modify › Move/Copy) to move or rotate it: drag the arrows and rings, or type exact values.'); }
     } catch (err) { done(); toast('Could not read ' + file.name + ': ' + occMsg(err)); }
   };
   rd.readAsText(file);
@@ -911,6 +928,10 @@ if (location.hostname === 'localhost') window.__dw = {
   sketchScreen: (x, y) => { const v = new THREE.Vector3(x, y, 0).applyMatrix4(sketchMatrix(featById(sketchId))).project(camera), r = renderer.domElement.getBoundingClientRect(); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; },
   doc: () => JSON.parse(JSON.stringify(doc)),
   helpers: () => enginePool.helpers.length,
+  gizmo: () => GZ.group?.visible ? { pos: GZ.group.position.toArray(), size: GZ.size } : null,
+  gizmoHit: (x, y) => { raycaster.setFromCamera(ndcOf({ clientX: x, clientY: y }), camera); scene.updateMatrixWorld(); const h = GZ.group ? raycaster.intersectObjects(GZ.group.children, false)[0] : null; return { f: !!GZ.f, vis: GZ.group?.visible, hit: h?.object.userData.gz || null, n: GZ.group?.children.length }; },
+  bodyCenter: ids => bodiesCenter(ids || [...result.bodies.keys()]),
+  hint: () => $('#hint').textContent,
   pickData: () => [...result.bodies.values()].filter(b => shapeData.get(b.shape)?.p.fsig).length,
   engineTimings: () => engineCall('timings').then(t => Object.fromEntries(Object.entries(t).map(([k, v]) => [k, Math.round(v)]))),
   sizes: () => ({ doc: JSON.stringify(doc).length, lean: leanJSON(doc).length, undoLast: history.undo.at(-1)?.length || 0, undoTotal: history.undo.reduce((a, x) => a + x.length, 0), stored: (localStorage.getItem(STORE_KEY) || '').length }),

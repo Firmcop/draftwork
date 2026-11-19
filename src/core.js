@@ -645,9 +645,9 @@ function doRegen() {
   return Promise.resolve();
 }
 // resolves when no rebuild is running or queued (e.g. to fit the view to a design that just opened)
-function whenRebuilt() { return new Promise(res => { const chk = () => (regenRunning || regenQueued || !$('#busy').hidden) ? setTimeout(chk, 60) : res(); chk(); }); }
+function whenRebuilt() { return new Promise(res => { const chk = () => (regenRunning || regenQueued || streamState.running || !$('#busy').hidden) ? setTimeout(chk, 60) : res(); chk(); }); }
 function finishRegen() {
-  if (!busyState().hold) { $('#busy').hidden = true; busyRender(); }   // an upload in progress keeps the indicator
+  if (!busyState().hold && !streamState.running) { $('#busy').hidden = true; busyRender(); }   // streamed meshes keep the indicator until the view is complete   // an upload in progress keeps the indicator
   if (selBody && !result.bodies.has(selBody)) selBody = null;
   if (typeof assemblyAutoComponents === 'function') assemblyAutoComponents();
   solveAssembly();

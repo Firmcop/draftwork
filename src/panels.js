@@ -416,10 +416,15 @@ function featureFields(f, idx) {
       break;
     }
     case 'move': {
-      const bs = bodiesBefore(f.id);
-      out.push(section_('Object', selField('Body', f, 'body', bs.length ? bs : [['', 'No body before this step']]), chkField('Create copy', f, 'copy')));
+      const bs = bodiesBefore(f.id), groups = new Map();
+      for (const [id] of bs) { const fid = String(result.bodies.get(id)?.feature || '').split(':')[0]; if (fid) groups.set(fid, (groups.get(fid) || 0) + 1); }
+      const opts = [...[...groups].filter(([, n]) => n > 1).map(([fid, n]) => ['feat:' + fid, `All ${n} bodies of ${featById(fid)?.name || 'one feature'}`]), ...(bs.length > 1 ? [['all', `Every body (${bs.length})`]] : []), ...bs];
+      out.push(section_('Object', selField('Bodies', f, 'body', opts.length ? opts : [['', 'No body before this step']], { rerender: true, after: () => { f.pivot = movePivot(f); } }), chkField('Create copy', f, 'copy'),
+        h('p', { class: 'note' }, 'Drag the arrows to move and the rings to rotate (Shift for fine steps), or type exact values.')));
       out.push(section_('Translate', exField('X distance', f, 'dx'), exField('Y distance', f, 'dy'), exField('Z distance', f, 'dz')));
-      out.push(section_('Rotate about origin', exField('X angle', f, 'rx', '°'), exField('Y angle', f, 'ry', '°'), exField('Z angle', f, 'rz', '°')));
+      const piv = Array.isArray(f.pivot);
+      out.push(section_(piv ? 'Rotate about the bodies’ centre' : 'Rotate about origin', exField('X angle', f, 'rx', '°'), exField('Y angle', f, 'ry', '°'), exField('Z angle', f, 'rz', '°'),
+        h('div', { class: 'row' }, h('span', { class: 'rl' }), h('button', { class: 'btn', type: 'button', id: 'mv-pivot', onclick: () => { checkpoint(); f.pivot = piv ? undefined : movePivot(f); if (!f.pivot) delete f.pivot; rerenderDialog(); scheduleRegen(0); } }, piv ? 'Rotate about the origin instead' : 'Rotate about the bodies’ centre'))));
       break;
     }
     case 'combine': {

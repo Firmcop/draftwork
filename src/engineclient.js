@@ -87,6 +87,58 @@ async function meshOnHelpers(items) {
   }
   return out;
 }
+// ---------- streaming display meshes: the bodies of a big import appear together and fill in batch by batch,
+// on the main engine and every helper at once, while the model can already be used ----------
+let streamGen = 0;
+const streamPending = new Set();
+const streamState = { total: 0, done: 0, running: false };
+async function streamMeshes(toks) {
+  const gen = ++streamGen, queue = toks.slice(), total = toks.length;
+  streamPending.clear(); toks.forEach(t => streamPending.add(t));
+  streamState.total = total; streamState.done = 0; streamState.running = true;
+  const BATCH = toks.length > 200 ? 16 : 8;
+  let tolFloor;
+  // the view is refreshed at most ~3 times a second while parts arrive (each refresh draws every part)
+  let lastShow = 0, showTimer = null;
+  const showNow = () => { showTimer = null; lastShow = performance.now(); if (gen !== streamGen) return; fillShownMeshes(); if (typeof requestRender === 'function') requestRender(); };
+  const show = () => { if (showTimer) return; const wait = Math.max(0, 350 - (performance.now() - lastShow)); showTimer = setTimeout(showNow, wait); };
+  const worker = async (h) => {
+    while (queue.length && gen === streamGen) {
+      const chunk = queue.splice(0, BATCH);
+      try {
+        let meshes;
+        if (!h) { const r = await engineCall('meshbatch', { toks: chunk }); meshes = r.meshes; tolFloor ??= r.tolFloor; }
+        else { const breps = await engineCall('serialize', { toks: chunk }); meshes = (await h.call('meshbrep', { items: chunk.map((t, i) => ({ tok: t, brep: breps[i] })).filter(x => x.brep), tolFloor })).meshes; }
+        if (gen !== streamGen) return;
+        meshes.forEach(ingestMesh); chunk.forEach(t => streamPending.delete(t)); streamState.done += chunk.length;
+        if ($('#busy').hidden) $('#busy').hidden = false;
+        engineProgress({ stage: 'view', done: streamState.done, total });
+        show();
+      } catch (e) { if (gen !== streamGen) return; for (const t of chunk) { streamPending.delete(t); wantMesh(t); } }
+    }
+  };
+  // the main engine starts (it also sets the model's display tolerance), then the helpers join in
+  const first = worker(null);
+  await new Promise(r => setTimeout(r, 0));
+  await Promise.all([first, ...enginePool.helpers.map(h => worker(h))]);
+  if (gen !== streamGen) return;
+  clearTimeout(showTimer); showNow();
+  streamState.running = false;
+  if (typeof mpCache !== 'undefined') mpCache = null;   // totals include the streamed parts
+  for (const t of toks) if (shapeData.get(t) && !shapeData.get(t).p.fsig) sigQueue.push(t);
+  pumpSigs();
+  if (typeof renderInfo === 'function') renderInfo();
+  if (typeof $ === 'function' && !regenRunning) { $('#busy').hidden = true; busyRender(); }
+}
+// bodies drawn before their mesh arrived get it now
+function fillShownMeshes() {
+  if (typeof shownBodies === 'undefined') return;
+  for (const [, s] of shownBodies) {
+    if (s.mesh.geometry !== EMPTY_MESH.display || !s.rec.shape || !shapeData.get(s.rec.shape)) continue;
+    const m = brepMeshOf(s.rec);
+    s.mesh.geometry = m.display; s.cap.geometry = m.display; s.edges.geometry = m.edgeGeom;
+  }
+}
 function startWorker(urls, wasm, wasmPlain) {
   return new Promise((resolve, reject) => {
     const src = `const factory = ${engineFactory.toString()};
@@ -126,7 +178,7 @@ async function startEngine() {
 }
 
 // ---- results ----
-function ingestMesh(p) { if (p) { shapeData.set(p.tok, { p }); meshWanted.delete(p.tok); if (!p.fsig) sigQueue.push(p.tok), pumpSigs(); } }
+function ingestMesh(p) { if (p) { shapeData.set(p.tok, { p }); meshWanted.delete(p.tok); if (!p.fsig && !streamState.running) sigQueue.push(p.tok), pumpSigs(); } }   // while streaming, picking data waits until the view is complete
 const sigQueue = [], sigWanted = new Set(); let sigBusy = false, sigWaiters = [];
 function sigsNeededNow() { return typeof doc !== 'undefined' && !!(doc.joints?.length || doc.drawing || doc.cam); }
 function sigsDrained() { return !sigBusy && !sigQueue.length ? Promise.resolve() : new Promise(res => sigWaiters.push(res)); }
@@ -147,11 +199,13 @@ function proxy(b) {
 }
 async function engineRegen(features, rollback) {
   await loadDerivedResults(features);
-  const r = await engineCall('regen', { features, rollback, helpers: enginePool.helpers.length });
+  const progressive = !sigsNeededNow();
+  const r = await engineCall('regen', { features, rollback, helpers: enginePool.helpers.length, progressive });
   for (const t of r.freed) shapeData.delete(t);
   if (r.derived?.length) engineCall('derived', { keys: r.derived }).then(list => { for (const [k, brep] of list) if (brep.length) { payloadSave('res:' + k, brep); derivedLoaded.add(k); } }).catch(() => { });
   r.meshes.forEach(ingestMesh);
   if (r.deferred?.length) (await meshOnHelpers(r.deferred)).forEach(ingestMesh);
+  if (r.pending?.length) streamMeshes(r.pending);   // many new bodies: shown at once, filled in batch by batch
   // joints, drawing references and CAM setups read face/edge data as soon as the rebuild finishes: fetch it first for those
   if (sigsNeededNow()) await sigsDrained();
   for (const [t, pos, idx, groups] of r.meshData || []) {
@@ -217,7 +271,7 @@ function wantMesh(t) {
 }
 function brepMeshOf(rec) {
   const d = shapeData.get(rec.shape);
-  if (!d) { wantMesh(rec.shape); return EMPTY_MESH; }
+  if (!d) { if (!streamPending.has(rec.shape)) wantMesh(rec.shape); return EMPTY_MESH; }   // streamed bodies arrive in batches
   if (d.built) return d.built;
   const { p } = d, display = new THREE.BufferGeometry();
   display.setAttribute('position', new THREE.BufferAttribute(p.pos, 3));

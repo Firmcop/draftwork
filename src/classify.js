@@ -5,6 +5,7 @@ function stepKind(info) {
   const parts = [], next = [];
   if (info.solids) parts.push(`${info.solids} editable solid${info.solids === 1 ? '' : 's'}`);
   if (info.repaired) parts.push(`${info.repaired} repaired on import`);
+  if (info.checked === false) parts.push('geometry check running');
   if (info.invalid) { parts.push(`${info.invalid} failing the geometry check`); next.push('Cuts on the failing solids may not work; re-export them from the source program if they do not.'); }
   if (info.surfaces) { parts.push(`${info.surfaces} surface bod${info.surfaces === 1 ? 'y' : 'ies'} (no volume)`); next.push('Surfaces can be trimmed and cut, but have no thickness: Stitch closes them into solids, Thicken gives them a wall.'); }
   const kind = info.solids && info.surfaces ? 'mixed' : info.solids ? (info.invalid ? 'solid-check' : 'solid') : info.surfaces ? 'surface' : 'empty';

@@ -127,8 +127,12 @@ function engineHost(RCmod) {
     for (const [, list] of out.beforeBodies) for (const [, b] of list) if (b.shape && !shipped.has(b.shape)) { shipped.add(b.shape); need.push(b.shape); }
     // with helper engines on other cores, most bodies are sent to them in the engine's own format and meshed in
     // parallel; this engine meshes its own share meanwhile (the page splits the rest)
+    // a display tolerance for the model as a whole: small parts of a large model don't need finer triangles than the
+    // big ones (display only; exact geometry, measurements and exports are unchanged)
+    brepTolFloor = modelTolFloor(res);
     let mine = need;
-    if (a.helpers > 0 && need.length >= 4) {
+    if (a.progressive && need.length > 24) { out.pending = need; mine = []; }
+    else if (a.helpers > 0 && need.length >= 4) {
       let t1 = performance.now();
       const items = need.map(t => ({ tok: t, brep: shapeOf.get(t).serialize() }));
       tAdd('serialize', performance.now() - t1);
@@ -184,15 +188,18 @@ function engineHost(RCmod) {
       if (op === 'meshfile') { const bin = a.binary ? Uint8Array.from(atob(a.data), c => c.charCodeAt(0)) : null; importMeshes.set(a.fileId, /\.obj$/i.test(a.name) ? parseOBJ(a.data) : parseSTL(bin || new TextEncoder().encode(a.data))); cacheArr = []; return importMeshes.get(a.fileId).idx.length / 3; }
       if (op === 'flat') { const r = lastRes?.sheet.get(a.body); return r ? sheetFlatData(r) : null; }
       // helper engine: mesh bodies sent in the engine's own format, with their picking data (same face numbering)
-      if (op === 'meshbrep') return { meshes: a.items.map(x => {
+      if (op === 'meshbrep') { if (a.tolFloor != null) brepTolFloor = a.tolFloor; } if (op === 'meshbrep') return { meshes: a.items.map(x => {
         const s = RC.deserializeShape(x.brep);
         try { const p = meshPayloadShape(s, x.tok, true), rec = { shape: s }; let t1 = performance.now(); p.fsig = packSigs(brepSigMap(rec, 'face'), FACE_SIG_KEYS); p.esig = packSigs(brepSigMap(rec, 'edge'), EDGE_SIG_KEYS); tAdd('signatures', performance.now() - t1); return p; }
         finally { try { s.delete(); } catch (e) { } }
       }) };
+      // a batch of display meshes (streamed after a rebuild with many new bodies)
+      if (op === 'meshbatch') { brepTolFloor = a.tolFloor ?? brepTolFloor; return { meshes: a.toks.map(t => { const p = meshPayload(t, true); if (p) shipped.add(t); return p; }).filter(Boolean), tolFloor: brepTolFloor }; }
       if (op === 'mesh') { const t = a.tok; const p = meshPayload(t, true); if (p) shipped.add(t); return p; }
       if (op === 'import') brepProgress({ stage: 'import' });
       if (op === 'import') { const n = await brepImportSTEP(a.fileId, a.text); cacheArr = []; return a.wantBrep ? { n, info: importInfo.get(a.fileId), brep: (importShapes.get(a.fileId) || []).map(s => s.serialize()) } : n; }
       // cached geometry: an import or an inserted design's result, in the engine's own format (no STEP parsing, no rebuild)
+      if (op === 'checkimport') { const r = brepCheckImport(a.fileId); if (r?.changed) cacheArr = []; return r ? { info: r.info, brep: r.changed ? importShapes.get(a.fileId).map(s => s.serialize()) : null } : null; }
       if (op === 'importbrep') brepProgress({ stage: 'cache' });
       if (op === 'importbrep') { importShapes.set(a.fileId, a.brep.map(s => RC.deserializeShape(s))); cacheArr = []; return a.brep.length; }
       if (op === 'derivebrep') brepProgress({ stage: 'cache' });
