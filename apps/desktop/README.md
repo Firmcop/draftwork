@@ -7,7 +7,9 @@ The Draftwork app in its own window, with the parts of a desktop program the bro
 - **Graphics card always on:** the browser's GPU blocklist is ignored, so the 3D view never falls back to
   software drawing.
 - **More memory** for large models (up to 8 GB for the app's working memory).
-- **Compiled engine kept between launches**, and everything works offline.
+- **Compiled engine kept between launches**, and everything works offline: every library is inside the app
+  (fonts fall back to Windows' own; the Build Timelapse page still loads its player from the internet).
+- **Big imports show up fast:** parts appear as soon as the file is read and fill in on all cores.
 - **Open with Draftwork:** double-click a `.step`, `.stp`, `.stl` or `.obj` file, or drop it on the icon.
 
 The geometry engine is the same OpenCascade engine as in the browser (compiled to WebAssembly), so results are
@@ -26,4 +28,5 @@ npm ci && npm run build          # in the repository root: builds dist/site
 cd apps/desktop && npm install
 npm start                        # run from source
 npm run dist:win                 # Windows installer in apps/desktop/release (on Windows)
+npm run smoke -- path\to\model.step   # starts the app, opens the file, prints timings
 ```

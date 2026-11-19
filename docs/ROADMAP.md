@@ -58,6 +58,7 @@ Next
 - [x] v0.46 Create Opening (door, window, vent, penetration presets; position from the wall edges; frame; cuts only the picked wall; structure warnings; validated result) and a 20 ft container reference model with 19 components; views fit once a design has finished building
 - [x] v0.47 Import classification: editable solids (checked, repaired with ShapeFix when possible), surface models, mixed files keep their loose faces, watertight / open / non-manifold meshes; an open mesh converts to a surface, never to a solid with made-up volume
 - [x] v0.48 Windows desktop app (Electron, apps/desktop): helper engines on spare cores mesh bodies and prepare picking data in parallel (also in the browser on 4+ core machines), GPU blocklist off, 8 GB working memory, Open with Draftwork for STEP/STL/OBJ, installer built by GitHub Actions; drag and drop files onto the window
+  Also in v0.48: big imports show their parts right after reading and fill in batch by batch (main engine and helpers), with a display tolerance from the model's size and the geometry check after the view; Move/Copy moves a whole imported model with arrow and ring handles, rotating about its centre
 - [ ] Desktop packaging (Tauri)
 
 ## Phase 2 — Drawings, assemblies, animation *(started)*
