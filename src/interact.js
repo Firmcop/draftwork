@@ -273,7 +273,7 @@ function checkImportLater(fileId, key) {
     if (r.info.repaired || r.info.invalid) toast(`Geometry check of ${file?.name || 'the import'}: ${r.info.repaired ? r.info.repaired + ' solid' + (r.info.repaired === 1 ? '' : 's') + ' repaired' : ''}${r.info.repaired && r.info.invalid ? ', ' : ''}${r.info.invalid ? r.info.invalid + ' still failing (cuts on them may not work)' : ''}`);
     if (dlg && typeof rerenderDialog === 'function') rerenderDialog();
   }).catch(() => { });
-  whenRebuilt().then(() => setTimeout(go, 300));
+  whenRebuilt().then(() => sigsDrained()).then(() => setTimeout(go, 100));   // after every part is selectable
 }
 function importStepFile(file) {
   traceStart('upload'); traceData('fileMB', +(file.size / 1e6).toFixed(2));

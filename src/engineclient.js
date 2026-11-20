@@ -208,11 +208,15 @@ function traceProgress() {
 async function pumpSigs() {
   if (sigBusy) return; sigBusy = true;
   try {
+    // batches of up to 48 bodies per engine call (one call per body cost a round trip each: seconds on big imports)
     while (sigQueue.length) {
-      const t = sigQueue.shift(), d = shapeData.get(t); if (!d || d.p.fsig || sigWanted.has(t)) continue;
-      sigWanted.add(t);
-      try { const r = await engineCall('sigs', { tok: t }); const d2 = shapeData.get(t); if (r && d2) { d2.p.fsig = r.fsig; d2.p.esig = r.esig; delete d2.fsigM; delete d2.esigM; } } catch (e) { }
-      sigWanted.delete(t);
+      const toks = [];
+      while (sigQueue.length && toks.length < 48) { const t = sigQueue.shift(), d = shapeData.get(t); if (d && !d.p.fsig && !sigWanted.has(t) && !toks.includes(t)) toks.push(t); }
+      if (!toks.length) continue;
+      toks.forEach(t => sigWanted.add(t));
+      try { const r = await engineCall('sigsbatch', { toks }); for (const x of r.sigs) { const d2 = shapeData.get(x.tok); if (d2) { d2.p.fsig = x.fsig; d2.p.esig = x.esig; delete d2.fsigM; delete d2.esigM; } } } catch (e) { }
+      toks.forEach(t => sigWanted.delete(t));
+      traceProgress();
     }
   } finally { sigBusy = false; const w = sigWaiters; sigWaiters = []; w.forEach(f => f()); traceProgress(); }
 }

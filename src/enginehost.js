@@ -74,7 +74,7 @@ function engineHost(RCmod) {
   const tok = s => { if (!s) return 0; let t = tokOf.get(s); if (!t) { t = nextTok++; tokOf.set(s, t); shapeOf.set(t, s); } return t; };
 
   function meshPayload(t, full) { return meshPayloadShape(shapeOf.get(t), t, full); }
-  function meshPayloadShape(shape, t, full) {
+  function meshPayloadShape(shape, t, full, withSigs = false) {
     const rec = { shape };
     if (!rec.shape) return null;
     let t1 = performance.now();
@@ -95,12 +95,9 @@ function engineHost(RCmod) {
       const pr = brepProps(rec);
       tAdd('props', performance.now() - t1);
       p.props = { volume: pr.volume, area: pr.area, com: [pr.com.x, pr.com.y, pr.com.z], surface: pr.surface };
-      // picking data travels with the mesh: one pass over the shape, no second round trip per body
-      // (measured: computing it afterwards one body at a time, behind the geometry check, took 1–3.6 s on imports)
-      t1 = performance.now();
-      p.fsig = packSigs(brepSigMap(rec, 'face'), FACE_SIG_KEYS); p.esig = packSigs(brepSigMap(rec, 'edge'), EDGE_SIG_KEYS);
-      tAdd('signatures', performance.now() - t1);
     }
+    // a helper engine's face numbering is its own: its picking data must come from the same copy
+    if (withSigs) { t1 = performance.now(); p.fsig = packSigs(brepSigMap(rec, 'face'), FACE_SIG_KEYS); p.esig = packSigs(brepSigMap(rec, 'edge'), EDGE_SIG_KEYS); tAdd('signatures', performance.now() - t1); }
     m.display.dispose?.(); m.edgeGeom.dispose?.();
     return p;
   }
@@ -202,7 +199,7 @@ function engineHost(RCmod) {
       // helper engine: mesh bodies sent in the engine's own format, with their picking data (same face numbering)
       if (op === 'meshbrep') { if (a.tolFloor != null) brepTolFloor = a.tolFloor; } if (op === 'meshbrep') return { meshes: a.items.map(x => {
         const s = RC.deserializeShape(x.brep);
-        try { return meshPayloadShape(s, x.tok, true); }
+        try { return meshPayloadShape(s, x.tok, true, true); }
         finally { try { s.delete(); } catch (e) { } }
       }) };
       // a batch of display meshes (streamed after a rebuild with many new bodies)
@@ -224,6 +221,8 @@ function engineHost(RCmod) {
       if (op === 'derivebrep') { deriveShapes.set(a.key, a.brep.map(s => RC.deserializeShape(s))); return a.brep.length; }
       if (op === 'derived') return a.keys.map(k => [k, (deriveShapes.get(k) || []).map(s => s.serialize())]);
       if (op === 'serialize') return a.toks.map(t => shapeOf.get(t)?.serialize() || null);
+      // picking data for many bodies in one call (after their meshes are shown)
+      if (op === 'sigsbatch') { let t1 = performance.now(); const out = a.toks.map(t => { const rec = { shape: shapeOf.get(t) }; return rec.shape ? { tok: t, fsig: packSigs(brepSigMap(rec, 'face'), FACE_SIG_KEYS), esig: packSigs(brepSigMap(rec, 'edge'), EDGE_SIG_KEYS) } : null; }).filter(Boolean); tAdd('signatures', performance.now() - t1); return { sigs: out }; }
       if (op === 'sigs') { const rec = { shape: shapeOf.get(a.tok) }; if (!rec.shape) return null; let t1 = performance.now(); const r = { fsig: packSigs(brepSigMap(rec, 'face'), FACE_SIG_KEYS), esig: packSigs(brepSigMap(rec, 'edge'), EDGE_SIG_KEYS) }; tAdd('signatures', performance.now() - t1); return r; }
       if (op === 'step') {
         if (a.items.some(x => !shapeOf.get(x.tok))) throw new Error('That body is no longer available. Try again after the rebuild.');
@@ -338,6 +337,7 @@ function engineHost(RCmod) {
     const out = [];
     const add = p => { if (!p) return; for (const k of ['pos', 'nrm', 'idx', 'triFace', 'seg', 'segEdge']) if (p[k]?.buffer) out.push(p[k].buffer); for (const s of [p.fsig, p.esig]) if (s?.packed) out.push(s.h.buffer, s.d.buffer, s.t.buffer); };
     if (r?.meshes) r.meshes.forEach(add); else if (r?.tok) add(r);
+    if (r?.sigs) for (const x of r.sigs) for (const s of [x.fsig, x.esig]) if (s?.packed) out.push(s.h.buffer, s.d.buffer, s.t.buffer);
     if (r instanceof Uint8Array) out.push(r.buffer);
     if (r?.fsig?.packed && !r.tok) for (const s of [r.fsig, r.esig]) out.push(s.h.buffer, s.d.buffer, s.t.buffer);
     return [...new Set(out)];
