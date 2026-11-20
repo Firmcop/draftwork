@@ -59,6 +59,13 @@ function packSigs(map, keys) {
 const TRUE_VIEW = { front: 'front', back: 'back', top: 'bottom', bottom: 'top', right: 'left', left: 'right' };
 function engineHost(RCmod) {
   let cacheArr = [];
+  // a file's solids changed (new import, loaded from the cache, repaired): rebuilds from the step that reads that file
+  // on; the steps before it (the rest of a populated project) keep their results and meshes
+  function dropCacheFrom(fileId) {
+    const tag = '"file":' + JSON.stringify(fileId);
+    const i = cacheArr.findIndex(c => c && c.key.includes(tag));
+    if (i >= 0) cacheArr.length = i;
+  }
   const tokOf = new Map(), shapeOf = new Map(), shipped = new Set();
   let nextTok = 1, lastRes = null, nextMTok = 1;
   const mTokOf = new WeakMap(), mStatOf = new WeakMap(), mShipped = new Set();
@@ -198,16 +205,16 @@ function engineHost(RCmod) {
       if (op === 'mesh') { const t = a.tok; const p = meshPayload(t, true); if (p) shipped.add(t); return p; }
       if (op === 'import') brepProgress({ stage: 'import' });
       if (op === 'import') {
-        const n = await brepImportSTEP(a.fileId, a.text); cacheArr = [];
+        const n = await brepImportSTEP(a.fileId, a.text); dropCacheFrom(a.fileId);
         if (!a.wantBrep) return n;
         let t1 = performance.now(); const brep = (importShapes.get(a.fileId) || []).map(s => s.serialize());
         const phases = { ...importPhases, serialize: performance.now() - t1 };
         return { n, info: importInfo.get(a.fileId), brep, phases };
       }
       // cached geometry: an import or an inserted design's result, in the engine's own format (no STEP parsing, no rebuild)
-      if (op === 'checkimport') { const r = brepCheckImport(a.fileId); if (r?.changed) cacheArr = []; return r ? { info: r.info, brep: r.changed ? importShapes.get(a.fileId).map(s => s.serialize()) : null } : null; }
+      if (op === 'checkimport') { const r = brepCheckImport(a.fileId); if (r?.changed) dropCacheFrom(a.fileId); return r ? { info: r.info, brep: r.changed ? importShapes.get(a.fileId).map(s => s.serialize()) : null } : null; }
       if (op === 'importbrep') brepProgress({ stage: 'cache' });
-      if (op === 'importbrep') { importShapes.set(a.fileId, a.brep.map(s => RC.deserializeShape(s))); cacheArr = []; return a.brep.length; }
+      if (op === 'importbrep') { importShapes.set(a.fileId, a.brep.map(s => RC.deserializeShape(s))); dropCacheFrom(a.fileId); if (a.info) importInfo.set(a.fileId, a.info); return a.brep.length; }
       if (op === 'derivebrep') brepProgress({ stage: 'cache' });
       if (op === 'derivebrep') { deriveShapes.set(a.key, a.brep.map(s => RC.deserializeShape(s))); return a.brep.length; }
       if (op === 'derived') return a.keys.map(k => [k, (deriveShapes.get(k) || []).map(s => s.serialize())]);

@@ -52,5 +52,5 @@ async function prunePayloads(docs) {
   const used = new Set();
   for (const d of docs) { const s = leanJSON(d); for (const m of s.matchAll(/"\$p":"([^"]+)"/g)) used.add(m[1]); }
   // geometry caches (brep: imports, res: inserted designs) are kept: they serve any design that refers to the same file or version
-  try { await libTx('payloads', 'readwrite', st => { if (!st) return null; const r = st.getAllKeys(); r.onsuccess = () => { for (const k of r.result) if (!used.has(k) && !/^(brep|res):/.test(k)) st.delete(k); }; return null; }); } catch (e) { }
+  try { await libTx('payloads', 'readwrite', st => { if (!st) return null; const r = st.getAllKeys(); r.onsuccess = () => { for (const k of r.result) if (!used.has(k) && !/^(brep|res|step):/.test(k)) st.delete(k); }; return null; }); } catch (e) { }
 }

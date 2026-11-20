@@ -261,17 +261,24 @@ const meshGeoms = new Map();   // mesh token -> { geom (non-indexed), groups }
 function engineMeshFile(fileId, name, data, binary) { return engineCall('meshfile', { fileId, name, data, binary }); }
 function brepSection(items, o) { return engineCall('section', { items: items.map(({ shape, place }) => ({ tok: shape, place })), ...o }); }
 function brepProject(items, kinds, cams) { return engineCall('project', { items: items.map(({ id, shape, place }) => ({ id, tok: shape, place })), kinds, cams: cams || {} }); }
-// STEP is parsed once; the solids are then kept in the engine's own format, so reopening or inserting skips parsing
-async function brepImportSTEP(fileId, text) {
+// STEP is parsed once per file content; the solids are then kept in the engine's own format, so reopening, importing
+// the same file again or inserting it into another project skips parsing. The key is the file's SHA-256 plus the
+// importer and kernel versions (a change to either parses afresh).
+const STEP_IMPORTER = 'step2-occt-replicad-1.1.0';
+async function stepContentKey(text) {
+  try { const d = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))); return 'step:' + [...d.slice(0, 16)].map(b => b.toString(16).padStart(2, '0')).join('') + ':' + text.length + ':' + STEP_IMPORTER; }
+  catch (e) { let h = 2166136261; for (let i = 0; i < text.length; i++) h = Math.imul(h ^ text.charCodeAt(i), 16777619); return 'step:fnv' + (h >>> 0).toString(16) + ':' + text.length + ':' + STEP_IMPORTER; }
+}
+async function brepImportSTEP(fileId, text, key) {
   const r = await engineCall('import', { fileId, text, wantBrep: true }); importsRead.add(fileId);
   traceMark('engineImport'); traceData('engine', r?.phases ? Object.fromEntries(Object.entries(r.phases).map(([k, v]) => [k, Math.round(v)])) : null);
   let t = performance.now();
-  if (r?.brep?.length) payloadSave('brep:' + fileId, r.brep);
+  if (r?.brep?.length) payloadSave(key || 'brep:' + fileId, key ? { brep: r.brep, info: r.info } : r.brep);
   traceData('cacheWriteMs', Math.round(performance.now() - t));
   brepImportSTEP.info = r?.info || null;
   return r?.n ?? r;
 }
-async function brepImportCached(fileId, brep) { const n = await engineCall('importbrep', { fileId, brep }); importsRead.add(fileId); traceMark('cacheLoaded'); return n; }
+async function brepImportCached(fileId, brep, info) { const n = await engineCall('importbrep', { fileId, brep, info }); importsRead.add(fileId); traceMark('cacheLoaded'); return n; }
 async function cachedPayload(key) {
   if (payloadMap().has(key)) return payloadMap().get(key);
   try { const rec = await libTx('payloads', 'readonly', st => st ? st.get(key) : null); if (rec) { payloadMap().set(key, rec.v); return rec.v; } } catch (e) { }

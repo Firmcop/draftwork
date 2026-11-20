@@ -246,10 +246,13 @@ function ensureImports() {
     const file = doc.files?.[f.file]; if (!file) continue;
     importPending.add(f.file);
     Promise.resolve(payloadsReady).then(async () => {
-      const brep = await cachedPayload('brep:' + f.file);           // parsed before: no STEP parsing
+      // parsed before (this file's content, or this import): no STEP parsing
+      const byContent = file.src ? await cachedPayload(file.src) : null;
+      if (byContent?.brep?.length) return brepImportCached(f.file, byContent.brep, byContent.info);
+      const brep = await cachedPayload('brep:' + f.file);
       if (brep?.length) return brepImportCached(f.file, brep);
       if (typeof file.text !== 'string') throw new Error('the file contents were not saved with this design; import it again');
-      return brepImportSTEP(f.file, file.text);
+      return brepImportSTEP(f.file, file.text, file.src || await stepContentKey(file.text));
     }).catch(e => { importsRead.add(f.file); toast('Could not read ' + file.name + ': ' + occMsg(e)); })
       .finally(() => { importPending.delete(f.file); scheduleRegen(0); });
   }
@@ -260,11 +263,13 @@ function startImportSTEP() {
 }
 $('#stepInput').addEventListener('change', e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) importStepFile(file); });
 // the geometry check of an import runs once the model is on screen; repaired solids replace the originals
-function checkImportLater(fileId) {
-  const go = () => engineCall('checkimport', { fileId }).then(r => {
+function checkImportLater(fileId, key) {
+  const go = () => engineCall('checkimport', { fileId }).then(async r => {
     traceMark('checked');
     if (!r) return; const file = doc.files?.[fileId]; if (file) file.info = r.info;
-    if (r.brep) { payloadSave('brep:' + fileId, r.brep); scheduleRegen(0); }
+    // the checked (and repaired) solids go back into the content cache: the next import of this file skips the check too
+    if (key) { const prev = await cachedPayload(key); const brep = r.brep || prev?.brep; if (brep?.length) payloadSave(key, { brep, info: r.info }); }
+    if (r.brep) { if (!key) payloadSave('brep:' + fileId, r.brep); scheduleRegen(0); }
     if (r.info.repaired || r.info.invalid) toast(`Geometry check of ${file?.name || 'the import'}: ${r.info.repaired ? r.info.repaired + ' solid' + (r.info.repaired === 1 ? '' : 's') + ' repaired' : ''}${r.info.repaired && r.info.invalid ? ', ' : ''}${r.info.invalid ? r.info.invalid + ' still failing (cuts on them may not work)' : ''}`);
     if (dlg && typeof rerenderDialog === 'function') rerenderDialog();
   }).catch(() => { });
@@ -287,16 +292,20 @@ function importStepFile(file) {
     const fileId = uid();
     toast('Reading ' + file.name + '…');
     try {
-      busyProgress({ label: 'Reading the STEP file (' + mb + ')', done: 0, total: 0 });
-      const n = await brepImportSTEP(fileId, text);
+      // the same file read before (any project): its solids come from the cache, no STEP parsing
+      const key = await stepContentKey(text), hit = await cachedPayload(key);
+      traceData('cache', hit?.brep?.length ? 'hit' : 'miss');
+      let n;
+      if (hit?.brep?.length) { busyProgress({ label: 'Loading ' + file.name + ' (read before)', done: 0, total: 0 }); n = await brepImportCached(fileId, hit.brep, hit.info); brepImportSTEP.info = hit.info || null; traceMark('engineImport'); }
+      else { busyProgress({ label: 'Reading the STEP file (' + mb + ')', done: 0, total: 0 }); n = await brepImportSTEP(fileId, text, key); }
       if (!n) { done(); toast('No solid bodies found in ' + file.name); return; }
       checkpoint();
-      doc.files ||= {}; doc.files[fileId] = { name: file.name, text, ...(brepImportSTEP.info ? { info: brepImportSTEP.info } : {}) };
+      doc.files ||= {}; doc.files[fileId] = { name: file.name, text, src: key, ...(brepImportSTEP.info ? { info: brepImportSTEP.info } : {}) };
       const f = { id: uid(), type: 'import', name: file.name.replace(/\.(step|stp)$/i, ''), file: fileId };
       insertFeature(f); await doRegen(); done(); whenRebuilt().then(() => setView('fit'));   // fit once every part has its mesh
       const k = stepKind(brepImportSTEP.info);
       toast(`Imported ${n} bod${n === 1 ? 'y' : 'ies'} from ${file.name}` + (k ? `: ${k.text}. ${k.next}` : ''));
-      checkImportLater(fileId);
+      if (brepImportSTEP.info?.checked) traceMark('checked'); else checkImportLater(fileId, key);
       const first = [...result.bodies.keys()].find(id => String(result.bodies.get(id)?.feature).split(':')[0] === f.id);
       if (first) { selBody = first; updateScene(); setHint('Imported. Press M (or Modify › Move/Copy) to move or rotate it: drag the arrows and rings, or type exact values.'); }
     } catch (err) { done(); toast('Could not read ' + file.name + ': ' + occMsg(err)); }
@@ -933,6 +942,9 @@ if (location.hostname === 'localhost') window.__dw = {
   sketchScreen: (x, y) => { const v = new THREE.Vector3(x, y, 0).applyMatrix4(sketchMatrix(featById(sketchId))).project(camera), r = renderer.domElement.getBoundingClientRect(); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; },
   doc: () => JSON.parse(JSON.stringify(doc)),
   helpers: () => enginePool.helpers.length,
+  // the first shown body a ray meets (to check that an opening goes all the way through)
+  rayHit: (o, d) => { const rc = new THREE.Raycaster(new THREE.Vector3(...o), new THREE.Vector3(...d).normalize()); scene.updateMatrixWorld(); const ms = [...shownBodies].filter(([, s]) => s.mesh.visible).map(([id, s]) => (s.mesh.userData.bid = id, s.mesh)); const h = rc.intersectObjects(ms, false)[0]; return h ? { id: h.object.userData.bid, dist: Math.round(h.distance * 10) / 10 } : null; },
+  bbox: () => { const b = new THREE.Box3(); for (const [, s] of shownBodies) if (s.mesh.visible) b.expandByObject(s.mesh); return [b.min.toArray().map(Math.round), b.max.toArray().map(Math.round)]; },
   importTrace: () => JSON.parse(JSON.stringify({ kind: importTrace.kind, marks: importTrace.marks, data: importTrace.data })),
   gizmo: () => GZ.group?.visible ? { pos: GZ.group.position.toArray(), size: GZ.size } : null,
   gizmoHit: (x, y) => { raycaster.setFromCamera(ndcOf({ clientX: x, clientY: y }), camera); scene.updateMatrixWorld(); const h = GZ.group ? raycaster.intersectObjects(GZ.group.children, false)[0] : null; return { f: !!GZ.f, vis: GZ.group?.visible, hit: h?.object.userData.gz || null, n: GZ.group?.children.length }; },
