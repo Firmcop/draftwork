@@ -46,17 +46,17 @@ check(seen.some(l => /^Reading the STEP file \(\d/.test(l)) && seen.some(l => /^
 check(await page.evaluate(() => document.querySelector('#busy').hidden), 'indicator clears when the upload is done');
 let st = await state();
 check(st.bodies.length === nBodies, `STEP import brings ${nBodies} bodies (${st.bodies.length})`);
-let t = await timings(); const sigs0 = t.sigs || 0;
+let t = await timings(); const sigs0 = (t.sigs || 0) + (t.sigsbatch || 0);
 check(t.import > 0 && !t.importbrep, 'first import parses the STEP file');
 // picking data (face/edge signatures) is computed after the rebuild, in the background
 await W(500);
 t = await timings();
-check(sigs0 + (t.sigs || 0) > 0, 'face and edge picking data arrive after the rebuild');
+check(sigs0 + (t.sigs || 0) + (t.sigsbatch || 0) > 0, 'face and edge picking data arrive after the rebuild (in batches)');
 const sz = await page.evaluate(() => window.__dw.sizes());
 check(sz.doc > 200000 && sz.lean < 20000, `saved document stays small with the file inside (${sz.lean} B saved vs ${sz.doc} B in memory)`);
 check(sz.undoLast < 20000, `undo entries leave the file out (${sz.undoLast} B)`);
 const keys = await idbKeys();
-check(keys.some(k => k.startsWith('brep:')) && keys.some(k => k.startsWith('f:')), 'file contents and parsed solids kept in browser storage');
+check(keys.some(k => k.startsWith('step:')) && keys.some(k => k.startsWith('f:')), 'file contents and parsed solids (keyed by the file content) kept in browser storage');
 
 // reopen: solids come from the cache, no STEP parsing
 await page.reload(); await engine(); await ready('import'); await idle();
