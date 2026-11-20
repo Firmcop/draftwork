@@ -39,3 +39,48 @@ card and more cores the remaining stages shrink further (they run on the helper 
 
 Fusion 360 is a native program using all cores for every stage, including reading the file; Draftwork's engine is
 OpenCascade compiled to WebAssembly, so reading a large STEP file is the stage where the gap remains.
+
+## v0.49: STEP import benchmark (before → after)
+
+Procedure: `npm run bench:import` (`tests/bench/make-fixtures.mjs`, then `tests/bench/bench-import.mjs --trials 3`).
+The built app in Chromium (software graphics, 2 cores, no helper engines); same machine, build mode and procedure
+before and after. Medians of 3 trials (ranges in `tests/bench` output); ms from file selection (reopen: from page
+start). *First frame*: a frame drawn with the model. *Edit-ready*: every part drawn and selectable (picking data in),
+so a wall can be clicked for a sketch and cut.
+
+**container20.step** (Draftwork's 20 ft container, 19 solids, 1.8 MB):
+
+| Workflow | First frame | Edit-ready |
+|---|---|---|
+| Cold upload (fresh profile, nothing cached) | 1781 → 1948 (ranges overlap: unchanged) | 2576 → 2590 (unchanged) |
+| Same file again (new design) | 581 → 328 | 1094 → 751 |
+| Reopen the project | 1374 → 1403 (unchanged) | 1569 → 1599 (unchanged) |
+| Insert into a populated project (19 parts) | 649 → 348 | 1936 → 687 |
+
+**parts300.step** (300 parts, 12 MB):
+
+| Workflow | First frame | Edit-ready |
+|---|---|---|
+| Cold upload | 4389 → 4706 (ranges overlap) | 9866 → 8773 |
+| Same file again | 2583 → 539 | 7468 → 4464 |
+| Reopen | 1491 → 1404 | 5483 → 5054 |
+| Insert into a populated project | 2514 → 352 | 9192 → 6035 |
+
+Cold phases (after; engine worker): parse 1079 ms, transfer to exact B-Rep 2512 ms, serialization 152 ms; then
+meshes 2.5 s and picking data 2.0 s (300 parts). For the container: parse 375 ms, transfer 616 ms.
+
+### What the measurements showed, and the changes
+
+1. **Re-reading files already read** (repeat import, insert of a file used before): the cache was keyed by a random
+   per-import id, so every upload parsed the STEP again (2.2 s for 300 parts even warm). Now keyed by the file's
+   SHA-256, length and importer/kernel version (`step:` payloads); the checked/repaired solids are cached too, so the
+   geometry check is not repeated.
+2. **Inserting rebuilt the whole project**: a new import cleared the engine's timeline cache, so every existing part
+   was rebuilt and re-meshed (19 → 38 meshes for the container insert). Now only steps from the import that changed
+   are rebuilt.
+3. **Picking data one body at a time, behind the geometry check**: 300 engine round trips after the meshes, queued
+   behind the check (1.0 s for the container, 3.6 s for 300 parts between "all drawn" and "selectable"). Now in
+   batches of 48 right after the meshes; the check runs after the model is selectable.
+
+Not changed: the cold STEP parse and B-Rep transfer (OpenCascade's reader, in the worker). It is now the largest
+cold cost; replacing it would mean a different kernel, which the measurements do not justify yet.
