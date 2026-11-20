@@ -1370,9 +1370,24 @@ function brepRefHashes(rec, refs, kind) {
 // what an import holds, so the page can say what can be edited: solids (valid, repaired, or invalid) and
 // surfaces (faces that belong to no solid: a surface model, or the loose parts of a mixed file)
 const importInfo = new Map();
+// phase timings of the last STEP import (ms): file into the engine's file system, STEP parsing, transfer into exact
+// B-Rep bodies, scanning for loose faces
+const importPhases = {};
 async function brepImportSTEP(fileId, text) {
-  const shape = await RC.importSTEP(new Blob([text]));
-  const oc = RC.getOC(), ta = oc.TopAbs_ShapeEnum;
+  const oc = RC.getOC(), ta = oc.TopAbs_ShapeEnum, now = () => performance.now();
+  for (const k in importPhases) delete importPhases[k];
+  let t = now();
+  const name = 'imp_' + Math.random().toString(36).slice(2) + '.step';
+  oc.FS.writeFile('/' + name, typeof text === 'string' ? new TextEncoder().encode(text) : new Uint8Array(text));
+  importPhases.fsWrite = now() - t; t = now();
+  const reader = new oc.STEPControl_Reader();
+  let shape;
+  try {
+    const ok = reader.ReadFile(name); importPhases.parse = now() - t; t = now();
+    if (ok !== oc.IFSelect_ReturnStatus.IFSelect_RetDone) throw new Error('Failed to load STEP file');
+    reader.TransferRoots();
+    shape = RC.cast(reader.OneShape()); importPhases.transfer = now() - t; t = now();
+  } finally { try { oc.FS.unlink('/' + name); } catch (e) { } reader.delete?.(); }
   let solids = [];
   try { solids = shape.solids || []; } catch (e) { solids = []; }
   // the geometry check (and repair) runs after the model is on screen: brepCheckImport
@@ -1386,6 +1401,7 @@ async function brepImportSTEP(fileId, text) {
   }
   const all = [...solids, ...surfaces];
   if (!all.length && shape) all.push(shape);
+  importPhases.scan = now() - t;
   importShapes.set(fileId, all);
   importInfo.set(fileId, { solids: solids.length, repaired: 0, invalid: 0, surfaces: surfaces.length, faces: free.length, checked: false });
   return all.length;

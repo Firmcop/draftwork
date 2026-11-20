@@ -262,6 +262,7 @@ $('#stepInput').addEventListener('change', e => { const file = e.target.files?.[
 // the geometry check of an import runs once the model is on screen; repaired solids replace the originals
 function checkImportLater(fileId) {
   const go = () => engineCall('checkimport', { fileId }).then(r => {
+    traceMark('checked');
     if (!r) return; const file = doc.files?.[fileId]; if (file) file.info = r.info;
     if (r.brep) { payloadSave('brep:' + fileId, r.brep); scheduleRegen(0); }
     if (r.info.repaired || r.info.invalid) toast(`Geometry check of ${file?.name || 'the import'}: ${r.info.repaired ? r.info.repaired + ' solid' + (r.info.repaired === 1 ? '' : 's') + ' repaired' : ''}${r.info.repaired && r.info.invalid ? ', ' : ''}${r.info.invalid ? r.info.invalid + ' still failing (cuts on them may not work)' : ''}`);
@@ -270,6 +271,7 @@ function checkImportLater(fileId) {
   whenRebuilt().then(() => setTimeout(go, 300));
 }
 function importStepFile(file) {
+  traceStart('upload'); traceData('fileMB', +(file.size / 1e6).toFixed(2));
   if (file.size > 25e6) { toast('That file is over 25 MB. Larger imports come with background processing.'); return; }
   const rd = new FileReader(), mb = (file.size / 1e6).toFixed(1) + ' MB';
   // the busy indicator follows the upload: loading the file, reading the STEP data, building, preparing the view
@@ -278,6 +280,7 @@ function importStepFile(file) {
   rd.onerror = () => { busyState().hold--; $('#busy').hidden = true; busyRender(); toast('Could not open ' + file.name); };
   rd.onload = async () => {
     const text = String(rd.result);
+    traceMark('fileRead');
     let held = true;
     const done = () => { if (held) { held = false; busyState().hold--; } if (!streamState.running) { $('#busy').hidden = true; busyRender(); } };
     if (!/ISO-10303-21/.test(text.slice(0, 2000))) { done(); toast('That is not a STEP file'); return; }
@@ -901,6 +904,7 @@ async function loadEngine() {
   try {
     if (typeof WebAssembly !== 'object') throw new Error('WebAssembly is not available');
     await startEngine();
+    traceMark('engineReady');
     engine = 'brep'; engineState = 'ready'; cache = []; mpCache = null;
     setEngineBadge(); scheduleRegen(0);
   } catch (e) {
@@ -913,6 +917,7 @@ async function loadEngine() {
 // ---------- boot ----------
 function start(data) {
   doc = upgradeDoc(data?.doc) || loadStored() || sampleDoc();
+  if (doc.features.some(f => f.type === 'import')) traceStart('reopen', 0);   // a design with imports: time its reopening from page start
   setInterval(busyRender, 250);   // elapsed time and counts in the busy indicator
   payloadsReady = Promise.resolve().then(() => hydrateDoc(doc)).then(() => { try { drawToolsOverlay(); requestRender(); } catch (e) { } });   // file contents and drawing views saved outside the document
   $('#docTitle').textContent = doc.name;
@@ -928,6 +933,7 @@ if (location.hostname === 'localhost') window.__dw = {
   sketchScreen: (x, y) => { const v = new THREE.Vector3(x, y, 0).applyMatrix4(sketchMatrix(featById(sketchId))).project(camera), r = renderer.domElement.getBoundingClientRect(); return { x: r.left + (v.x + 1) / 2 * r.width, y: r.top + (1 - v.y) / 2 * r.height }; },
   doc: () => JSON.parse(JSON.stringify(doc)),
   helpers: () => enginePool.helpers.length,
+  importTrace: () => JSON.parse(JSON.stringify({ kind: importTrace.kind, marks: importTrace.marks, data: importTrace.data })),
   gizmo: () => GZ.group?.visible ? { pos: GZ.group.position.toArray(), size: GZ.size } : null,
   gizmoHit: (x, y) => { raycaster.setFromCamera(ndcOf({ clientX: x, clientY: y }), camera); scene.updateMatrixWorld(); const h = GZ.group ? raycaster.intersectObjects(GZ.group.children, false)[0] : null; return { f: !!GZ.f, vis: GZ.group?.visible, hit: h?.object.userData.gz || null, n: GZ.group?.children.length }; },
   bodyCenter: ids => bodiesCenter(ids || [...result.bodies.keys()]),

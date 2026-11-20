@@ -124,6 +124,7 @@ async function streamMeshes(toks) {
   if (gen !== streamGen) return;
   clearTimeout(showTimer); showNow();
   streamState.running = false;
+  setTimeout(traceProgress, 0);
   if (typeof mpCache !== 'undefined') mpCache = null;   // totals include the streamed parts
   for (const t of toks) if (shapeData.get(t) && !shapeData.get(t).p.fsig) sigQueue.push(t);
   pumpSigs();
@@ -133,6 +134,7 @@ async function streamMeshes(toks) {
 // bodies drawn before their mesh arrived get it now
 function fillShownMeshes() {
   if (typeof shownBodies === 'undefined') return;
+  traceProgress();
   for (const [, s] of shownBodies) {
     if (s.mesh.geometry !== EMPTY_MESH.display || !s.rec.shape || !shapeData.get(s.rec.shape)) continue;
     const m = brepMeshOf(s.rec);
@@ -182,6 +184,27 @@ function ingestMesh(p) { if (p) { shapeData.set(p.tok, { p }); meshWanted.delete
 const sigQueue = [], sigWanted = new Set(); let sigBusy = false, sigWaiters = [];
 function sigsNeededNow() { return typeof doc !== 'undefined' && !!(doc.joints?.length || doc.drawing || doc.cam); }
 function sigsDrained() { return !sigBusy && !sigQueue.length ? Promise.resolve() : new Promise(res => sigWaiters.push(res)); }
+// ---------- import timeline: milliseconds from the start of an import (or of the page, for a reopen) to each stage ----------
+// fileRead → engineImport (STEP parsed, bodies exact) → regenDone (timeline rebuilt) → firstFrame (first part drawn)
+// → meshesIn (every part drawn) → editReady (every part selectable: picking data in) → checked (geometry check)
+const importTrace = { t0: 0, kind: '', marks: {}, data: {}, active: false };
+function traceStart(kind, t0 = performance.now()) { Object.assign(importTrace, { t0, kind, marks: {}, data: {}, active: true }); }
+function traceMark(name) { if (importTrace.active && importTrace.marks[name] == null) importTrace.marks[name] = Math.round(performance.now() - importTrace.t0); }
+function traceData(k, v) { if (importTrace.active) importTrace.data[k] = v; }
+function traceFrame() { if (importTrace.active && importTrace.marks.firstFrame == null && !traceFrame.wait) { traceFrame.wait = true; requestAnimationFrame(() => requestAnimationFrame(() => { traceFrame.wait = false; traceMark('firstFrame'); })); } }
+// all bodies drawn and selectable?
+function traceProgress() {
+  if (!importTrace.active || typeof result === 'undefined' || !result?.bodies?.size) return;
+  const recs = [...result.bodies.values()].filter(b => b.shape), ds = recs.map(b => shapeData.get(b.shape));
+  if (ds.some(d => d?.p?.idx?.length)) traceFrame();
+  if (!ds.every(Boolean) || streamState.running) return;
+  if (importTrace.marks.meshesIn == null) {
+    traceMark('meshesIn');
+    let tris = 0, bytes = 0; for (const d of ds) { tris += (d.p.idx?.length || 0) / 3; for (const k of ['pos', 'idx', 'nrm', 'edges', 'triFace']) bytes += d.p[k]?.byteLength || 0; }
+    traceData('triangles', Math.round(tris)); traceData('meshMB', +(bytes / 1e6).toFixed(2)); traceData('bodies', recs.length);
+  }
+  if (ds.every(d => d.p.fsig)) traceMark('editReady');
+}
 async function pumpSigs() {
   if (sigBusy) return; sigBusy = true;
   try {
@@ -191,7 +214,7 @@ async function pumpSigs() {
       try { const r = await engineCall('sigs', { tok: t }); const d2 = shapeData.get(t); if (r && d2) { d2.p.fsig = r.fsig; d2.p.esig = r.esig; delete d2.fsigM; delete d2.esigM; } } catch (e) { }
       sigWanted.delete(t);
     }
-  } finally { sigBusy = false; const w = sigWaiters; sigWaiters = []; w.forEach(f => f()); }
+  } finally { sigBusy = false; const w = sigWaiters; sigWaiters = []; w.forEach(f => f()); traceProgress(); }
 }
 function proxy(b) {
   const k = `${b.id}|${b.shape}|${b.name}|${b.feature}`;
@@ -206,6 +229,7 @@ async function engineRegen(features, rollback) {
   r.meshes.forEach(ingestMesh);
   if (r.deferred?.length) (await meshOnHelpers(r.deferred)).forEach(ingestMesh);
   if (r.pending?.length) streamMeshes(r.pending);   // many new bodies: shown at once, filled in batch by batch
+  if (features.every(f => f.type !== 'import' || importsRead.has(f.file))) { traceMark('regenDone'); setTimeout(traceProgress, 0); }   // the rebuild that has the imported bodies
   // joints, drawing references and CAM setups read face/edge data as soon as the rebuild finishes: fetch it first for those
   if (sigsNeededNow()) await sigsDrained();
   for (const [t, pos, idx, groups] of r.meshData || []) {
@@ -240,11 +264,14 @@ function brepProject(items, kinds, cams) { return engineCall('project', { items:
 // STEP is parsed once; the solids are then kept in the engine's own format, so reopening or inserting skips parsing
 async function brepImportSTEP(fileId, text) {
   const r = await engineCall('import', { fileId, text, wantBrep: true }); importsRead.add(fileId);
+  traceMark('engineImport'); traceData('engine', r?.phases ? Object.fromEntries(Object.entries(r.phases).map(([k, v]) => [k, Math.round(v)])) : null);
+  let t = performance.now();
   if (r?.brep?.length) payloadSave('brep:' + fileId, r.brep);
+  traceData('cacheWriteMs', Math.round(performance.now() - t));
   brepImportSTEP.info = r?.info || null;
   return r?.n ?? r;
 }
-async function brepImportCached(fileId, brep) { const n = await engineCall('importbrep', { fileId, brep }); importsRead.add(fileId); return n; }
+async function brepImportCached(fileId, brep) { const n = await engineCall('importbrep', { fileId, brep }); importsRead.add(fileId); traceMark('cacheLoaded'); return n; }
 async function cachedPayload(key) {
   if (payloadMap().has(key)) return payloadMap().get(key);
   try { const rec = await libTx('payloads', 'readonly', st => st ? st.get(key) : null); if (rec) { payloadMap().set(key, rec.v); return rec.v; } } catch (e) { }

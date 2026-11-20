@@ -197,7 +197,13 @@ function engineHost(RCmod) {
       if (op === 'meshbatch') { brepTolFloor = a.tolFloor ?? brepTolFloor; return { meshes: a.toks.map(t => { const p = meshPayload(t, true); if (p) shipped.add(t); return p; }).filter(Boolean), tolFloor: brepTolFloor }; }
       if (op === 'mesh') { const t = a.tok; const p = meshPayload(t, true); if (p) shipped.add(t); return p; }
       if (op === 'import') brepProgress({ stage: 'import' });
-      if (op === 'import') { const n = await brepImportSTEP(a.fileId, a.text); cacheArr = []; return a.wantBrep ? { n, info: importInfo.get(a.fileId), brep: (importShapes.get(a.fileId) || []).map(s => s.serialize()) } : n; }
+      if (op === 'import') {
+        const n = await brepImportSTEP(a.fileId, a.text); cacheArr = [];
+        if (!a.wantBrep) return n;
+        let t1 = performance.now(); const brep = (importShapes.get(a.fileId) || []).map(s => s.serialize());
+        const phases = { ...importPhases, serialize: performance.now() - t1 };
+        return { n, info: importInfo.get(a.fileId), brep, phases };
+      }
       // cached geometry: an import or an inserted design's result, in the engine's own format (no STEP parsing, no rebuild)
       if (op === 'checkimport') { const r = brepCheckImport(a.fileId); if (r?.changed) cacheArr = []; return r ? { info: r.info, brep: r.changed ? importShapes.get(a.fileId).map(s => s.serialize()) : null } : null; }
       if (op === 'importbrep') brepProgress({ stage: 'cache' });
