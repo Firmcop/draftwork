@@ -79,7 +79,7 @@ check((await ray([1700, -1500, 1400], [0, 1, 0]))?.id !== rightWall, 'a ray pass
 await W(1500);
 await page.reload(); await engine(); await editReady('reopen'); await idle(); await W(800);
 const v3 = await vols();
-check(Math.abs(v3[rightWall] - v2[rightWall]) < 1e-3 && (await state()).features.slice(-2).every(f => f === 'extrude:ok'), 'after reopening, the wall still has both openings');
+check(Math.abs(v3[rightWall] - v2[rightWall]) < 1e-3 && (await state()).features.filter(f => f.startsWith('extrude')).join() === 'extrude:ok,extrude:ok', 'after reopening, the wall still has both openings');
 through = await ray([36, -1500, 1200], [0, 1, 0]);
 check(through?.id !== rightWall, 'the door opening goes through after reopening');
 check((await page.evaluate(() => window.__dw.importTrace())).marks.cacheLoaded != null, 'reopening reads the cached solids, not the STEP file');
